@@ -1,0 +1,42 @@
+<!--
+  ~ Copyright (C) 2026 The Android Open Source Project
+  ~
+  ~ Licensed under the Apache License, Version 2.0 (the "License");
+  ~ you may not use this file except in compliance with the License.
+  ~ You may obtain a copy of the License at
+  ~
+  ~      http://www.apache.org/licenses/LICENSE-2.0
+  ~
+  ~ Unless required by applicable law or agreed to in writing, software
+  ~ distributed under the License is distributed on an "AS IS" BASIS,
+  ~ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+  ~ See the License for the specific language governing permissions and
+  ~ limitations under the License.
+  -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="48dp"
+    android:height="48dp"
+    android:viewportWidth="48"
+    android:viewportHeight="48">
+  <group>
+    <clip-path
+        android:pathData="M0,0h48v48h-48z"/>
+    <path
+        android:pathData="M47.044,12.371C46.773,11.35 46.238,10.418 45.493,9.668C44.748,8.919 43.82,8.378 42.8,8.1C39.048,7.091 24.048,7.091 24.048,7.091C24.048,7.091 9.048,7.091 5.295,8.1C4.275,8.378 3.347,8.919 2.602,9.668C1.857,10.418 1.323,11.35 1.051,12.371C0.048,16.14 0.048,24 0.048,24C0.048,24 0.048,31.86 1.051,35.629C1.323,36.65 1.857,37.582 2.602,38.332C3.347,39.081 4.275,39.622 5.295,39.9C9.048,40.909 24.048,40.909 24.048,40.909C24.048,40.909 39.048,40.909 42.8,39.9C43.82,39.622 44.748,39.081 45.493,38.332C46.238,37.582 46.773,36.65 47.044,35.629C48.048,31.86 48.048,24 48.048,24C48.048,24 48.048,16.14 47.044,12.371Z"
+        android:fillColor="#E80535"/>
+    <path
+        android:pathData="M24,16L24,32"
+        android:strokeLineJoin="round"
+        android:strokeWidth="3"
+        android:fillColor="#00000000"
+        android:strokeColor="#ffffff"
+        android:strokeLineCap="round"/>
+    <path
+        android:pathData="M32,24L16,24"
+        android:strokeLineJoin="round"
+        android:strokeWidth="3"
+        android:fillColor="#00000000"
+        android:strokeColor="#ffffff"
+        android:strokeLineCap="round"/>
+  </group>
+</vector>

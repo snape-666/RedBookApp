@@ -1,6 +1,5 @@
 package com.example.redbook.ui.theme
 
-import android.app.Activity
 import android.os.Build
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
@@ -12,15 +11,25 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.platform.LocalContext
 
 private val DarkColorScheme = darkColorScheme(
-    primary = Purple80,
-    secondary = PurpleGrey80,
-    tertiary = Pink80
+    primary = primaryDark,
+    secondary = secondaryDark,
+    tertiary = onPrimaryDark,
+    background = backgroundDark,
+    surface = surfaceDark,
+    onSurface = onSurfaceDark,
+    surfaceVariant = surfaceVariantDark,
+    outline = outlineDark
 )
 
 private val LightColorScheme = lightColorScheme(
-    primary = Purple40,
-    secondary = PurpleGrey40,
-    tertiary = Pink40
+    primary = primaryLight,
+    secondary = secondaryLight,
+    tertiary = onPrimaryLight,
+    background = backgroundLight,
+    surface = surfaceLight,
+    onSurface = onSurfaceLight,
+    surfaceVariant = surfaceVariantLight,
+    outline = outlineLight
 
     /* Other default colors to override
     background = Color(0xFFFFFBFE),
@@ -37,7 +46,7 @@ private val LightColorScheme = lightColorScheme(
 fun RedBookTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
     // Dynamic color is available on Android 12+
-    dynamicColor: Boolean = true,
+    dynamicColor: Boolean =false,
     content: @Composable () -> Unit
 ) {
     val colorScheme = when {

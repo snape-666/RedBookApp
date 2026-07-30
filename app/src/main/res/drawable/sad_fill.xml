@@ -1,0 +1,59 @@
+<!--
+  ~ Copyright (C) 2026 The Android Open Source Project
+  ~
+  ~ Licensed under the Apache License, Version 2.0 (the "License");
+  ~ you may not use this file except in compliance with the License.
+  ~ You may obtain a copy of the License at
+  ~
+  ~      http://www.apache.org/licenses/LICENSE-2.0
+  ~
+  ~ Unless required by applicable law or agreed to in writing, software
+  ~ distributed under the License is distributed on an "AS IS" BASIS,
+  ~ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+  ~ See the License for the specific language governing permissions and
+  ~ limitations under the License.
+  -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="20dp"
+    android:height="20dp"
+    android:viewportWidth="20"
+    android:viewportHeight="20">
+  <path
+      android:pathData="M10,10m-8.5,0a8.5,8.5 0,1 1,17 0a8.5,8.5 0,1 1,-17 0"
+      android:strokeWidth="2"
+      android:fillColor="#FFA958"
+      android:strokeColor="#FFA958"
+      android:strokeLineCap="round"/>
+  <path
+      android:pathData="M6.902,13.398C7.261,13.32 7.735,13.263 8.261,13.225C8.795,13.186 9.394,13.167 10,13.167C10.606,13.167 11.205,13.186 11.739,13.225C12.265,13.263 12.739,13.32 13.098,13.398"
+      android:strokeWidth="2"
+      android:fillColor="#00000000"
+      android:strokeColor="#914800"
+      android:strokeLineCap="round"/>
+  <path
+      android:pathData="M7.833,8.333C8.069,8.333 8.187,8.333 8.257,8.467C8.327,8.6 8.281,8.668 8.188,8.804C8.159,8.846 8.126,8.886 8.089,8.923C7.933,9.079 7.721,9.167 7.5,9.167C7.279,9.167 7.067,9.079 6.911,8.923C6.874,8.886 6.841,8.846 6.812,8.804C6.719,8.668 6.673,8.6 6.743,8.467C6.813,8.333 6.931,8.333 7.167,8.333L7.5,8.333H7.833Z"
+      android:fillColor="#914800"/>
+  <group>
+    <clip-path
+        android:pathData="M5.667,7.5h4v3h-4zM7.833,8.333C8.069,8.333 8.187,8.333 8.257,8.467C8.327,8.6 8.281,8.668 8.188,8.804C8.159,8.846 8.126,8.886 8.089,8.923C7.933,9.079 7.721,9.167 7.5,9.167C7.279,9.167 7.067,9.079 6.911,8.923C6.874,8.886 6.841,8.846 6.812,8.804C6.719,8.668 6.673,8.6 6.743,8.467C6.813,8.333 6.931,8.333 7.167,8.333L7.5,8.333H7.833Z"/>
+    <path
+        android:strokeWidth="1"
+        android:pathData="M7.833,8.333C8.069,8.333 8.187,8.333 8.257,8.467C8.327,8.6 8.281,8.668 8.188,8.804C8.159,8.846 8.126,8.886 8.089,8.923C7.933,9.079 7.721,9.167 7.5,9.167C7.279,9.167 7.067,9.079 6.911,8.923C6.874,8.886 6.841,8.846 6.812,8.804C6.719,8.668 6.673,8.6 6.743,8.467C6.813,8.333 6.931,8.333 7.167,8.333L7.5,8.333H7.833Z"
+        android:fillColor="#00000000"
+        android:strokeColor="#33363F"
+        android:strokeLineCap="round"/>
+  </group>
+  <path
+      android:pathData="M12.833,8.333C13.069,8.333 13.186,8.333 13.257,8.467C13.327,8.6 13.281,8.668 13.188,8.804C13.159,8.846 13.126,8.886 13.089,8.923C12.933,9.079 12.721,9.167 12.5,9.167C12.279,9.167 12.067,9.079 11.911,8.923C11.874,8.886 11.841,8.846 11.812,8.804C11.719,8.668 11.673,8.6 11.743,8.467C11.814,8.333 11.931,8.333 12.167,8.333L12.5,8.333H12.833Z"
+      android:fillColor="#B65C00"/>
+  <group>
+    <clip-path
+        android:pathData="M10.667,7.5h4v3h-4zM12.833,8.333C13.069,8.333 13.186,8.333 13.257,8.467C13.327,8.6 13.281,8.668 13.188,8.804C13.159,8.846 13.126,8.886 13.089,8.923C12.933,9.079 12.721,9.167 12.5,9.167C12.279,9.167 12.067,9.079 11.911,8.923C11.874,8.886 11.841,8.846 11.812,8.804C11.719,8.668 11.673,8.6 11.743,8.467C11.814,8.333 11.931,8.333 12.167,8.333L12.5,8.333H12.833Z"/>
+    <path
+        android:strokeWidth="1"
+        android:pathData="M12.833,8.333C13.069,8.333 13.186,8.333 13.257,8.467C13.327,8.6 13.281,8.668 13.188,8.804C13.159,8.846 13.126,8.886 13.089,8.923C12.933,9.079 12.721,9.167 12.5,9.167C12.279,9.167 12.067,9.079 11.911,8.923C11.874,8.886 11.841,8.846 11.812,8.804C11.719,8.668 11.673,8.6 11.743,8.467C11.814,8.333 11.931,8.333 12.167,8.333L12.5,8.333H12.833Z"
+        android:fillColor="#00000000"
+        android:strokeColor="#33363F"
+        android:strokeLineCap="round"/>
+  </group>
+</vector>

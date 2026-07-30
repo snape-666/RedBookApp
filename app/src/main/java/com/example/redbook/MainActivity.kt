@@ -5,13 +5,17 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Text
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.tooling.preview.Preview
+import com.example.redbook.ui.PostDetail.DetailScreen
 import com.example.redbook.ui.theme.RedBookTheme
+import com.example.redbook.ui.home.HomeScreen
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -19,29 +23,44 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         setContent {
             RedBookTheme {
-                Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
-                    Greeting(
-                        name = "Android",
-                        modifier = Modifier.padding(innerPadding)
-                    )
+                Surface(
+                    modifier = Modifier.fillMaxSize(),
+                    color = MaterialTheme.colorScheme.background
+                ) {
+                    AppScreen()
                 }
             }
         }
     }
 }
-
 @Composable
-fun Greeting(name: String, modifier: Modifier = Modifier) {
-    Text(
-        text = "Hello $name!",
-        modifier = modifier
-    )
+fun AppScreen() {
+    // 当前页面状态
+    var currentScreen by remember { mutableStateOf<Screen>(Screen.Home) }
+    var selectedPostId by remember { mutableStateOf("") }
+
+    when (currentScreen) {
+        Screen.Home -> {
+            HomeScreen(
+                onNavigateToDetail = { postId ->
+                    selectedPostId = postId
+                    currentScreen = Screen.Detail
+                }
+            )
+        }
+        Screen.Detail -> {
+            DetailScreen(
+                postId = selectedPostId,
+                onBack = {
+                    currentScreen = Screen.Home
+                }
+            )
+        }
+    }
 }
 
-@Preview(showBackground = true)
-@Composable
-fun GreetingPreview() {
-    RedBookTheme {
-        Greeting("Android")
-    }
+// 定义页面类型
+sealed class Screen {
+    object Home : Screen()
+    object Detail : Screen()
 }
