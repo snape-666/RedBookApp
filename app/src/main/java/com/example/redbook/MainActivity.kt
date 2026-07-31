@@ -14,6 +14,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import com.example.redbook.ui.PostDetail.DetailScreen
+import com.example.redbook.ui.auth.LoginScreen
+import com.example.redbook.ui.auth.RegisterScreen
 import com.example.redbook.ui.theme.RedBookTheme
 import com.example.redbook.ui.home.HomeScreen
 
@@ -36,10 +38,31 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun AppScreen() {
     // 当前页面状态
-    var currentScreen by remember { mutableStateOf<Screen>(Screen.Home) }
+    var currentScreen by remember { mutableStateOf<Screen>(Screen.Login) }
     var selectedPostId by remember { mutableStateOf("") }
 
     when (currentScreen) {
+        Screen.Login -> {
+            LoginScreen(
+                onLoginSuccess = {
+                    println("Login success callback called")
+                    currentScreen = Screen.Home
+                },
+                onNavigateToRegister = {
+                    currentScreen = Screen.Register
+                }
+            )
+        }
+        Screen.Register -> {
+            RegisterScreen(
+                onRegisterSuccess = {
+                    currentScreen = Screen.Login
+                },
+                onNavigateToLogin = {
+                    currentScreen = Screen.Login
+                }
+            )
+        }
         Screen.Home -> {
             HomeScreen(
                 onNavigateToDetail = { postId ->
@@ -61,6 +84,8 @@ fun AppScreen() {
 
 // 定义页面类型
 sealed class Screen {
+    object Login : Screen()
+    object Register : Screen()
     object Home : Screen()
     object Detail : Screen()
 }
