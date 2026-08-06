@@ -44,8 +44,7 @@ fun AppScreen() {
     when (currentScreen) {
         Screen.Login -> {
             LoginScreen(
-                onLoginSuccess = {
-                    println("Login success callback called")
+                onLoginSuccess = { userData ->
                     currentScreen = Screen.Home
                 },
                 onNavigateToRegister = {

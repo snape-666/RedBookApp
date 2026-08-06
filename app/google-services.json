@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "133248837411",
+    "project_id": "my-redbookproject",
+    "storage_bucket": "my-redbookproject.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:133248837411:android:3f598c6a9afb489dbc8e96",
+        "android_client_info": {
+          "package_name": "com.example.redbook"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBD5ecWr4zogDSxdChZM57RJukbjWSKb9k"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

@@ -4,6 +4,15 @@ plugins {
     alias(libs.plugins.ksp)
 }
 
+val propsFile = rootProject.file("supabase.properties")
+val props = mutableMapOf<String, String>()
+if (propsFile.exists()) {
+    propsFile.readLines().forEach { line ->
+        val parts = line.split("=", limit = 2)
+        if (parts.size == 2) props[parts[0].trim()] = parts[1].trim()
+    }
+}
+
 android {
     namespace = "com.example.redbook"
     compileSdk = 37
@@ -15,6 +24,9 @@ android {
         versionCode = 1
         versionName = "1.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+        buildConfigField("String", "SUPABASE_SERVICE_ROLE", "\"${props["SUPABASE_SERVICE_ROLE"] ?: ""}\"")
+        buildConfigField("String", "RESEND_API_KEY", "\"${props["RESEND_API_KEY"] ?: ""}\"")
     }
 
     buildTypes {
@@ -32,6 +44,7 @@ android {
     }
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 }
 
@@ -46,11 +59,9 @@ dependencies {
     ksp(libs.androidx.room.compiler)
     // Coil
     implementation(libs.coil.compose)
-
     // Lifecycle
     implementation(libs.androidx.lifecycle.viewmodel.compose)
     implementation(libs.androidx.lifecycle.runtime.compose)
-
     // Compose
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.activity.compose)
@@ -60,14 +71,11 @@ dependencies {
     implementation(libs.androidx.compose.ui)
     implementation(libs.androidx.compose.ui.graphics)
     implementation(libs.androidx.compose.ui.tooling.preview)
-
     // AndroidX Core
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
-
     //  Volley
     implementation(libs.volley)
-
     //  Test
     testImplementation(libs.junit)
     androidTestImplementation(platform(libs.androidx.compose.bom))

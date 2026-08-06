@@ -1,23 +1,18 @@
 package com.example.redbook.ui.auth
 
-import android.annotation.SuppressLint
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import com.example.redbook.data.local.AppDatabase
-import com.example.redbook.data.local.UserEntity
-import com.example.redbook.data.repository.AuthRepository
+import com.example.redbook.data.repository.SupabaseAuthRepository
 import com.example.redbook.ui.utils.Validator
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
-import java.util.Random
 
 class AuthViewModel(application: Application) : AndroidViewModel(application) {
 
-    private val repository = AuthRepository(AppDatabase.getInstance(application))
+    private val repository = SupabaseAuthRepository(application)
 
     private val _loginUiState = MutableStateFlow(LoginUiState())
     val loginUiState: StateFlow<LoginUiState> = _loginUiState.asStateFlow()
@@ -25,18 +20,14 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
     private val _registerUiState = MutableStateFlow(RegisterUiState())
     val registerUiState: StateFlow<RegisterUiState> = _registerUiState.asStateFlow()
 
-    private val _verificationCodeState = MutableStateFlow(VerificationCodeState())
-    val verificationCodeState: StateFlow<VerificationCodeState> = _verificationCodeState.asStateFlow()
-
-    private var generatedCode: String? = null
-    private var codeTimestamp: Long = 0
-
     fun login() {
         val currentState = _loginUiState.value
-        val accountError = Validator.getAccountError(currentState.account)
-        if (accountError != null) {
+
+        val input = currentState.email.trim()
+        val inputError = if (input.contains("@")) Validator.getEmailError(input) else Validator.getAccountError(input)
+        if (inputError != null) {
             _loginUiState.value = currentState.copy(
-                accountError = accountError as String?,
+                emailError = inputError,
                 passwordError = null,
                 loginError = null
             )
@@ -46,8 +37,8 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
         val passwordError = Validator.getPasswordError(currentState.password)
         if (passwordError != null) {
             _loginUiState.value = currentState.copy(
-                passwordError = passwordError as String?,
-                accountError = null,
+                passwordError = passwordError,
+                emailError = null,
                 loginError = null
             )
             return
@@ -55,21 +46,20 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
 
         viewModelScope.launch {
             _loginUiState.value = currentState.copy(isLoading = true)
-            val result = repository.login(currentState.account, currentState.password)
-            result.onSuccess { user ->
+            val result = repository.login(currentState.email, currentState.password)
+            result.onSuccess { userData ->
                 _loginUiState.value = currentState.copy(
                     isLoading = false,
                     loginSuccess = true,
-                    loggedInUser = user,
-                    accountError = null,
+                    loggedInUser = userData,
+                    emailError = null,
                     passwordError = null,
                     loginError = null
                 )
             }.onFailure { error ->
                 _loginUiState.value = currentState.copy(
                     isLoading = false,
-                    loginSuccess = false,
-                    loginError = error.message ?: "登录失败，请重试"
+                    loginError = error.message ?: "登录失败"
                 )
             }
         }
@@ -81,10 +71,9 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
         val accountError = Validator.getAccountError(currentState.account)
         if (accountError != null) {
             _registerUiState.value = currentState.copy(
-                accountError = accountError as String?,
+                accountError = accountError,
                 passwordError = null,
                 emailError = null,
-                codeError = null,
                 registerError = null
             )
             return
@@ -93,10 +82,9 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
         val passwordError = Validator.getPasswordError(currentState.password)
         if (passwordError != null) {
             _registerUiState.value = currentState.copy(
-                passwordError = passwordError as String?,
+                passwordError = passwordError,
                 accountError = null,
                 emailError = null,
-                codeError = null,
                 registerError = null
             )
             return
@@ -105,30 +93,9 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
         val emailError = Validator.getEmailError(currentState.email)
         if (emailError != null) {
             _registerUiState.value = currentState.copy(
-                emailError = emailError as String?,
+                emailError = emailError,
                 accountError = null,
                 passwordError = null,
-                codeError = null,
-                registerError = null
-            )
-            return
-        }
-
-        val codeError = Validator.getVerificationCodeError(currentState.verificationCode)
-        if (codeError != null) {
-            _registerUiState.value = currentState.copy(
-                codeError = codeError as String?,
-                accountError = null,
-                passwordError = null,
-                emailError = null,
-                registerError = null
-            )
-            return
-        }
-
-        if (!isCodeValid(currentState.verificationCode)) {
-            _registerUiState.value = currentState.copy(
-                codeError = "验证码错误或已过期，请重新获取",
                 registerError = null
             )
             return
@@ -137,74 +104,94 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             _registerUiState.value = currentState.copy(isLoading = true)
             val result = repository.register(
-                account = currentState.account,
+                email = currentState.email,
                 password = currentState.password,
-                nickname = currentState.nickname.takeIf { it.isNotBlank() },
-                email = currentState.email
+                account = currentState.account,
+                nickname = currentState.nickname.takeIf { it.isNotBlank() }
             )
-            result.onSuccess { userId ->
+            result.onSuccess {
                 _registerUiState.value = currentState.copy(
                     isLoading = false,
                     registerSuccess = true,
                     registerError = null
                 )
-                clearVerificationCode()
             }.onFailure { error ->
                 _registerUiState.value = currentState.copy(
                     isLoading = false,
-                    registerSuccess = false,
-                    registerError = error.message ?: "注册失败，请重试"
+                    registerError = error.message ?: "注册失败"
                 )
             }
         }
     }
 
-    @SuppressLint("DefaultLocale")
-    fun sendVerificationCode() {
-        val currentState = _verificationCodeState.value
-        if (currentState.isSending) return
+    private val _passwordResetState = MutableStateFlow(PasswordResetState())
+    val passwordResetState: StateFlow<PasswordResetState> = _passwordResetState.asStateFlow()
 
-        val email = _registerUiState.value.email
-        if (!Validator.isValidEmail(email)) {
-            _registerUiState.value = _registerUiState.value.copy(
-                emailError = Validator.getEmailError(email)
-            )
+    fun updateResetEmail(email: String) {
+        _passwordResetState.value = PasswordResetState(email = email)
+    }
+
+    fun sendResetCode() {
+        val state = _passwordResetState.value
+        val emailError = Validator.getEmailError(state.email)
+        if (emailError != null) {
+            _passwordResetState.value = state.copy(emailError = emailError)
             return
         }
-
         viewModelScope.launch {
-            _verificationCodeState.value = currentState.copy(isSending = true)
-            generatedCode = String.format("%06d", Random().nextInt(1000000))
-            codeTimestamp = System.currentTimeMillis()
-
-            var remainingSeconds = 60
-            while (remainingSeconds > 0) {
-                delay(1000)
-                remainingSeconds--
-                _verificationCodeState.value = _verificationCodeState.value.copy(
-                    remainingSeconds = remainingSeconds,
-                    isSending = remainingSeconds > 0
+            _passwordResetState.value = state.copy(isLoading = true)
+            repository.requestResetCode(state.email).onSuccess { code ->
+                _passwordResetState.value = _passwordResetState.value.copy(
+                    isLoading = false, codeSent = true, generatedCode = code
+                )
+            }.onFailure { error ->
+                _passwordResetState.value = state.copy(
+                    isLoading = false, error = error.message ?: "发送失败"
                 )
             }
-            _verificationCodeState.value = _verificationCodeState.value.copy(isSending = false)
         }
     }
 
-    private fun isCodeValid(inputCode: String): Boolean {
-        return generatedCode == inputCode &&
-                System.currentTimeMillis() - codeTimestamp < 60 * 1000
+    fun doResetPassword() {
+        val state = _passwordResetState.value
+        if (state.verificationCode != state.generatedCode) {
+            _passwordResetState.value = state.copy(error = "验证码错误")
+            return
+        }
+        val passwordError = Validator.getPasswordError(state.newPassword)
+        if (passwordError != null) {
+            _passwordResetState.value = state.copy(passwordError = passwordError)
+            return
+        }
+        viewModelScope.launch {
+            _passwordResetState.value = state.copy(isLoading = true)
+            repository.verifyCodeAndReset(state.email, state.verificationCode, state.newPassword)
+                .onSuccess {
+                    _passwordResetState.value = PasswordResetState(resetSuccess = true)
+                }.onFailure { error ->
+                    _passwordResetState.value = state.copy(
+                        isLoading = false, error = error.message ?: "重置失败"
+                    )
+                }
+        }
     }
 
-    private fun clearVerificationCode() {
-        generatedCode = null
-        codeTimestamp = 0
-        _verificationCodeState.value = VerificationCodeState()
+    fun updateResetCode(code: String) {
+        _passwordResetState.value = _passwordResetState.value.copy(verificationCode = code)
     }
 
-    fun updateLoginAccount(account: String) {
+    fun updateResetPassword(password: String) {
+        _passwordResetState.value = _passwordResetState.value.copy(newPassword = password)
+    }
+
+    fun clearPasswordResetState() {
+        _passwordResetState.value = PasswordResetState()
+    }
+
+    fun updateLoginEmail(email: String) {
         _loginUiState.value = _loginUiState.value.copy(
-            account = account,
-            accountError = null,
+            email = email,
+            emailError = null,
             loginError = null
         )
     }
@@ -248,14 +235,6 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
         )
     }
 
-    fun updateRegisterVerificationCode(code: String) {
-        _registerUiState.value = _registerUiState.value.copy(
-            verificationCode = code,
-            codeError = null,
-            registerError = null
-        )
-    }
-
     fun clearLoginError() {
         _loginUiState.value = _loginUiState.value.copy(loginError = null)
     }
@@ -265,14 +244,14 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     data class LoginUiState(
-        val account: String = "",
+        val email: String = "",
         val password: String = "",
-        val accountError: String? = null,
+        val emailError: String? = null,
         val passwordError: String? = null,
         val loginError: String? = null,
         val isLoading: Boolean = false,
         val loginSuccess: Boolean = false,
-        val loggedInUser: UserEntity? = null
+        val loggedInUser: SupabaseAuthRepository.UserData? = null
     )
 
     data class RegisterUiState(
@@ -280,18 +259,24 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
         val password: String = "",
         val email: String = "",
         val nickname: String = "",
-        val verificationCode: String = "",
         val accountError: String? = null,
         val passwordError: String? = null,
         val emailError: String? = null,
-        val codeError: String? = null,
         val registerError: String? = null,
         val isLoading: Boolean = false,
         val registerSuccess: Boolean = false
     )
 
-    data class VerificationCodeState(
-        val remainingSeconds: Int = 0,
-        val isSending: Boolean = false
+    data class PasswordResetState(
+        val email: String = "",
+        val emailError: String? = null,
+        val error: String? = null,
+        val isLoading: Boolean = false,
+        val codeSent: Boolean = false,
+        val generatedCode: String = "",
+        val verificationCode: String = "",
+        val newPassword: String = "",
+        val passwordError: String? = null,
+        val resetSuccess: Boolean = false
     )
 }

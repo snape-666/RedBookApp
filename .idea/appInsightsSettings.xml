@@ -8,10 +8,10 @@
             <InsightsFilterSettings>
               <option name="connection">
                 <ConnectionSetting>
-                  <option name="appId" value="PLACEHOLDER" />
-                  <option name="mobileSdkAppId" value="" />
-                  <option name="projectId" value="" />
-                  <option name="projectNumber" value="" />
+                  <option name="appId" value="com.example.redbook" />
+                  <option name="mobileSdkAppId" value="1:133248837411:android:3f598c6a9afb489dbc8e96" />
+                  <option name="projectId" value="my-redbookproject" />
+                  <option name="projectNumber" value="133248837411" />
                 </ConnectionSetting>
               </option>
               <option name="signal" value="SIGNAL_UNSPECIFIED" />
