@@ -51,9 +51,8 @@ fun PostCard(
         modifier = modifier
             .width(216.dp)
             .clickable { onCardClick() }
-            .background(MaterialTheme.colorScheme.surface),
-        shape = RoundedCornerShape(10.dp),
-        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp) ,
+            .clip(RoundedCornerShape(10.dp)),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
     ) {
         Column (modifier=Modifier.fillMaxWidth()){
             Image(

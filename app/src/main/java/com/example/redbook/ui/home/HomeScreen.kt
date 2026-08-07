@@ -33,8 +33,8 @@ import com.example.redbook.ui.utils.formatCount
 @Composable
 fun HomeScreen(
     viewModel: HomeViewModel = viewModel(),
-    onNavigateToDetail: (String) -> Unit
-
+    onNavigateToDetail: (String) -> Unit,
+    onNavigateToSearch: () -> Unit = {}
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     var selectedTabIndex by remember { mutableIntStateOf(1) }
@@ -59,7 +59,7 @@ fun HomeScreen(
                 selectedTabIndex = index
 
             },
-            onActionClick = {},
+            onActionClick = onNavigateToSearch,
             actionIconRes = R.drawable.search
         )
 
@@ -96,7 +96,7 @@ fun HomeScreen(
                             userName = note.userName,
                             isLiked = note.isLiked,
                             likeCount = formatCount(note.likeCount),
-                            onCardClick = { onNavigateToDetail(note.id.toString())}
+                            onCardClick = { onNavigateToDetail(note.id) }
                         )
                     }
                 }
@@ -115,7 +115,7 @@ fun HomeScreen(
         BottomBar(
             modifier = Modifier
                 .fillMaxWidth(),
-            titles = listOf("首页","阅读","发布","我的"),
+            titles = listOf("首页","阅读","消息","我的"),
             selectedIndex = selectedBottomIndex,
             onTitleClick = {index->
                 selectedBottomIndex=index

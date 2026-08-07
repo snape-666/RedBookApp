@@ -23,6 +23,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
@@ -55,6 +56,8 @@ fun DetailScreen(
     val focusRequester = remember { FocusRequester() }
     val lazyListState = rememberLazyListState()
     val replyTarget by viewModel.replyTarget.collectAsState()
+
+    LaunchedEffect(postId) { viewModel.loadPost(postId) }
     // 图片选择器（多选）
     val imagePickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetMultipleContents()

@@ -3,6 +3,7 @@ package com.example.redbook.ui.detail.components
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.MaterialTheme
@@ -64,7 +65,13 @@ fun PostContent(
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
             Text(
-                text = " · ${post.ipLocation}",
+                text = post.ipLocation,
+                fontSize = 12.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(modifier = Modifier.weight(1f))
+            Text(
+                text = "${post.viewCount}次浏览",
                 fontSize = 12.sp,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )

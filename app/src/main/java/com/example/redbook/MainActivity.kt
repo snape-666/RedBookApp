@@ -18,6 +18,7 @@ import com.example.redbook.ui.auth.LoginScreen
 import com.example.redbook.ui.auth.RegisterScreen
 import com.example.redbook.ui.theme.RedBookTheme
 import com.example.redbook.ui.home.HomeScreen
+import com.example.redbook.ui.search.SearchScreen
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -38,7 +39,7 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun AppScreen() {
     // 当前页面状态
-    var currentScreen by remember { mutableStateOf<Screen>(Screen.Login) }
+    var currentScreen by remember { mutableStateOf<Screen>(Screen.Home) }
     var selectedPostId by remember { mutableStateOf("") }
 
     when (currentScreen) {
@@ -67,6 +68,9 @@ fun AppScreen() {
                 onNavigateToDetail = { postId ->
                     selectedPostId = postId
                     currentScreen = Screen.Detail
+                },
+                onNavigateToSearch = {
+                    currentScreen = Screen.Search
                 }
             )
         }
@@ -75,6 +79,15 @@ fun AppScreen() {
                 postId = selectedPostId,
                 onBack = {
                     currentScreen = Screen.Home
+                }
+            )
+        }
+        Screen.Search -> {
+            SearchScreen(
+                onBack = { currentScreen = Screen.Home },
+                onNavigateToDetail = { postId ->
+                    selectedPostId = postId
+                    currentScreen = Screen.Detail
                 }
             )
         }
@@ -87,4 +100,5 @@ sealed class Screen {
     object Register : Screen()
     object Home : Screen()
     object Detail : Screen()
+    object Search : Screen()
 }

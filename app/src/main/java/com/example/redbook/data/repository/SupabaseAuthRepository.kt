@@ -297,11 +297,154 @@ class SupabaseAuthRepository(private val app: Application) {
         return when {
             msg.contains("超时") || msg.contains("timeout") -> "网络连接超时"
             msg.contains("user already registered") -> "该邮箱已被注册"
-            msg.contains("invalid login credentials") -> "邮箱或密码错误"
+            msg.contains("invalid login credentials") -> "账号或密码错误"
             msg.contains("password should be at least") -> "密码长度至少需要6位"
             msg.contains("422") -> msg.removePrefix("422: ").ifBlank { "请求格式不正确" }
             msg.contains("429") -> "操作太频繁，请稍后再试"
             else -> msg.ifBlank { "操作失败，请重试" }
+        }
+    }
+
+    suspend fun insertPost(postId: String, title: String, content: String,
+                           authorUid: String, authorName: String, authorAvatar: String) {
+        val body = JSONObject().apply {
+            put("post_id", postId)
+            put("title", title)
+            put("content", content)
+            put("author_uid", authorUid)
+            put("author_name", authorName)
+            put("author_avatar", authorAvatar)
+            put("created_at", System.currentTimeMillis())
+        }
+        supabasePostBody("/rest/v1/posts", body)
+    }
+
+    suspend fun incrementViewCount(postId: String) {
+        val resp = queryRest("posts", "select=view_count&post_id=eq.$postId&limit=1")
+        val arr = resp.optJSONArray("users") ?: resp.optJSONArray("posts") ?: return
+        if (arr.length() == 0) return
+        val count = arr.getJSONObject(0).optInt("view_count", 0) + 1
+        val body = JSONObject().apply { put("view_count", count) }
+        patchUserRowByPostId(postId, body)
+    }
+
+    suspend fun getPosts(): JSONArray {
+        val resp = queryRest("posts", "select=*&order=created_at.desc")
+        return resp.optJSONArray("users") ?: resp.optJSONArray("posts") ?: JSONArray()
+    }
+
+    suspend fun getPost(postId: String): JSONObject? {
+        val resp = queryRest("posts", "select=*&post_id=eq.$postId&limit=1")
+        val arr = resp.optJSONArray("users") ?: resp.optJSONArray("posts") ?: return null
+        return if (arr.length() > 0) arr.getJSONObject(0) else null
+    }
+
+    suspend fun getComments(postId: String): JSONArray {
+        val resp = queryRest("comments", "select=*&post_id=eq.$postId&order=created_at.asc")
+        return resp.optJSONArray("users") ?: resp.optJSONArray("comments") ?: JSONArray()
+    }
+
+    suspend fun insertComment(commentId: String, postId: String, content: String,
+                              authorUid: String, authorName: String, authorAvatar: String) {
+        val body = JSONObject().apply {
+            put("comment_id", commentId)
+            put("post_id", postId)
+            put("content", content)
+            put("author_uid", authorUid)
+            put("author_name", authorName)
+            put("author_avatar", authorAvatar)
+            put("created_at", System.currentTimeMillis())
+        }
+        supabasePostBody("/rest/v1/comments", body)
+    }
+
+    suspend fun insertReply(replyId: String, postId: String, parentId: String, content: String,
+                            authorUid: String, authorName: String, authorAvatar: String) {
+        val body = JSONObject().apply {
+            put("comment_id", replyId)
+            put("post_id", postId)
+            put("parent_id", parentId)
+            put("content", content)
+            put("author_uid", authorUid)
+            put("author_name", authorName)
+            put("author_avatar", authorAvatar)
+            put("created_at", System.currentTimeMillis())
+        }
+        supabasePostBody("/rest/v1/comments", body)
+    }
+
+    suspend fun updatePostLike(postId: String, delta: Int) {
+        val resp = queryRest("posts", "select=like_count&post_id=eq.$postId&limit=1")
+        val arr = resp.optJSONArray("users") ?: resp.optJSONArray("posts") ?: return
+        if (arr.length() == 0) return
+        val count = arr.getJSONObject(0).optInt("like_count", 0) + delta
+        patchUserRowByPostId(postId, JSONObject().apply { put("like_count", count.coerceAtLeast(0)) })
+    }
+
+    suspend fun updatePostFav(postId: String, delta: Int) {
+        val resp = queryRest("posts", "select=favorite_count&post_id=eq.$postId&limit=1")
+        val arr = resp.optJSONArray("users") ?: resp.optJSONArray("posts") ?: return
+        if (arr.length() == 0) return
+        val count = arr.getJSONObject(0).optInt("favorite_count", 0) + delta
+        patchUserRowByPostId(postId, JSONObject().apply { put("favorite_count", count.coerceAtLeast(0)) })
+    }
+
+    suspend fun updateCommentLike(commentId: String, delta: Int) {
+        val resp = queryRest("comments", "select=like_count&comment_id=eq.$commentId&limit=1")
+        val arr = resp.optJSONArray("users") ?: resp.optJSONArray("comments") ?: return
+        if (arr.length() == 0) return
+        val count = arr.getJSONObject(0).optInt("like_count", 0) + delta
+        patchCommentRow(commentId, JSONObject().apply { put("like_count", count.coerceAtLeast(0)) })
+    }
+
+    private suspend fun supabasePostBody(path: String, body: JSONObject) {
+        val bodyStr = body.toString()
+        suspendCancellableCoroutine<String> { cont ->
+            val request = object : StringRequest(POST, "${SupabaseConfig.url}$path",
+                { cont.resume(it) },
+                { error -> cont.resumeWithException(Exception(extractVolleyError(error))) }
+            ) {
+                override fun getBody() = bodyStr.toByteArray()
+                override fun getBodyContentType() = "application/json"
+                override fun getHeaders() = mapOf(
+                    "apikey" to SupabaseConfig.anonKey, "Prefer" to "return=minimal"
+                )
+            }
+            requestQueue.add(request)
+        }
+    }
+
+    private suspend fun patchUserRowByPostId(postId: String, body: JSONObject) {
+        val bodyStr = body.toString()
+        suspendCancellableCoroutine<String> { cont ->
+            val request = object : StringRequest(PATCH, "${SupabaseConfig.url}/rest/v1/posts?post_id=eq.$postId",
+                { cont.resume(it) },
+                { error -> cont.resumeWithException(Exception(extractVolleyError(error))) }
+            ) {
+                override fun getBody() = bodyStr.toByteArray()
+                override fun getBodyContentType() = "application/json"
+                override fun getHeaders() = mapOf(
+                    "apikey" to SupabaseConfig.anonKey, "Prefer" to "return=minimal"
+                )
+            }
+            requestQueue.add(request)
+        }
+    }
+
+    private suspend fun patchCommentRow(commentId: String, body: JSONObject) {
+        val bodyStr = body.toString()
+        suspendCancellableCoroutine<String> { cont ->
+            val request = object : StringRequest(PATCH, "${SupabaseConfig.url}/rest/v1/comments?comment_id=eq.$commentId",
+                { cont.resume(it) },
+                { error -> cont.resumeWithException(Exception(extractVolleyError(error))) }
+            ) {
+                override fun getBody() = bodyStr.toByteArray()
+                override fun getBodyContentType() = "application/json"
+                override fun getHeaders() = mapOf(
+                    "apikey" to SupabaseConfig.anonKey, "Prefer" to "return=minimal"
+                )
+            }
+            requestQueue.add(request)
         }
     }
 

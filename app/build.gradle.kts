@@ -1,7 +1,6 @@
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
-    alias(libs.plugins.ksp)
 }
 
 val propsFile = rootProject.file("supabase.properties")
@@ -53,10 +52,6 @@ kotlin {
 }
 
 dependencies {
-    //Room
-    implementation(libs.androidx.room.runtime)
-    implementation(libs.androidx.room.ktx)
-    ksp(libs.androidx.room.compiler)
     // Coil
     implementation(libs.coil.compose)
     // Lifecycle

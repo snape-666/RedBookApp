@@ -1,12 +1,14 @@
 package com.example.redbook.ui.PostDetail
 
+import android.app.Application
 import android.net.Uri
-import androidx.lifecycle.ViewModel
+import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.redbook.R
 import com.example.redbook.data.model.Comment
 import com.example.redbook.data.model.PostDetail
 import com.example.redbook.data.model.Reply
+import com.example.redbook.data.repository.SupabaseAuthRepository
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -14,7 +16,9 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
-class DetailViewModel : ViewModel() {
+class DetailViewModel(application: Application) : AndroidViewModel(application) {
+
+    private val repository = SupabaseAuthRepository(application)
 
     private val _uiState = MutableStateFlow<DetailUiState>(DetailUiState.Loading)
     val uiState: StateFlow<DetailUiState> = _uiState.asStateFlow()
@@ -37,19 +41,56 @@ class DetailViewModel : ViewModel() {
         val userName: String
     )
 
-    init {
-        fetchPostDetail()
-    }
-
-
+    init { }
 
     fun setReplyTarget(target: ReplyTarget?) {
         _replyTarget.value = target
     }
-    fun fetchPostDetail() {
+
+    fun loadPost(postId: String) {
         viewModelScope.launch {
             _uiState.value = DetailUiState.Loading
-            delay(500)
+            try {
+                val p = repository.getPost(postId)
+                if (p != null) {
+                    val post = PostDetail(
+                        postId = p.optString("post_id", ""),
+                        imageRes = R.drawable.test,
+                        title = p.optString("title", ""),
+                        content = p.optString("content", ""),
+                        publishTime = p.optLong("created_at", 0),
+                        ipLocation = p.optString("ip_location", "未知"),
+                        viewCount = p.optInt("view_count", 0) + 1,
+                        likeCount = p.optInt("like_count", 0),
+                        favoriteCount = p.optInt("favorite_count", 0),
+                        commentCount = p.optInt("comment_count", 0),
+                        isLiked = false, isFavorited = false, isFollowed = false,
+                        authorId = p.optString("author_uid", ""),
+                        authorName = p.optString("author_name", ""),
+                        authorAvatar = R.drawable.test
+                    )
+                    val cloudComments = repository.getComments(post.postId)
+                    val comments = (0 until cloudComments.length()).map { i ->
+                        val c = cloudComments.getJSONObject(i)
+                        Comment(
+                            id = c.optString("comment_id", ""),
+                            userId = c.optString("author_uid", ""),
+                            userName = c.optString("author_name", ""),
+                            avatarRes = R.drawable.test,
+                            content = c.optString("content", ""),
+                            timestamp = c.optLong("created_at", 0),
+                            ipLocation = c.optString("ip_location", "未知"),
+                            likeCount = c.optInt("like_count", 0),
+                            isLiked = false,
+                            isAuthor = c.optString("author_uid") == post.authorId,
+                            replies = emptyList()
+                        )
+                    }
+                    _uiState.value = DetailUiState.Success(post, comments)
+                    repository.incrementViewCount(postId)
+                    return@launch
+                }
+            } catch (_: Exception) { }
 
             val mockPost = PostDetail(
                 postId = "1",
@@ -196,13 +237,12 @@ class DetailViewModel : ViewModel() {
                     isAuthor = isAuthor,
                     replies = emptyList()
                 )
-                // 添加到列表顶部，并更新评论数
+                // 添加到列表顶部
                 val updatedComments = listOf(newComment) + currentState.comments
                 val updatedPost = currentState.post.copy(commentCount = updatedComments.size)
-                _uiState.value = currentState.copy(
-                    comments = updatedComments,
-                    post = updatedPost
-                )
+                _uiState.value = currentState.copy(comments = updatedComments, post = updatedPost)
+
+                repository.insertComment(newComment.id, post.postId, content, "me", "我", "")
 
                 _commentText.value = ""
                 clearSelectedImages()
@@ -237,6 +277,8 @@ class DetailViewModel : ViewModel() {
                     } else comment
                 }
                 _uiState.value = currentState.copy(comments = updatedComments)
+
+                repository.insertReply(newReply.id, post.postId, parentCommentId, content, "me", "我", "")
             }
         }
     }

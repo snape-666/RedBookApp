@@ -55,6 +55,10 @@ val greenBackgroundDark = Color(0xFF2D453D)
 val greenFillDark = Color(0xFFA8E8C2)
 val femaleDark = Color(0xFFFF78C2)
 
+
+@Composable
+fun getOutline(): Color =
+    if (isSystemInDarkTheme()) outlineDark else outlineLight
 @Composable
 fun getOnSurfaceSecondary(): Color =
     if (isSystemInDarkTheme()) onSurfaceSecondaryDark else onSurfaceSecondaryLight

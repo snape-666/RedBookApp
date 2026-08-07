@@ -1,28 +1,27 @@
 package com.example.redbook.ui.home
 
-import androidx.lifecycle.ViewModel
+import android.app.Application
+import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.redbook.data.model.Note
 import com.example.redbook.data.repository.HomeRepository
-import kotlinx.coroutines.delay
+import com.example.redbook.data.repository.SupabaseAuthRepository
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
-class HomeViewModel : ViewModel() {
+class HomeViewModel(application: Application) : AndroidViewModel(application) {
 
-    private val repository = HomeRepository()
+    private val repository = HomeRepository(SupabaseAuthRepository(application))
 
     private val _uiState = MutableStateFlow<HomeUiState>(HomeUiState.Loading)
     val uiState = _uiState.asStateFlow()
 
-    init {
-        fetchNotes()
-    }
+    init { fetchNotes() }
 
     fun fetchNotes() {
         viewModelScope.launch {
             _uiState.value = HomeUiState.Loading
-            delay(800)
             try {
                 val notes = repository.getNotes()
                 _uiState.value = HomeUiState.Success(notes)
@@ -31,27 +30,22 @@ class HomeViewModel : ViewModel() {
             }
         }
     }
-    fun toggleLike(noteId: Int) {
+
+    fun toggleLike(noteId: String) {
         val currentState = _uiState.value
-        // 只有当前状态是 Success 时才处理
         if (currentState is HomeUiState.Success) {
-            val currentNotes = currentState.notes
-
-            //找到并更新目标笔记
-            val updatedNotes = currentNotes.map { note ->
+            _uiState.value = HomeUiState.Success(currentState.notes.map { note ->
                 if (note.id == noteId) {
-                    val newLikeCount = if (note.isLiked) note.likeCount - 1 else note.likeCount + 1
-                    note.copy(
-                        isLiked = !note.isLiked,
-                        likeCount = newLikeCount
-                    )
-                } else {
-                    note
-                }
-            }
-
-            //  将更新后的列表重新包装成 Success 状态，发射出去
-            _uiState.value = HomeUiState.Success(updatedNotes)
+                    val delta = if (note.isLiked) -1 else 1
+                    note.copy(isLiked = !note.isLiked, likeCount = note.likeCount + delta)
+                } else note
+            })
         }
     }
+}
+
+sealed class HomeUiState {
+    object Loading : HomeUiState()
+    data class Success(val notes: List<Note>) : HomeUiState()
+    data class Error(val message: String) : HomeUiState()
 }
