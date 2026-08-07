@@ -139,7 +139,7 @@ fun SearchScreen(
                                     fontSize = 14.sp,
                                     color = MaterialTheme.colorScheme.onSurface
                                 ),
-                                cursorBrush = SolidColor(MaterialTheme.colorScheme.onSurface),
+                                cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
                                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
                                 keyboardActions = KeyboardActions(onSearch = {
                                     viewModel.search(

@@ -38,56 +38,56 @@ class MainActivity : ComponentActivity() {
 }
 @Composable
 fun AppScreen() {
-    // 当前页面状态
     var currentScreen by remember { mutableStateOf<Screen>(Screen.Home) }
     var selectedPostId by remember { mutableStateOf("") }
+    var screenStack by remember { mutableStateOf(listOf<Screen>(Screen.Home)) }
+
+    fun navigateTo(screen: Screen) {
+        screenStack = screenStack + screen
+        currentScreen = screen
+    }
+
+    fun goBack() {
+        if (screenStack.size > 1) {
+            screenStack = screenStack.dropLast(1)
+            currentScreen = screenStack.last()
+        }
+    }
 
     when (currentScreen) {
         Screen.Login -> {
             LoginScreen(
-                onLoginSuccess = { userData ->
-                    currentScreen = Screen.Home
-                },
-                onNavigateToRegister = {
-                    currentScreen = Screen.Register
-                }
+                onLoginSuccess = { navigateTo(Screen.Home) },
+                onNavigateToRegister = { navigateTo(Screen.Register) }
             )
         }
         Screen.Register -> {
             RegisterScreen(
-                onRegisterSuccess = {
-                    currentScreen = Screen.Login
-                },
-                onNavigateToLogin = {
-                    currentScreen = Screen.Login
-                }
+                onRegisterSuccess = { goBack() },
+                onNavigateToLogin = { goBack() }
             )
         }
         Screen.Home -> {
             HomeScreen(
                 onNavigateToDetail = { postId ->
                     selectedPostId = postId
-                    currentScreen = Screen.Detail
+                    navigateTo(Screen.Detail)
                 },
-                onNavigateToSearch = {
-                    currentScreen = Screen.Search
-                }
+                onNavigateToSearch = { navigateTo(Screen.Search) }
             )
         }
         Screen.Detail -> {
             DetailScreen(
                 postId = selectedPostId,
-                onBack = {
-                    currentScreen = Screen.Home
-                }
+                onBack = { goBack() }
             )
         }
         Screen.Search -> {
             SearchScreen(
-                onBack = { currentScreen = Screen.Home },
+                onBack = { goBack() },
                 onNavigateToDetail = { postId ->
                     selectedPostId = postId
-                    currentScreen = Screen.Detail
+                    navigateTo(Screen.Detail)
                 }
             )
         }

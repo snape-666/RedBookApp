@@ -333,6 +333,11 @@ class SupabaseAuthRepository(private val app: Application) {
         return resp.optJSONArray("users") ?: resp.optJSONArray("posts") ?: JSONArray()
     }
 
+    suspend fun getPostsByViews(): JSONArray {
+        val resp = queryRest("posts", "select=*&order=view_count.desc&limit=6")
+        return resp.optJSONArray("users") ?: resp.optJSONArray("posts") ?: JSONArray()
+    }
+
     suspend fun getPost(postId: String): JSONObject? {
         val resp = queryRest("posts", "select=*&post_id=eq.$postId&limit=1")
         val arr = resp.optJSONArray("users") ?: resp.optJSONArray("posts") ?: return null

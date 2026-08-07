@@ -86,23 +86,21 @@ class SearchViewModel(application: Application) : AndroidViewModel(application) 
     private fun loadSuggestions() {
         viewModelScope.launch {
             try {
-                val posts = repository.getPosts()
+                val posts = repository.getPostsByViews()
                 val titles = (0 until posts.length()).map { i ->
                     extractKeyContent(posts.getJSONObject(i).optString("title", ""))
-                }.filter { it.isNotBlank() }.take(6)
+                }.filter { it.isNotBlank() }
                 _uiState.value = _uiState.value.copy(suggestions = titles)
             } catch (_: Exception) { }
         }
     }
 
     private fun extractKeyContent(title: String): String {
-        val clean = title.replace(Regex("这是第\\d+篇"), "").trim()
-        val breaks = listOf("，", ",", "。", ".", "！", "的", "风格")
-        for (b in breaks) {
-            val idx = clean.indexOf(b)
-            if (idx in 3..12) return clean.substring(0, idx).trim()
-        }
-        return if (clean.length <= 12) clean else clean.take(10) + "…"
+        val clean = title
+            .replace(Regex("这是第\\d+篇"), "")
+            .replace(Regex("的笔记|的帖子|风格"), "")
+            .trim()
+        return if (clean.length <= 15) clean else clean.take(15) + "…"
     }
 
     data class SearchUiState(
