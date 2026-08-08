@@ -19,6 +19,7 @@ import com.example.redbook.ui.auth.RegisterScreen
 import com.example.redbook.ui.theme.RedBookTheme
 import com.example.redbook.ui.home.HomeScreen
 import com.example.redbook.ui.search.SearchScreen
+import com.example.redbook.ui.publish.PublishScreen
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -41,6 +42,9 @@ fun AppScreen() {
     var currentScreen by remember { mutableStateOf<Screen>(Screen.Home) }
     var selectedPostId by remember { mutableStateOf("") }
     var screenStack by remember { mutableStateOf(listOf<Screen>(Screen.Home)) }
+    var userUid by remember { mutableStateOf("") }
+    var userXhsId by remember { mutableStateOf("") }
+    var userName by remember { mutableStateOf("") }
 
     fun navigateTo(screen: Screen) {
         screenStack = screenStack + screen
@@ -57,7 +61,12 @@ fun AppScreen() {
     when (currentScreen) {
         Screen.Login -> {
             LoginScreen(
-                onLoginSuccess = { navigateTo(Screen.Home) },
+                onLoginSuccess = { userData ->
+                    userUid = userData.uid
+                    userXhsId = userData.xhsId
+                    userName = userData.nickname.ifBlank { userData.account }
+                    navigateTo(Screen.Home)
+                },
                 onNavigateToRegister = { navigateTo(Screen.Register) }
             )
         }
@@ -73,13 +82,23 @@ fun AppScreen() {
                     selectedPostId = postId
                     navigateTo(Screen.Detail)
                 },
-                onNavigateToSearch = { navigateTo(Screen.Search) }
+                onNavigateToSearch = { navigateTo(Screen.Search) },
+                onNavigateToPublish = { navigateTo(Screen.Publish) }
             )
         }
         Screen.Detail -> {
             DetailScreen(
                 postId = selectedPostId,
                 onBack = { goBack() }
+            )
+        }
+        Screen.Publish -> {
+            PublishScreen(
+                authorUid = userUid,
+                authorXhsId = userXhsId,
+                authorName = userName,
+                onBack = { goBack() },
+                onPublished = { goBack() }
             )
         }
         Screen.Search -> {
@@ -101,4 +120,5 @@ sealed class Screen {
     object Home : Screen()
     object Detail : Screen()
     object Search : Screen()
+    object Publish : Screen()
 }

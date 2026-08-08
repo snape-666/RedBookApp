@@ -319,6 +319,97 @@ class SupabaseAuthRepository(private val app: Application) {
         supabasePostBody("/rest/v1/posts", body)
     }
 
+    suspend fun uploadImage(uri: android.net.Uri, app: android.content.Context): String? {
+        return withContext(Dispatchers.IO) {
+            try {
+                val cr = app.contentResolver
+                val mime = cr.getType(uri) ?: "image/jpeg"
+                val inputStream = cr.openInputStream(uri) ?: return@withContext null
+                val bytes = inputStream.readBytes()
+                inputStream.close()
+                val ext = when { mime.contains("png") -> "png"; mime.contains("webp") -> "webp"; else -> "jpg" }
+                val fileName = "img_${System.currentTimeMillis()}.$ext"
+                uploadToStorage("post-images", fileName, bytes, mime)
+                "${SupabaseConfig.url}/storage/v1/object/public/post-images/$fileName"
+            } catch (e: Exception) { 
+                e.printStackTrace()
+                null 
+            }
+        }
+    }
+
+    private suspend fun uploadToStorage(bucket: String, fileName: String, bytes: ByteArray, mime: String) {
+        suspendCancellableCoroutine<String> { cont ->
+            val request = object : StringRequest(
+                POST, "${SupabaseConfig.url}/storage/v1/object/$bucket/$fileName",
+                { cont.resume(it) },
+                { error -> cont.resumeWithException(Exception(extractVolleyError(error))) }
+            ) {
+                override fun getBody(): ByteArray = bytes
+                override fun getBodyContentType(): String = mime
+                override fun getHeaders(): Map<String, String> = mapOf(
+                    "apikey" to SupabaseConfig.anonKey,
+                    "Authorization" to "Bearer ${SupabaseConfig.anonKey}"
+                )
+            }
+            requestQueue.add(request)
+        }
+    }
+
+    suspend fun publishPost(postId: String, title: String, content: String,
+                            authorUid: String, authorName: String, authorXhsId: String, imageUrl: String = "") {
+        val body = JSONObject().apply {
+            put("post_id", postId)
+            put("title", title)
+            put("content", content)
+            put("author_uid", authorUid)
+            put("author_name", authorName)
+            put("author_xhs_id", authorXhsId)
+            put("image_url", imageUrl)
+            put("created_at", System.currentTimeMillis())
+        }
+        supabasePostBody("/rest/v1/posts", body)
+    }
+
+    suspend fun saveDraft(draftId: String, title: String, content: String,
+                          authorUid: String, authorXhsId: String, authorName: String) {
+        val body = JSONObject().apply {
+            put("draft_id", draftId)
+            put("title", title)
+            put("content", content)
+            put("author_uid", authorUid)
+            put("author_xhs_id", authorXhsId)
+            put("author_name", authorName)
+            put("created_at", System.currentTimeMillis())
+            put("updated_at", System.currentTimeMillis())
+        }
+        supabasePostBody("/rest/v1/drafts", body)
+    }
+
+    suspend fun getDrafts(authorUid: String): JSONArray {
+        val resp = queryRest("drafts", "select=*&author_uid=eq.$authorUid&order=updated_at.desc")
+        return resp.optJSONArray("users") ?: resp.optJSONArray("drafts") ?: JSONArray()
+    }
+
+    suspend fun deleteDraft(draftId: String) {
+        val body = JSONObject().apply { put("draft_id", draftId) }
+        supabaseDelete("/rest/v1/drafts?draft_id=eq.$draftId")
+    }
+
+    private suspend fun supabaseDelete(path: String) {
+        suspendCancellableCoroutine<String> { cont ->
+            val request = object : StringRequest(DELETE, "${SupabaseConfig.url}$path",
+                { cont.resume(it) },
+                { error -> cont.resumeWithException(Exception(extractVolleyError(error))) }
+            ) {
+                override fun getHeaders() = mapOf(
+                    "apikey" to SupabaseConfig.anonKey, "Prefer" to "return=minimal"
+                )
+            }
+            requestQueue.add(request)
+        }
+    }
+
     suspend fun incrementViewCount(postId: String) {
         val resp = queryRest("posts", "select=view_count&post_id=eq.$postId&limit=1")
         val arr = resp.optJSONArray("users") ?: resp.optJSONArray("posts") ?: return

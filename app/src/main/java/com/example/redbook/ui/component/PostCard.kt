@@ -6,6 +6,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -25,7 +26,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
+import coil.compose.AsyncImage
+import coil.request.ImageRequest
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
@@ -44,7 +48,7 @@ fun PostCard(
     likeCount : String,
     modifier: Modifier = Modifier,
     onCardClick: () -> Unit = {},
-
+    imageUrl: String = ""
 ) {
     val likeIconRes = if (isLiked) R.drawable.favorite_fill else R.drawable.favorite_light
     Card(
@@ -55,15 +59,23 @@ fun PostCard(
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
     ) {
         Column (modifier=Modifier.fillMaxWidth()){
-            Image(
-                painter = painterResource(id = imageRes),
-                contentDescription = "Post image",
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(250.dp)
-                    .clip(RoundedCornerShape(topStart = 10.dp, topEnd = 10.dp)),
-                contentScale = ContentScale.Crop
-            )
+            if (imageUrl.isNotBlank()) {
+                AsyncImage(
+                    model = ImageRequest.Builder(LocalContext.current).data(imageUrl).crossfade(true).build(),
+                    contentDescription = null,
+                    modifier = Modifier.fillMaxWidth().aspectRatio(3f / 4f)
+                        .clip(RoundedCornerShape(topStart = 10.dp, topEnd = 10.dp)),
+                    contentScale = ContentScale.Crop
+                )
+            } else {
+                Image(
+                    painter = painterResource(id = imageRes),
+                    contentDescription = "Post image",
+                    modifier = Modifier.fillMaxWidth().aspectRatio(3f / 4f)
+                        .clip(RoundedCornerShape(topStart = 10.dp, topEnd = 10.dp)),
+                    contentScale = ContentScale.Crop
+                )
+            }
 
 
             Row(

@@ -22,10 +22,11 @@ class HomeRepository(private val supabase: SupabaseAuthRepository) {
     private fun parsePosts(posts: JSONArray): List<Note> {
         return (0 until posts.length()).map { i ->
             val p = posts.getJSONObject(i)
-            Note(
-                id = p.optString("post_id", ""),
-                title = p.optString("title", ""),
-                imageRes = R.drawable.test,
+                    Note(
+                        id = p.optString("post_id", ""),
+                        title = p.optString("title", ""),
+                        imageRes = R.drawable.test,
+                        imageUrl = p.optString("image_url", ""),
                 avatarRes = R.drawable.test,
                 userName = p.optString("author_name", ""),
                 likeCount = p.optInt("like_count", 0),

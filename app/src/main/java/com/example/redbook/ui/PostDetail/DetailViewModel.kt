@@ -56,6 +56,7 @@ class DetailViewModel(application: Application) : AndroidViewModel(application) 
                     val post = PostDetail(
                         postId = p.optString("post_id", ""),
                         imageRes = R.drawable.test,
+                        imageUrl = p.optString("image_url", ""),
                         title = p.optString("title", ""),
                         content = p.optString("content", ""),
                         publishTime = p.optLong("created_at", 0),

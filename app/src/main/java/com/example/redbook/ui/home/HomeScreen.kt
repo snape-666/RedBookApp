@@ -12,8 +12,10 @@ import androidx.compose.foundation.lazy.staggeredgrid.LazyVerticalStaggeredGrid
 import androidx.compose.foundation.lazy.staggeredgrid.StaggeredGridCells
 import androidx.compose.foundation.lazy.staggeredgrid.items
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -30,11 +32,13 @@ import com.example.redbook.ui.component.HomeTopBar
 import com.example.redbook.ui.component.PostCard
 import com.example.redbook.ui.utils.formatCount
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun HomeScreen(
     viewModel: HomeViewModel = viewModel(),
     onNavigateToDetail: (String) -> Unit,
-    onNavigateToSearch: () -> Unit = {}
+    onNavigateToSearch: () -> Unit = {},
+    onNavigateToPublish: () -> Unit = {}
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     var selectedTabIndex by remember { mutableIntStateOf(1) }
@@ -80,6 +84,11 @@ fun HomeScreen(
 
             is HomeUiState.Success -> {
                 val notes = (uiState as HomeUiState.Success).notes
+                PullToRefreshBox(
+                    isRefreshing = uiState is HomeUiState.Loading,
+                    onRefresh = { viewModel.fetchNotes() },
+                    modifier = Modifier.fillMaxSize()
+                ) {
                 LazyVerticalStaggeredGrid(
                     columns = StaggeredGridCells.Fixed(2),
                     contentPadding = PaddingValues(8.dp),
@@ -96,9 +105,11 @@ fun HomeScreen(
                             userName = note.userName,
                             isLiked = note.isLiked,
                             likeCount = formatCount(note.likeCount),
-                            onCardClick = { onNavigateToDetail(note.id) }
+                            onCardClick = { onNavigateToDetail(note.id) },
+                            imageUrl = note.imageUrl
                         )
                     }
+                }
                 }
             }
 
@@ -121,7 +132,7 @@ fun HomeScreen(
                 selectedBottomIndex=index
             },
             fabIconRes = R.drawable.social_icons,
-            onFabClick = {},
+            onFabClick = onNavigateToPublish,
             indicatorHeight =3,
             indicatorWidth = 30,
         )

@@ -1,0 +1,15 @@
+CREATE TABLE drafts (
+  id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  draft_id TEXT UNIQUE NOT NULL,
+  title TEXT NOT NULL DEFAULT '',
+  content TEXT NOT NULL DEFAULT '',
+  author_uid TEXT NOT NULL,
+  author_xhs_id TEXT NOT NULL,
+  author_name TEXT NOT NULL,
+  created_at BIGINT NOT NULL,
+  updated_at BIGINT NOT NULL
+);
+ALTER TABLE drafts DISABLE ROW LEVEL SECURITY;
+GRANT ALL ON drafts TO anon, authenticated;
+
+ALTER TABLE posts ADD COLUMN IF NOT EXISTS image_url TEXT DEFAULT '';
