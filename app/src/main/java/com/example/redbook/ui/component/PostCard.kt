@@ -59,9 +59,11 @@ fun PostCard(
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
     ) {
         Column (modifier=Modifier.fillMaxWidth()){
-            if (imageUrl.isNotBlank()) {
+            val firstUrl = imageUrl.split(",").firstOrNull { it.isNotBlank() } ?: ""
+            if (firstUrl.isNotBlank()) {
                 AsyncImage(
-                    model = ImageRequest.Builder(LocalContext.current).data(imageUrl).crossfade(true).build(),
+                    model = ImageRequest.Builder(LocalContext.current).data(firstUrl)
+                        .crossfade(300).placeholder(imageRes).build(),
                     contentDescription = null,
                     modifier = Modifier.fillMaxWidth().aspectRatio(3f / 4f)
                         .clip(RoundedCornerShape(topStart = 10.dp, topEnd = 10.dp)),

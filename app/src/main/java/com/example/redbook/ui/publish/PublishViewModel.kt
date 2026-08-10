@@ -64,18 +64,18 @@ class PublishViewModel(
         viewModelScope.launch {
             _uiState.value = state.copy(isSaving = true)
             try {
-                var imageUrl = ""
-                if (state.images.isNotEmpty()) {
-                    imageUrl = repository.uploadImage(state.images.first(), getApplication()) ?: ""
-                    if (imageUrl.isEmpty() && state.images.isNotEmpty()) {
-                        _uiState.value = state.copy(isSaving = false, error = "图片上传失败")
-                        return@launch
-                    }
+                val urls = mutableListOf<String>()
+                for (img in state.images) {
+                    val url = repository.uploadImage(img, getApplication())
+                    if (url != null) urls.add(url)
+                }
+                if (state.images.isNotEmpty() && urls.isEmpty()) {
+                    _uiState.value = state.copy(isSaving = false, error = "图片上传失败")
+                    return@launch
                 }
                 repository.publishPost(
-                    "post_${System.currentTimeMillis()}",
-                    state.title, state.content,
-                    authorUid, authorName, authorXhsId, imageUrl
+                    "post_${System.currentTimeMillis()}", state.title, state.content,
+                    authorUid, authorName, authorXhsId, urls.joinToString(",")
                 )
                 _uiState.value = state.copy(isSaving = false, saved = true, savedAsDraft = false)
             } catch (e: Exception) {
