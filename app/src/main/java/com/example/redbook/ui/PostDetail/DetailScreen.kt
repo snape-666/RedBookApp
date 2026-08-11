@@ -185,18 +185,6 @@ fun DetailScreen(
 
 
             if (isKeyboardVisible) {
-
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .background(Color.Black.copy(alpha = 0.5f))
-                        .clickable {
-                            // 点击遮罩关闭键盘
-                            viewModel.setKeyboardVisible(false)
-                            focusRequester.freeFocus()
-                        }
-                ) {
-                    // 输入栏放在底部，跟随键盘
                     KeyboardInputBar(
                         text = commentText,
                         onTextChange = { viewModel.updateCommentText(it) },
@@ -223,9 +211,8 @@ fun DetailScreen(
                             .fillMaxWidth()
                             .imePadding()              // 键盘顶起
                             .navigationBarsPadding()   // 避开底部手势栏
-                            .clickable(enabled = false) { } // 阻止点击穿透到遮罩
+                            .clickable(enabled = false) { }
                     )
-                }
             }
         }
     }

@@ -45,6 +45,7 @@ import coil.request.ImageRequest
 import com.example.redbook.R
 import com.example.redbook.ui.theme.getOnSurfaceSecondary
 import com.example.redbook.ui.theme.getOnSurfaceTertiary
+import com.example.redbook.ui.theme.getOutline
 
 @Composable
 fun PublishScreen(
@@ -118,7 +119,7 @@ fun PublishScreen(
                             .clickable { imagePicker.launch("*/*") },
                         contentAlignment = Alignment.Center
                     ) {
-                        Icon(painterResource(R.drawable.add_square), "添加", Modifier.size(32.dp), tint = getOnSurfaceSecondary())
+                        Icon(painterResource(R.drawable.add_square), "添加", Modifier.size(32.dp), tint = getOutline())
                     }
                 }
             }
@@ -135,7 +136,7 @@ fun PublishScreen(
                 cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
                 singleLine = true,
                 decorationBox = { inner ->
-                    if (state.title.isEmpty()) Text("添加标题", fontSize = 18.sp, color = MaterialTheme.colorScheme.surfaceVariant)
+                    if (state.title.isEmpty()) Text("添加标题", fontSize = 18.sp, color = getOnSurfaceSecondary())
                     inner()
                 }
             )
@@ -150,7 +151,7 @@ fun PublishScreen(
                     textStyle = androidx.compose.ui.text.TextStyle(fontSize = 15.sp, color = MaterialTheme.colorScheme.onSurface),
                     cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
                     decorationBox = { inner ->
-                        if (state.content.isEmpty()) Text("分享你的想法...", fontSize = 15.sp, color = MaterialTheme.colorScheme.surfaceVariant)
+                        if (state.content.isEmpty()) Text("分享你的想法...", fontSize = 15.sp, color = getOnSurfaceSecondary())
                         inner()
                     }
                 )

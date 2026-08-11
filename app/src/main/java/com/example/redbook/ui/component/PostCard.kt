@@ -87,7 +87,7 @@ fun PostCard(
                             contentScale = ContentScale.Crop)
                     }
                     Icon(
-                        painter = painterResource(R.drawable.add_square),
+                        painter = painterResource(R.drawable.video_fill),
                         contentDescription = "视频",
                         modifier = Modifier.align(Alignment.TopEnd).padding(8.dp).size(28.dp),
                         tint = Color.White

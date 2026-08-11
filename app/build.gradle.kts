@@ -52,6 +52,7 @@ kotlin {
 }
 
 dependencies {
+    implementation(libs.androidx.compose.foundation.layout)
     // Coil
     implementation(libs.coil.compose)
     // Lifecycle
