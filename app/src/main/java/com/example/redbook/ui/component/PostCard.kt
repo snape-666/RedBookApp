@@ -4,9 +4,11 @@ import android.content.res.Configuration
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -21,6 +23,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -28,6 +31,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
+import android.graphics.Bitmap
+import android.media.MediaMetadataRetriever
+import androidx.compose.ui.graphics.asImageBitmap
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import androidx.compose.ui.text.font.FontWeight
@@ -60,7 +66,34 @@ fun PostCard(
     ) {
         Column (modifier=Modifier.fillMaxWidth()){
             val firstUrl = imageUrl.split(",").firstOrNull { it.isNotBlank() } ?: ""
-            if (firstUrl.isNotBlank()) {
+            val isVideo = firstUrl.startsWith("video:")
+            if (isVideo) {
+                Box(modifier = Modifier.fillMaxWidth().aspectRatio(3f / 4f)) {
+                    val videoPath = firstUrl.removePrefix("video:")
+                    val thumb = remember(videoPath) {
+                        val retriever = MediaMetadataRetriever()
+                        try {
+                            retriever.setDataSource(videoPath)
+                            retriever.frameAtTime
+                        } finally { retriever.release() }
+                    }
+                    if (thumb != null) {
+                        Image(bitmap = thumb.asImageBitmap(), contentDescription = null,
+                            modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(topStart = 10.dp, topEnd = 10.dp)),
+                            contentScale = ContentScale.Crop)
+                    } else {
+                        Image(painter = painterResource(id = imageRes), contentDescription = null,
+                            modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(topStart = 10.dp, topEnd = 10.dp)),
+                            contentScale = ContentScale.Crop)
+                    }
+                    Icon(
+                        painter = painterResource(R.drawable.add_square),
+                        contentDescription = "视频",
+                        modifier = Modifier.align(Alignment.TopEnd).padding(8.dp).size(28.dp),
+                        tint = Color.White
+                    )
+                }
+            } else if (firstUrl.isNotBlank()) {
                 AsyncImage(
                     model = ImageRequest.Builder(LocalContext.current).data(firstUrl)
                         .crossfade(300).placeholder(imageRes).build(),

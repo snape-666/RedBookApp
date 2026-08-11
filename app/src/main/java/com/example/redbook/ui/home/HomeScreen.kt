@@ -38,7 +38,8 @@ fun HomeScreen(
     viewModel: HomeViewModel = viewModel(),
     onNavigateToDetail: (String) -> Unit,
     onNavigateToSearch: () -> Unit = {},
-    onNavigateToPublish: () -> Unit = {}
+    onNavigateToPublish: () -> Unit = {},
+    onNavigateToVideo: (String, String) -> Unit = { _, _ -> }
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     var selectedTabIndex by remember { mutableIntStateOf(1) }
@@ -105,7 +106,10 @@ fun HomeScreen(
                             userName = note.userName,
                             isLiked = note.isLiked,
                             likeCount = formatCount(note.likeCount),
-                            onCardClick = { onNavigateToDetail(note.id) },
+                            onCardClick = {
+                                if (note.imageUrl.startsWith("video:")) onNavigateToVideo(note.id, note.imageUrl.removePrefix("video:"))
+                                else onNavigateToDetail(note.id)
+                            },
                             imageUrl = note.imageUrl
                         )
                     }

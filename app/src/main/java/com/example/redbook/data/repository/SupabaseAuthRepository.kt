@@ -327,10 +327,12 @@ class SupabaseAuthRepository(private val app: Application) {
                 val inputStream = cr.openInputStream(uri) ?: return@withContext null
                 val bytes = inputStream.readBytes()
                 inputStream.close()
-                val ext = when { mime.contains("png") -> "png"; mime.contains("webp") -> "webp"; else -> "jpg" }
+                val isVideo = mime.contains("video")
+                val ext = when { isVideo -> "mp4"; mime.contains("png") -> "png"; mime.contains("webp") -> "webp"; else -> "jpg" }
+                val prefix = if (isVideo) "video:" else ""
                 val fileName = "img_${System.currentTimeMillis()}.$ext"
                 uploadToStorage("post-images", fileName, bytes, mime)
-                "${SupabaseConfig.url}/storage/v1/object/public/post-images/$fileName"
+                "$prefix${SupabaseConfig.url}/storage/v1/object/public/post-images/$fileName"
             } catch (e: Exception) { 
                 e.printStackTrace()
                 null 
@@ -427,6 +429,25 @@ class SupabaseAuthRepository(private val app: Application) {
     suspend fun getPostsByViews(): JSONArray {
         val resp = queryRest("posts", "select=*&order=view_count.desc&limit=6")
         return resp.optJSONArray("users") ?: resp.optJSONArray("posts") ?: JSONArray()
+    }
+
+    suspend fun getVideos(): JSONArray {
+        val resp = queryRest("video_notes", "select=*&order=created_at.desc")
+        return resp.optJSONArray("users") ?: resp.optJSONArray("video_notes") ?: JSONArray()
+    }
+
+    suspend fun publishVideo(videoId: String, title: String, videoUrl: String,
+                             authorUid: String, authorName: String, authorXhsId: String) {
+        val body = JSONObject().apply {
+            put("video_id", videoId)
+            put("title", title)
+            put("video_url", videoUrl)
+            put("author_uid", authorUid)
+            put("author_name", authorName)
+            put("author_xhs_id", authorXhsId)
+            put("created_at", System.currentTimeMillis())
+        }
+        supabasePostBody("/rest/v1/video_notes", body)
     }
 
     suspend fun getPost(postId: String): JSONObject? {

@@ -62,4 +62,22 @@ class HomeRepository(private val supabase: SupabaseAuthRepository) {
             )
         }
     }
+
+    suspend fun getVideoNotes(): List<Note> {
+        return try {
+            val videos = supabase.getVideos()
+            (0 until videos.length()).map { i ->
+                val v = videos.getJSONObject(i)
+                Note(
+                    id = v.optString("video_id", ""),
+                    title = v.optString("title", ""),
+                    imageRes = R.drawable.test,
+                    imageUrl = "video:${v.optString("video_url", "")}",
+                    avatarRes = R.drawable.test,
+                    userName = v.optString("author_name", ""),
+                    likeCount = 0
+                )
+            }
+        } catch (e: Exception) { emptyList() }
+    }
 }

@@ -90,40 +90,38 @@ fun PublishScreen(
         Column(
             modifier = Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = 16.dp)
         ) {
+            if (viewModel.isVideoMode && state.images.isNotEmpty()) {
+                Box(modifier = Modifier.fillMaxWidth().height(300.dp).background(Color.Black.copy(alpha = 0.8f), RoundedCornerShape(10.dp)),
+                    contentAlignment = Alignment.Center) {
+                    Text("🎬 视频已选择", color = Color.White, fontSize = 16.sp)
+                }
+                Spacer(Modifier.height(16.dp))
+            } else {
             // 图片区
             Row(
                 modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 state.images.forEach { uri ->
-                    Box(
-                        modifier = Modifier.size(100.dp).clip(RoundedCornerShape(10.dp))
-                    ) {
+                    Box(modifier = Modifier.size(100.dp).clip(RoundedCornerShape(10.dp))) {
                         AsyncImage(
                             model = ImageRequest.Builder(LocalContext.current).data(uri).crossfade(true).build(),
-                            contentDescription = null,
-                            modifier = Modifier.fillMaxSize(),
-                            contentScale = ContentScale.Crop
+                            contentDescription = null, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop
                         )
                     }
                 }
                 if (state.images.size < 11) {
                     Box(
-                        modifier = Modifier.size(100.dp)
-                            .clip(RoundedCornerShape(10.dp))
+                        modifier = Modifier.size(100.dp).clip(RoundedCornerShape(10.dp))
                             .border(1.dp, borderColor, RoundedCornerShape(10.dp))
                             .background(fillColor)
                             .clickable { imagePicker.launch("*/*") },
                         contentAlignment = Alignment.Center
                     ) {
-                        Icon(
-                            painter = painterResource(R.drawable.add_square),
-                            contentDescription = "添加图片",
-                            modifier = Modifier.size(32.dp),
-                            tint = getOnSurfaceSecondary()
-                        )
+                        Icon(painterResource(R.drawable.add_square), "添加", Modifier.size(32.dp), tint = getOnSurfaceSecondary())
                     }
                 }
+            }
             }
 
             Spacer(Modifier.height(16.dp))
@@ -144,18 +142,19 @@ fun PublishScreen(
 
             Spacer(Modifier.height(12.dp))
 
-            // 正文
-            androidx.compose.foundation.text.BasicTextField(
-                value = state.content,
-                onValueChange = viewModel::updateContent,
-                modifier = Modifier.fillMaxWidth().weight(1f),
-                textStyle = androidx.compose.ui.text.TextStyle(fontSize = 15.sp, color = MaterialTheme.colorScheme.onSurface),
-                cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
-                decorationBox = { inner ->
-                    if (state.content.isEmpty()) Text("分享你的想法...", fontSize = 15.sp, color = MaterialTheme.colorScheme.surfaceVariant)
-                    inner()
-                }
-            )
+            if (!viewModel.isVideoMode) {
+                androidx.compose.foundation.text.BasicTextField(
+                    value = state.content,
+                    onValueChange = viewModel::updateContent,
+                    modifier = Modifier.fillMaxWidth().weight(1f),
+                    textStyle = androidx.compose.ui.text.TextStyle(fontSize = 15.sp, color = MaterialTheme.colorScheme.onSurface),
+                    cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+                    decorationBox = { inner ->
+                        if (state.content.isEmpty()) Text("分享你的想法...", fontSize = 15.sp, color = MaterialTheme.colorScheme.surfaceVariant)
+                        inner()
+                    }
+                )
+            }
 
             if (state.error != null) {
                 Text(state.error!!, color = MaterialTheme.colorScheme.error, fontSize = 13.sp,

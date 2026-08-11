@@ -20,6 +20,8 @@ import com.example.redbook.ui.theme.RedBookTheme
 import com.example.redbook.ui.home.HomeScreen
 import com.example.redbook.ui.search.SearchScreen
 import com.example.redbook.ui.publish.PublishScreen
+import com.example.redbook.ui.video.VideoDetailScreen
+import com.example.redbook.R
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -41,6 +43,8 @@ class MainActivity : ComponentActivity() {
 fun AppScreen() {
     var currentScreen by remember { mutableStateOf<Screen>(Screen.Home) }
     var selectedPostId by remember { mutableStateOf("") }
+    var selectedVideoId by remember { mutableStateOf("") }
+    var selectedVideoUrl by remember { mutableStateOf("") }
     var screenStack by remember { mutableStateOf(listOf<Screen>(Screen.Home)) }
     var userUid by remember { mutableStateOf("") }
     var userXhsId by remember { mutableStateOf("") }
@@ -83,7 +87,12 @@ fun AppScreen() {
                     navigateTo(Screen.Detail)
                 },
                 onNavigateToSearch = { navigateTo(Screen.Search) },
-                onNavigateToPublish = { navigateTo(Screen.Publish) }
+                onNavigateToPublish = { navigateTo(Screen.Publish) },
+                onNavigateToVideo = { videoId, videoUrl ->
+                    selectedVideoId = videoId
+                    selectedVideoUrl = videoUrl
+                    navigateTo(Screen.Video)
+                }
             )
         }
         Screen.Detail -> {
@@ -99,6 +108,20 @@ fun AppScreen() {
                 authorName = userName,
                 onBack = { goBack() },
                 onPublished = { goBack() }
+            )
+        }
+        Screen.Video -> {
+            VideoDetailScreen(
+                videoUrl = selectedVideoUrl.ifBlank { "test" },
+                title = "视频",
+                authorName = userName.ifBlank { "作者" },
+                authorAvatar = R.drawable.test,
+                isFollowed = false,
+                likeCount = 0, favoriteCount = 0, commentCount = 0,
+                onBack = { goBack() },
+                onFollowClick = {},
+                onLikeClick = {},
+                onFavoriteClick = {}
             )
         }
         Screen.Search -> {
@@ -121,4 +144,5 @@ sealed class Screen {
     object Detail : Screen()
     object Search : Screen()
     object Publish : Screen()
+    object Video : Screen()
 }
