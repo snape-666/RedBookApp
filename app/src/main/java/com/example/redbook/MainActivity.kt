@@ -21,6 +21,7 @@ import com.example.redbook.ui.home.HomeScreen
 import com.example.redbook.ui.search.SearchScreen
 import com.example.redbook.ui.publish.PublishScreen
 import com.example.redbook.ui.video.VideoDetailScreen
+import com.example.redbook.ui.profile.ProfileScreen
 import com.example.redbook.R
 
 class MainActivity : ComponentActivity() {
@@ -45,7 +46,7 @@ fun AppScreen() {
     var selectedPostId by remember { mutableStateOf("") }
     var selectedVideoId by remember { mutableStateOf("") }
     var selectedVideoUrl by remember { mutableStateOf("") }
-    var screenStack by remember { mutableStateOf(listOf<Screen>(Screen.Home)) }
+    var screenStack by remember { mutableStateOf(listOf<Screen>(Screen.Login)) }
     var userUid by remember { mutableStateOf("") }
     var userXhsId by remember { mutableStateOf("") }
     var userName by remember { mutableStateOf("") }
@@ -69,7 +70,8 @@ fun AppScreen() {
                     userUid = userData.uid
                     userXhsId = userData.xhsId
                     userName = userData.nickname.ifBlank { userData.account }
-                    navigateTo(Screen.Home)
+                    screenStack = listOf(Screen.Home)
+                    currentScreen = Screen.Home
                 },
                 onNavigateToRegister = { navigateTo(Screen.Register) }
             )
@@ -88,6 +90,7 @@ fun AppScreen() {
                 },
                 onNavigateToSearch = { navigateTo(Screen.Search) },
                 onNavigateToPublish = { navigateTo(Screen.Publish) },
+                onNavigateToProfile = { navigateTo(Screen.Profile) },
                 onNavigateToVideo = { videoId, videoUrl ->
                     selectedVideoId = videoId
                     selectedVideoUrl = videoUrl
@@ -108,6 +111,19 @@ fun AppScreen() {
                 authorName = userName,
                 onBack = { goBack() },
                 onPublished = { goBack() }
+            )
+        }
+        Screen.Profile -> {
+            ProfileScreen(
+                userName = userName.ifBlank { "用户" },
+                userXhsId = userXhsId.ifBlank { "00000000000" },
+                ipLocation = "未知",
+                followCount = 0, fansCount = 0, likeCount = 0,
+                onBack = { goBack() },
+                onEditProfile = { },
+                onBottomTabClick = { idx -> if (idx == 0) { screenStack = listOf(Screen.Home); currentScreen = Screen.Home } },
+                onPostClick = { postId -> selectedPostId = postId; navigateTo(Screen.Detail) },
+                onPublish = { navigateTo(Screen.Publish) }
             )
         }
         Screen.Video -> {
@@ -145,4 +161,5 @@ sealed class Screen {
     object Search : Screen()
     object Publish : Screen()
     object Video : Screen()
+    object Profile : Screen()
 }

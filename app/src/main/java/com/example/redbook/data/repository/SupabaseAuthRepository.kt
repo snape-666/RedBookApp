@@ -37,7 +37,7 @@ class SupabaseAuthRepository(private val app: Application) {
                     if (existing.optJSONArray("users")?.length() ?: 0 > 0)
                         throw AppException("该账号名已被占用")
 
-                    val xhsId = (1..11).map { Random.nextInt(10) }.joinToString("")
+                    val xhsId = generateUniqueXhsId()
                     val body = JSONObject().apply {
                         put("email", email)
                         put("password", password)
@@ -50,6 +50,8 @@ class SupabaseAuthRepository(private val app: Application) {
                     val response = supabasePost("/auth/v1/signup", body)
                     val uid = response.getJSONObject("user").getString("id")
                     insertUserMapping(uid, account, email)
+                    // 存储 xhs_id 到 users 表（失败不阻断注册）
+                    try { patchUserRow(uid, JSONObject().apply { put("xhs_id", xhsId) }) } catch (_: Exception) { }
                     Result.success(uid)
                 }
                 result ?: Result.failure(Exception("网络连接超时"))
@@ -75,7 +77,25 @@ class SupabaseAuthRepository(private val app: Application) {
                         put("email", email)
                         put("password", password)
                     }
-                    parseUserData(supabasePost("/auth/v1/token?grant_type=password", body))
+                    val userData = parseUserData(supabasePost("/auth/v1/token?grant_type=password", body)).getOrNull()
+                    if (userData == null) {
+                        Result.failure(Exception("登录失败"))
+                    } else if (userData.xhsId.isBlank()) {
+                        val res = queryRest("users", "select=xhs_id,account,nickname&uid=eq.${userData.uid}&limit=1")
+                        val arr = res.optJSONArray("users")
+                        if (arr != null && arr.length() > 0) {
+                            val row = arr.getJSONObject(0)
+                            Result.success(userData.copy(
+                                xhsId = row.optString("xhs_id", ""),
+                                account = userData.account.ifBlank { row.optString("account", "") },
+                                nickname = userData.nickname.ifBlank { row.optString("nickname", "") }
+                            ))
+                        } else {
+                            Result.success(userData)
+                        }
+                    } else {
+                        Result.success(userData)
+                    }
                 }
                 result ?: Result.failure(Exception("网络连接超时"))
             } catch (e: AppException) {
@@ -151,6 +171,21 @@ class SupabaseAuthRepository(private val app: Application) {
                 Result.failure(Exception(parseError(e)))
             }
         }
+    }
+
+    private suspend fun generateUniqueXhsId(): String {
+        var id: String
+        do {
+            id = (1..9).map { Random.nextInt(10) }.joinToString("")
+        } while (xhsIdExists(id))
+        return id
+    }
+
+    private suspend fun xhsIdExists(xhsId: String): Boolean {
+        return try {
+            val resp = queryRest("users", "select=xhs_id&xhs_id=eq.$xhsId&limit=1")
+            (resp.optJSONArray("users")?.length() ?: 0) > 0
+        } catch (e: Exception) { false }
     }
 
     private suspend fun patchUserRow(uid: String, body: JSONObject) {
@@ -454,6 +489,99 @@ class SupabaseAuthRepository(private val app: Application) {
         val resp = queryRest("posts", "select=*&post_id=eq.$postId&limit=1")
         val arr = resp.optJSONArray("users") ?: resp.optJSONArray("posts") ?: return null
         return if (arr.length() > 0) arr.getJSONObject(0) else null
+    }
+    // 记录点赞/取消点赞（按小红书id绑定）
+    suspend fun recordLike(userXhsId: String, postId: String, liked: Boolean) {
+        if (liked) {
+            val body = JSONObject().apply {
+                put("like_id", "l_${userXhsId}_$postId")
+                put("user_xhs_id", userXhsId)
+                put("post_id", postId)
+                put("created_at", System.currentTimeMillis())
+            }
+            supabasePostBody("/rest/v1/likes", body)
+        } else {
+            supabaseDelete("/rest/v1/likes?user_xhs_id=eq.$userXhsId&post_id=eq.$postId")
+        }
+    }
+
+    // 记录收藏/取消收藏
+    suspend fun recordFavorite(userXhsId: String, postId: String, favorited: Boolean) {
+        if (favorited) {
+            val body = JSONObject().apply {
+                put("fav_id", "f_${userXhsId}_$postId")
+                put("user_xhs_id", userXhsId)
+                put("post_id", postId)
+                put("created_at", System.currentTimeMillis())
+            }
+            supabasePostBody("/rest/v1/favorites", body)
+        } else {
+            supabaseDelete("/rest/v1/favorites?user_xhs_id=eq.$userXhsId&post_id=eq.$postId")
+        }
+    }
+
+    // 用户发布的帖子
+    suspend fun getUserPosts(userXhsId: String): JSONArray {
+        val resp = queryRest("posts", "select=*&author_xhs_id=eq.$userXhsId&order=created_at.desc")
+        return resp.optJSONArray("users") ?: resp.optJSONArray("posts") ?: JSONArray()
+    }
+
+    // 用户点赞的帖子
+    suspend fun getUserLikedPosts(userXhsId: String): JSONArray {
+        val resp = queryRest("likes", "select=post_id&user_xhs_id=eq.$userXhsId")
+        val arr = resp.optJSONArray("users") ?: resp.optJSONArray("likes") ?: JSONArray()
+        val postIds = (0 until arr.length()).map { arr.getJSONObject(it).getString("post_id") }
+        if (postIds.isEmpty()) return JSONArray()
+        val filters = postIds.joinToString(",") { "post_id=eq.$it" }
+        val postsResp = queryRest("posts", "select=*&or=($filters)")
+        return postsResp.optJSONArray("users") ?: postsResp.optJSONArray("posts") ?: JSONArray()
+    }
+
+    // 用户收藏的帖子
+    suspend fun getUserFavoritedPosts(userXhsId: String): JSONArray {
+        val resp = queryRest("favorites", "select=post_id&user_xhs_id=eq.$userXhsId")
+        val arr = resp.optJSONArray("users") ?: resp.optJSONArray("favorites") ?: JSONArray()
+        val postIds = (0 until arr.length()).map { arr.getJSONObject(it).getString("post_id") }
+        if (postIds.isEmpty()) return JSONArray()
+        val filters = postIds.joinToString(",") { "post_id=eq.$it" }
+        val postsResp = queryRest("posts", "select=*&or=($filters)")
+        return postsResp.optJSONArray("users") ?: postsResp.optJSONArray("posts") ?: JSONArray()
+    }
+
+    // 用户的评论和回复
+    suspend fun getUserComments(userXhsId: String): JSONArray {
+        val resp = queryRest("comments", "select=*&author_xhs_id=eq.$userXhsId&order=created_at.desc")
+        val arr = resp.optJSONArray("users") ?: resp.optJSONArray("comments") ?: JSONArray()
+        val result = JSONArray()
+        for (i in 0 until arr.length()) {
+            val c = arr.getJSONObject(i)
+            val obj = JSONObject()
+            obj.put("comment_id", c.optString("comment_id"))
+            obj.put("post_id", c.optString("post_id"))
+            obj.put("parent_id", c.optString("parent_id"))
+            obj.put("content", c.optString("content"))
+            obj.put("author_name", c.optString("author_name"))
+            obj.put("created_at", c.optLong("created_at"))
+            obj.put("like_count", c.optInt("like_count"))
+            val parentId = c.optString("parent_id")
+            if (parentId.isNotEmpty()) {
+                val pr = queryRest("comments", "select=content,author_name&comment_id=eq.$parentId&limit=1")
+                val parr = pr.optJSONArray("users") ?: pr.optJSONArray("comments") ?: JSONArray()
+                if (parr.length() > 0) {
+                    val p = parr.getJSONObject(0)
+                    obj.put("parent_content", p.optString("content"))
+                    obj.put("parent_user", p.optString("author_name"))
+                }
+            }
+            result.put(obj)
+        }
+        return result
+    }
+
+    // 用户的草稿
+    suspend fun getUserDrafts(userXhsId: String): JSONArray {
+        val resp = queryRest("drafts", "select=*&author_xhs_id=eq.$userXhsId&order=updated_at.desc")
+        return resp.optJSONArray("users") ?: resp.optJSONArray("drafts") ?: JSONArray()
     }
 
     suspend fun getComments(postId: String): JSONArray {

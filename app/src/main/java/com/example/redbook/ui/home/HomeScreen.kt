@@ -39,7 +39,8 @@ fun HomeScreen(
     onNavigateToDetail: (String) -> Unit,
     onNavigateToSearch: () -> Unit = {},
     onNavigateToPublish: () -> Unit = {},
-    onNavigateToVideo: (String, String) -> Unit = { _, _ -> }
+    onNavigateToVideo: (String, String) -> Unit = { _, _ -> },
+    onNavigateToProfile: () -> Unit = {}
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     var selectedTabIndex by remember { mutableIntStateOf(1) }
@@ -134,6 +135,7 @@ fun HomeScreen(
             selectedIndex = selectedBottomIndex,
             onTitleClick = {index->
                 selectedBottomIndex=index
+                if (index == 3) onNavigateToProfile()
             },
             fabIconRes = R.drawable.social_icons,
             onFabClick = onNavigateToPublish,
