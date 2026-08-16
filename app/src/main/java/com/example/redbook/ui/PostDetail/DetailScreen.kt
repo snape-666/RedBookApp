@@ -6,16 +6,20 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
@@ -23,14 +27,20 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.redbook.R
@@ -40,6 +50,8 @@ import com.example.redbook.ui.component.NoteCardBottomBar
 import com.example.redbook.ui.component.CommentInputArea
 import com.example.redbook.ui.component.CommentItem
 import com.example.redbook.ui.detail.components.PostContent
+import com.example.redbook.ui.theme.getOnSurfaceSecondary
+import com.example.redbook.ui.theme.getOutline
 import kotlinx.coroutines.launch
 
 @Composable
@@ -62,6 +74,7 @@ fun DetailScreen(
     val focusRequester = remember { FocusRequester() }
     val lazyListState = rememberLazyListState()
     val replyTarget by viewModel.replyTarget.collectAsState()
+    var deletingComment by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(postId) { viewModel.loadPost(postId) }
     LaunchedEffect(uiState, scrollToCommentId) {
@@ -186,6 +199,9 @@ fun DetailScreen(
                                 },
                                 onLikeClick = { commentId ->
                                     viewModel.toggleCommentLike(commentId)
+                                },
+                                onLongClick = { commentId ->
+                                    deletingComment = commentId
                                 }
                             )
                         }
@@ -229,6 +245,50 @@ fun DetailScreen(
                             .navigationBarsPadding()   // 避开底部手势栏
                             .clickable(enabled = false) { }
                     )
+            }
+
+            deletingComment?.let { commentId ->
+                Dialog(onDismissRequest = { deletingComment = null }) {
+                    Column(
+                        Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(MaterialTheme.colorScheme.surface)
+                    ) {
+                        Column(
+                            Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 24.dp, vertical = 20.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Text("删除评论", fontWeight = FontWeight.Bold, fontSize = 18.sp, color = MaterialTheme.colorScheme.onSurface)
+                            Spacer(Modifier.height(8.dp))
+                            Text("确定删除该评论吗？", fontSize = 14.sp, color = getOnSurfaceSecondary())
+                        }
+                        Box(Modifier.fillMaxWidth().height(0.5.dp).background(getOutline()))
+                        Row(
+                            Modifier.fillMaxWidth().height(48.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Box(
+                                Modifier.weight(1f).fillMaxHeight().clickable { deletingComment = null },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text("取消", color = getOnSurfaceSecondary())
+                            }
+                            Box(Modifier.width(0.5.dp).fillMaxHeight().background(getOutline()))
+                            Box(
+                                Modifier.weight(1f).fillMaxHeight().clickable {
+                                    viewModel.deleteComment(commentId)
+                                    deletingComment = null
+                                },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text("确认", color = MaterialTheme.colorScheme.primary)
+                            }
+                        }
+                    }
+                }
             }
         }
     }

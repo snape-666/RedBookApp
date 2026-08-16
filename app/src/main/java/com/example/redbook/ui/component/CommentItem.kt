@@ -1,7 +1,9 @@
 package com.example.redbook.ui.component
 
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -41,6 +43,7 @@ import androidx.compose.ui.platform.LocalLocale
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun CommentItem(
     comment: Comment,
@@ -48,11 +51,16 @@ fun CommentItem(
     onUserNameClick: () -> Unit,
     onReplyClick: (String,String) -> Unit,
     onLikeClick: (String) -> Unit,
+    onLongClick: (String) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     var isExpanded by remember { mutableStateOf(false) }
 
-    Column(modifier = modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
+    Column(modifier = modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)
+        .combinedClickable(
+            onClick = {},
+            onLongClick = { onLongClick(comment.id) }
+        )) {
         // 一级评论
         Row {
             Image(
@@ -167,8 +175,9 @@ fun CommentItem(
                     reply = reply,
                     onAvatarClick = onAvatarClick,
                     onUserNameClick = onUserNameClick,
-                    onReplyClick = { onReplyClick(comment.id,comment.userName) },
+                    onReplyClick = { onReplyClick(reply.id, reply.userName) },
                     onLikeClick = { onLikeClick(reply.id) },
+                    onLongClick = { onLongClick(reply.id) },
                     modifier = Modifier.padding(start = 40.dp)
                 )
             }

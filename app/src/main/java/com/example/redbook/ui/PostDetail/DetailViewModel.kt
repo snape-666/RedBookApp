@@ -76,9 +76,10 @@ class DetailViewModel(
                         authorAvatar = R.drawable.test
                     )
                     val cloudComments = repository.getComments(post.postId)
-                    val comments = (0 until cloudComments.length()).map { i ->
+                    val raw = (0 until cloudComments.length()).map { i ->
                         val c = cloudComments.getJSONObject(i)
-                        Comment(
+                        val parentId = c.optString("parent_id", "")
+                        parentId to Comment(
                             id = c.optString("comment_id", ""),
                             userId = c.optString("author_uid", ""),
                             userName = c.optString("author_name", ""),
@@ -90,6 +91,25 @@ class DetailViewModel(
                             isLiked = false,
                             isAuthor = c.optString("author_uid") == post.authorId,
                             replies = emptyList()
+                        )
+                    }
+                    val replies = raw.filter { it.first.isNotEmpty() }
+                    val comments = raw.filter { it.first.isEmpty() }.map { (_, comment) ->
+                        comment.copy(
+                            replies = replies.filter { it.first == comment.id }.map { (_, r) ->
+                                Reply(
+                                    id = r.id,
+                                    userId = r.userId,
+                                    userName = r.userName,
+                                    avatarRes = r.avatarRes,
+                                    content = r.content,
+                                    timestamp = r.timestamp,
+                                    ipLocation = r.ipLocation,
+                                    likeCount = r.likeCount,
+                                    isLiked = r.isLiked,
+                                    isAuthor = r.isAuthor
+                                )
+                            }
                         )
                     }
                     val isLiked = repository.hasLiked(userUid, post.postId)
@@ -238,6 +258,23 @@ class DetailViewModel(
                 }
             }
             _uiState.value = currentState.copy(comments = updatedComments)
+        }
+    }
+
+    fun deleteComment(commentId: String) {
+        val currentState = _uiState.value
+        if (currentState is DetailUiState.Success) {
+            val updatedComments = currentState.comments.mapNotNull { comment ->
+                if (comment.id == commentId) {
+                    null
+                } else {
+                    comment.copy(replies = comment.replies.filter { it.id != commentId })
+                }
+            }
+            _uiState.value = currentState.copy(comments = updatedComments)
+            viewModelScope.launch {
+                try { repository.deleteComment(commentId) } catch (_: Exception) { }
+            }
         }
     }
 

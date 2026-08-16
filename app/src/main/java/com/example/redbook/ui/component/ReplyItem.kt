@@ -1,7 +1,9 @@
 package com.example.redbook.ui.component
 
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -36,6 +38,7 @@ import androidx.compose.ui.platform.LocalLocale
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun ReplyItem(
     reply: Reply,
@@ -43,9 +46,14 @@ fun ReplyItem(
     onUserNameClick: () -> Unit,
     onReplyClick: () -> Unit,
     onLikeClick: () -> Unit,
+    onLongClick: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
-    Row(modifier = modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+    Row(modifier = modifier.fillMaxWidth().padding(vertical = 4.dp)
+        .combinedClickable(
+            onClick = {},
+            onLongClick = { onLongClick() }
+        )) {
         Image(
             painter = painterResource(id = reply.avatarRes),
             contentDescription = null,

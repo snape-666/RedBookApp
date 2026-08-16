@@ -10,5 +10,7 @@ data class UserComment(
     val parentUser: String,
     val parentContent: String,
     val likeCount: Int,
-    val timestamp: Long
+    val timestamp: Long,
+    val ipLocation: String = "未知",
+    val isLiked: Boolean = false
 )

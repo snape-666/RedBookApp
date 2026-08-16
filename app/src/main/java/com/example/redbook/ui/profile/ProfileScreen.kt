@@ -2,9 +2,11 @@ package com.example.redbook.ui.profile
 
 import android.media.MediaMetadataRetriever
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -13,9 +15,11 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -35,6 +39,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -50,6 +55,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
@@ -60,6 +66,7 @@ import com.example.redbook.ui.component.BottomBar
 import com.example.redbook.ui.component.PostCard
 import com.example.redbook.ui.theme.getOnSurfaceSecondary
 import com.example.redbook.ui.theme.getOnSurfaceTertiary
+import com.example.redbook.ui.theme.getOutline
 import java.text.SimpleDateFormat
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -88,6 +95,7 @@ fun ProfileScreen(
     val noRipple = remember { MutableInteractionSource() }
     var bottomIndex by remember { mutableIntStateOf(3) }
     var selectedTab by remember { mutableIntStateOf(0) }
+    var deletingComment by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(Unit) { viewModel.refresh() }
 
@@ -108,7 +116,8 @@ fun ProfileScreen(
             Surface(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .weight(1f),
+                    .weight(1f)
+                    .offset(y = (-8).dp),
                 shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp),
                 color = MaterialTheme.colorScheme.surface
             ) {
@@ -162,9 +171,23 @@ fun ProfileScreen(
                                             }
                                         }
                                     } else {
-                                        state.comments.forEach { comment ->
-                                            item(span = StaggeredGridItemSpan.FullLine) {
-                                                ProfileCommentItem(comment, onCommentClick)
+                                        item(span = StaggeredGridItemSpan.FullLine) {
+                                            Column {
+                                                state.comments.forEach { comment ->
+                                                    ProfileCommentItem(
+                                                        comment = comment,
+                                                        onCommentClick = onCommentClick,
+                                                        onLongClick = { deletingComment = it }
+                                                    )
+                                                }
+                                                Box(
+                                                    Modifier
+                                                        .fillMaxWidth()
+                                                        .padding(vertical = 10.dp),
+                                                    Alignment.Center
+                                                ) {
+                                                    Text("-到底了-", fontSize = 12.sp, color = getOnSurfaceSecondary())
+                                                }
                                             }
                                         }
                                     }
@@ -229,6 +252,50 @@ fun ProfileScreen(
                 .height(16.dp)
                 .background(MaterialTheme.colorScheme.onPrimary))
         }
+
+        deletingComment?.let { commentId ->
+            Dialog(onDismissRequest = { deletingComment = null }) {
+                Column(
+                    Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(MaterialTheme.colorScheme.surface)
+                ) {
+                    Column(
+                        Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 24.dp, vertical = 20.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Text("删除评论", fontWeight = FontWeight.Bold, fontSize = 18.sp, color = MaterialTheme.colorScheme.onSurface)
+                        Spacer(Modifier.height(8.dp))
+                        Text("确定删除该评论吗？", fontSize = 14.sp, color = getOnSurfaceSecondary())
+                    }
+                    Box(Modifier.fillMaxWidth().height(0.5.dp).background(getOutline()))
+                    Row(
+                        Modifier.fillMaxWidth().height(48.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Box(
+                            Modifier.weight(1f).fillMaxHeight().clickable { deletingComment = null },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text("取消", color = getOnSurfaceSecondary())
+                        }
+                        Box(Modifier.width(0.5.dp).fillMaxHeight().background(getOutline()))
+                        Box(
+                            Modifier.weight(1f).fillMaxHeight().clickable {
+                                viewModel.deleteComment(commentId)
+                                deletingComment = null
+                            },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text("确认", color = MaterialTheme.colorScheme.primary)
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -250,7 +317,8 @@ private fun ProfileHeader(
             painterResource(R.drawable.test2),
             null,
             Modifier.matchParentSize(),
-            contentScale = ContentScale.Crop)
+            contentScale = ContentScale.Crop,
+            alignment = Alignment.TopCenter)
         Box(Modifier.matchParentSize().background(onPri.copy(alpha = 0.22f)))
         Column(Modifier
             .fillMaxWidth()
@@ -335,7 +403,7 @@ private fun ProfileHeader(
                 }
             }
 
-            Spacer(Modifier.height(15.dp))
+            Spacer(Modifier.height(25.dp))
         }
     }
 }
@@ -438,15 +506,25 @@ private fun DraftBox(draftImage: String, draftCount: Int, onDraftClick: () -> Un
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun ProfileCommentItem(comment: UserComment, onCommentClick: (String, String) -> Unit) {
+private fun ProfileCommentItem(comment: UserComment, onCommentClick: (String, String) -> Unit, onLongClick: (String) -> Unit = {}) {
     val locale = LocalLocale.current.platformLocale
     val timeText = remember(comment.timestamp) {
-        SimpleDateFormat("yyyy-MM-dd HH:mm", locale).format(comment.timestamp)
+        SimpleDateFormat("yyyy-MM-dd", locale).format(comment.timestamp)
+    }
+    val displayContent = remember(comment.content, comment.isReply) {
+        if (comment.isReply) {
+            comment.content.replaceFirst(Regex("^回复\\s*\\S+\\s*[:：]\\s*"), "")
+        } else comment.content
     }
     Row(Modifier
         .fillMaxWidth()
         .background(MaterialTheme.colorScheme.surface)
+        .combinedClickable(
+            onClick = { onCommentClick(comment.postId, comment.commentId) },
+            onLongClick = { onLongClick(comment.commentId) }
+        )
         .padding(horizontal = 16.dp, vertical = 8.dp)) {
         Image(
             painter = painterResource(R.drawable.test),
@@ -460,18 +538,27 @@ private fun ProfileCommentItem(comment: UserComment, onCommentClick: (String, St
             .weight(1f)
             .padding(start = 8.dp)) {
             Text(comment.authorName, fontSize = 14.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
-            Text(comment.content, fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.padding(vertical = 2.dp))
+            Text(displayContent, fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.padding(vertical = 2.dp))
             if (comment.isReply && comment.parentUser.isNotBlank()) {
-                Text(
-                    text = "@${comment.parentUser}：${comment.parentContent}",
-                    fontSize = 12.sp,
-                    color = getOnSurfaceSecondary(),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier
+                Row(
+                    Modifier
                         .padding(top = 2.dp)
-                        .fillMaxWidth()
-                )
+                        .fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(Modifier
+                        .width(2.dp)
+                        .height(12.dp)
+                        .background(getOutline()))
+                    Spacer(Modifier.width(6.dp))
+                    Text(
+                        text = "@${comment.parentUser}：${comment.parentContent}",
+                        fontSize = 12.sp,
+                        color = getOnSurfaceSecondary(),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
             }
             Text(
                 text = "来自笔记·${comment.postTitle}",
@@ -479,6 +566,7 @@ private fun ProfileCommentItem(comment: UserComment, onCommentClick: (String, St
                 color = getOnSurfaceSecondary(),
                 modifier = Modifier
                     .padding(top = 4.dp)
+                    .clip(RoundedCornerShape(4.dp))
                     .clickable { onCommentClick(comment.postId, comment.commentId) }
             )
             Row(
@@ -488,7 +576,7 @@ private fun ProfileCommentItem(comment: UserComment, onCommentClick: (String, St
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text("$timeText · IP", fontSize = 12.sp, color = getOnSurfaceTertiary())
+                Text("$timeText · ${comment.ipLocation}", fontSize = 12.sp, color = getOnSurfaceTertiary())
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(
                         painter = painterResource(R.drawable.favorite_light),

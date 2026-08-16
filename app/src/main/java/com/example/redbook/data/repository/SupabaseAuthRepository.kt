@@ -642,6 +642,7 @@ class SupabaseAuthRepository(private val app: Application) {
             obj.put("created_at", c.optLong("created_at"))
             obj.put("like_count", c.optInt("like_count"))
             obj.put("post_title", c.optString("post_title", ""))
+            obj.put("ip_location", c.optString("ip_location", ""))
             val parentId = c.optString("parent_id")
             if (parentId.isNotEmpty()) {
                 val pr = queryRest("comments", "select=content,author_name&comment_id=eq.$parentId&limit=1")
@@ -709,6 +710,10 @@ class SupabaseAuthRepository(private val app: Application) {
             put("created_at", System.currentTimeMillis())
         }
         supabasePostBody("/rest/v1/comments", body)
+    }
+
+    suspend fun deleteComment(commentId: String) {
+        supabaseDelete("/rest/v1/comments?comment_id=eq.$commentId")
     }
 
     suspend fun updatePostLike(postId: String, delta: Int) {

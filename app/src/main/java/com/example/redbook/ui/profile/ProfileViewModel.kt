@@ -47,6 +47,14 @@ class ProfileViewModel(application: Application, private val userUid: String, pr
         }
     }
 
+    fun deleteComment(commentId: String) {
+        val current = _uiState.value
+        _uiState.value = current.copy(comments = current.comments.filter { it.commentId != commentId })
+        viewModelScope.launch {
+            try { repository.deleteComment(commentId) } catch (_: Exception) { }
+        }
+    }
+
     private suspend fun safe(block: suspend () -> org.json.JSONArray): org.json.JSONArray =
         try { block() } catch (e: Exception) { org.json.JSONArray() }
 
@@ -64,7 +72,8 @@ class ProfileViewModel(application: Application, private val userUid: String, pr
                 parentUser = c.optString("parent_user", ""),
                 parentContent = c.optString("parent_content", ""),
                 likeCount = c.optInt("like_count", 0),
-                timestamp = c.optLong("created_at", 0)
+                timestamp = c.optLong("created_at", 0),
+                ipLocation = c.optString("ip_location", "").ifBlank { "未知" }
             )
         }
     }
