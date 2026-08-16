@@ -45,9 +45,15 @@ import kotlinx.coroutines.launch
 @Composable
 fun DetailScreen(
     postId: String,
-    viewModel: DetailViewModel = viewModel(),
+    userUid: String = "",
+    userXhsId: String = "",
+    userName: String = "",
+    scrollToCommentId: String = "",
+    onCommentScrolled: () -> Unit = {},
     onBack: () -> Unit = {}
 ) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val viewModel: DetailViewModel = viewModel(factory = DetailViewModelFactory(context.applicationContext as android.app.Application, userUid, userXhsId, userName))
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val isKeyboardVisible by viewModel.isKeyboardVisible.collectAsState()
     val commentText by viewModel.commentText.collectAsState()
@@ -58,6 +64,16 @@ fun DetailScreen(
     val replyTarget by viewModel.replyTarget.collectAsState()
 
     LaunchedEffect(postId) { viewModel.loadPost(postId) }
+    LaunchedEffect(uiState, scrollToCommentId) {
+        if (scrollToCommentId.isNotBlank() && uiState is DetailUiState.Success) {
+            val comments = (uiState as DetailUiState.Success).comments
+            val idx = comments.indexOfFirst { it.id == scrollToCommentId }
+            if (idx >= 0) {
+                lazyListState.animateScrollToItem(2 + idx)
+            }
+            onCommentScrolled()
+        }
+    }
     // 图片选择器（多选）
     val imagePickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetMultipleContents()

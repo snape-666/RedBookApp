@@ -18,6 +18,11 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateMapOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -28,6 +33,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
+import coil.compose.AsyncImagePainter
 import coil.request.ImageRequest
 import com.example.redbook.data.model.PostDetail
 import java.text.SimpleDateFormat
@@ -44,13 +50,13 @@ fun PostContent(
         val urls = post.imageUrl.split(",").filter { it.isNotBlank() }
         if (urls.size > 1) {
             val pagerState = rememberPagerState(pageCount = { urls.size })
-            HorizontalPager(state = pagerState, modifier = Modifier.fillMaxWidth().aspectRatio(3f / 4f)) { index ->
-                AsyncImage(
-                    model = ImageRequest.Builder(LocalContext.current).data(urls[index]).crossfade(true).build(),
-                    contentDescription = null,
-                    modifier = Modifier.fillMaxSize(),
-                    contentScale = ContentScale.Crop
-                )
+            val ratios = remember { mutableStateMapOf<Int, Float>() }
+            val currentRatio = ratios[pagerState.currentPage] ?: (3f / 4f)
+            HorizontalPager(
+                state = pagerState,
+                modifier = Modifier.fillMaxWidth().aspectRatio(currentRatio)
+            ) { index ->
+                AdaptiveImage(urls[index], onRatioChanged = { ratios[index] = it })
             }
             Row(
                 modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
@@ -70,12 +76,7 @@ fun PostContent(
                 }
             }
         } else if (urls.size == 1) {
-            AsyncImage(
-                model = ImageRequest.Builder(LocalContext.current).data(urls[0]).crossfade(true).build(),
-                contentDescription = null,
-                modifier = Modifier.fillMaxWidth().aspectRatio(3f / 4f),
-                contentScale = ContentScale.Crop
-            )
+            AdaptiveImage(urls[0])
         } else {
             Image(
                 painter = painterResource(id = post.imageRes),
@@ -103,4 +104,28 @@ fun PostContent(
                 color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
+}
+
+@Composable
+private fun AdaptiveImage(
+    url: String,
+    defaultRatio: Float = 3f / 4f,
+    onRatioChanged: (Float) -> Unit = {}
+) {
+    var ratio by remember(url) { mutableStateOf(defaultRatio) }
+    AsyncImage(
+        model = ImageRequest.Builder(LocalContext.current).data(url).crossfade(true).build(),
+        contentDescription = null,
+        onState = { state ->
+            if (state is AsyncImagePainter.State.Success) {
+                val s = state.painter.intrinsicSize
+                if (s.width > 0f && s.height > 0f) {
+                    val r = s.width / s.height
+                    if (r > 0f) { ratio = r; onRatioChanged(r) }
+                }
+            }
+        },
+        contentScale = ContentScale.FillWidth,
+        modifier = Modifier.fillMaxWidth().aspectRatio(ratio)
+    )
 }

@@ -1,5 +1,6 @@
 package com.example.redbook.ui.profile
 
+import android.media.MediaMetadataRetriever
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -12,25 +13,26 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.staggeredgrid.LazyVerticalStaggeredGrid
+import androidx.compose.foundation.lazy.staggeredgrid.StaggeredGridCells
+import androidx.compose.foundation.lazy.staggeredgrid.StaggeredGridItemSpan
+import androidx.compose.foundation.lazy.staggeredgrid.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
@@ -39,10 +41,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLocale
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -50,13 +55,17 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import com.example.redbook.R
-import com.example.redbook.data.model.Note
+import com.example.redbook.data.model.UserComment
 import com.example.redbook.ui.component.BottomBar
 import com.example.redbook.ui.component.PostCard
+import com.example.redbook.ui.theme.getOnSurfaceSecondary
+import com.example.redbook.ui.theme.getOnSurfaceTertiary
+import java.text.SimpleDateFormat
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ProfileScreen(
+    userUid: String,
     userName: String,
     userXhsId: String,
     ipLocation: String,
@@ -67,41 +76,204 @@ fun ProfileScreen(
     onEditProfile: () -> Unit,
     onBottomTabClick: (Int) -> Unit,
     onPostClick: (String) -> Unit,
-    onPublish: () -> Unit = {}
+    onVideoClick: (String, String) -> Unit = { _, _ -> },
+    onCommentClick: (String, String) -> Unit = { _, _ -> },
+    onPublish: () -> Unit = {},
+    onDraftClick: () -> Unit = {}
 ) {
     val context = LocalContext.current
-    val viewModel: ProfileViewModel = viewModel(factory = ProfileViewModelFactory(context.applicationContext as android.app.Application, userXhsId))
+    val viewModel: ProfileViewModel = viewModel(factory = ProfileViewModelFactory(context.applicationContext as android.app.Application, userUid, userXhsId))
     val state by viewModel.uiState.collectAsStateWithLifecycle()
-    val onPri = Color.White
+    val refreshing by viewModel.refreshing.collectAsStateWithLifecycle()
     val noRipple = remember { MutableInteractionSource() }
     var bottomIndex by remember { mutableIntStateOf(3) }
+    var selectedTab by remember { mutableIntStateOf(0) }
+
+    LaunchedEffect(Unit) { viewModel.refresh() }
 
     Box(Modifier.fillMaxSize()) {
-        Image(painterResource(R.drawable.test2), null, Modifier
-            .fillMaxWidth()
-            .fillMaxHeight(0.45f), contentScale = ContentScale.Crop)
-        Box(Modifier
-            .fillMaxWidth()
-            .fillMaxHeight(0.45f)
-            .background(onPri.copy(alpha = 0.22f)))
+        Column(Modifier.fillMaxSize()) {
+            ProfileHeader(
+                userName = userName,
+                userXhsId = userXhsId,
+                ipLocation = ipLocation,
+                followCount = followCount,
+                fansCount = fansCount,
+                likeCount = likeCount,
+                onBack = onBack,
+                onEditProfile = onEditProfile,
+                noRipple = noRipple
+            )
+
+            Surface(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f),
+                shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp),
+                color = MaterialTheme.colorScheme.surface
+            ) {
+                Column(Modifier.fillMaxSize()) {
+                    TabRow(selectedTab, onTabSelected = { selectedTab = it })
+
+                    PullToRefreshBox(
+                        isRefreshing = refreshing,
+                        onRefresh = { viewModel.refresh() },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .weight(1f)
+                    ) {
+                        LazyVerticalStaggeredGrid(
+                            columns = StaggeredGridCells.Fixed(2),
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .background(MaterialTheme.colorScheme.background),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalItemSpacing = 8.dp,
+                            contentPadding = PaddingValues(start = 8.dp, end = 8.dp, bottom = 80.dp)
+                        ) {
+                            when (selectedTab) {
+                                0 -> {
+                                    if (state.draftCount > 0) {
+                                        item { DraftBox(state.latestDraftImage, state.draftCount, onDraftClick) }
+                                    }
+                                    items(state.posts, key = { it.id }) { note ->
+                                        PostCard(
+                                            imageRes = note.imageRes,
+                                            title = note.title,
+                                            avatarRes = note.avatarRes,
+                                            userName = note.userName,
+                                            isLiked = note.isLiked,
+                                            likeCount = note.likeCount.toString(),
+                                            onCardClick = {
+                                                if (note.imageUrl.startsWith("video:")) onVideoClick(note.id, note.imageUrl.removePrefix("video:"))
+                                                else onPostClick(note.id)
+                                            },
+                                            imageUrl = note.imageUrl)
+                                    }
+                                }
+                                1 -> {
+                                    if (state.comments.isEmpty()) {
+                                        item(span = StaggeredGridItemSpan.FullLine) {
+                                            Box(
+                                                Modifier
+                                                    .fillMaxWidth()
+                                                    .height(200.dp), Alignment.Center) {
+                                                Text("暂无评论", color = Color.Gray, fontSize = 14.sp)
+                                            }
+                                        }
+                                    } else {
+                                        state.comments.forEach { comment ->
+                                            item(span = StaggeredGridItemSpan.FullLine) {
+                                                ProfileCommentItem(comment, onCommentClick)
+                                            }
+                                        }
+                                    }
+                                }
+                                2 -> {
+                                    items(state.favoritedPosts, key = { it.id }) { note ->
+                                        PostCard(
+                                            imageRes = note.imageRes,
+                                            title = note.title,
+                                            avatarRes = note.avatarRes,
+                                            userName = note.userName,
+                                            isLiked = note.isLiked,
+                                            likeCount = note.likeCount.toString(),
+                                            onCardClick = {
+                                                if (note.imageUrl.startsWith("video:")) onVideoClick(note.id, note.imageUrl.removePrefix("video:"))
+                                                else onPostClick(note.id)
+                                            },
+                                            imageUrl = note.imageUrl)
+                                    }
+                                }
+                                3 -> {
+                                    items(state.likedPosts, key = { it.id }) { note ->
+                                        PostCard(
+                                            imageRes = note.imageRes,
+                                            title = note.title,
+                                            avatarRes = note.avatarRes,
+                                            userName = note.userName,
+                                            isLiked = note.isLiked,
+                                            likeCount = note.likeCount.toString(),
+                                            onCardClick = {
+                                                if (note.imageUrl.startsWith("video:")) onVideoClick(note.id, note.imageUrl.removePrefix("video:"))
+                                                else onPostClick(note.id)
+                                            },
+                                            imageUrl = note.imageUrl)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
 
         Column(Modifier
-            .fillMaxSize()
-            .padding(top = 36.dp)) {
+            .align(Alignment.BottomCenter)
+            .fillMaxWidth()) {
+            Box(Modifier
+                .fillMaxWidth()
+                .height(1.dp)
+                .background(Color.Gray.copy(alpha = 0.2f)))
+            BottomBar(
+                titles = listOf("首页", "阅读", "消息", "我的"),
+                selectedIndex = bottomIndex,
+                onTitleClick = { idx ->
+                    bottomIndex = idx
+                    if (idx == 0) onBottomTabClick(0)
+                },
+                fabIconRes = R.drawable.social_icons, onFabClick = onPublish
+            )
+            Spacer(Modifier
+                .fillMaxWidth()
+                .height(16.dp)
+                .background(MaterialTheme.colorScheme.onPrimary))
+        }
+    }
+}
+
+@Composable
+private fun ProfileHeader(
+    userName: String,
+    userXhsId: String,
+    ipLocation: String,
+    followCount: Int,
+    fansCount: Int,
+    likeCount: Int,
+    onBack: () -> Unit,
+    onEditProfile: () -> Unit,
+    noRipple: MutableInteractionSource
+) {
+    val onPri = Color.White
+    Box(Modifier.fillMaxWidth()) {
+        Image(
+            painterResource(R.drawable.test2),
+            null,
+            Modifier.matchParentSize(),
+            contentScale = ContentScale.Crop)
+        Box(Modifier.matchParentSize().background(onPri.copy(alpha = 0.22f)))
+        Column(Modifier
+            .fillMaxWidth()
+            .padding(top = 36.dp, start = 12.dp, end = 12.dp)) {
             Row(Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 12.dp, vertical = 8.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                .padding(vertical = 8.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically) {
                 Icon(painterResource(R.drawable.arrow_left), null, Modifier
                     .size(28.dp)
-                    .clickable(noRipple, null) { onBack() }, tint = onPri.copy(alpha = 0.8f))
+                    .clickable(noRipple, null) { onBack() },
+                    tint = onPri.copy(alpha = 0.8f))
                 Box(Modifier
                     .border(1.dp, onPri.copy(alpha = 0.22f), RoundedCornerShape(20.dp))
                     .background(onPri.copy(alpha = 0.3f), RoundedCornerShape(20.dp))
                     .clickable(noRipple, null) { onEditProfile() }
                     .padding(horizontal = 12.dp, vertical = 6.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(painterResource(R.drawable.edit_grey), null, Modifier.size(16.dp), tint = onPri)
-                        Spacer(Modifier.width(4.dp)); Text("编辑主页", fontSize = 13.sp, color = onPri)
+                        Icon(painterResource(R.drawable.edit_grey), null,
+                            Modifier.size(16.dp), tint = onPri)
+                        Spacer(Modifier.width(4.dp));
+                        Text("编辑主页", fontSize = 13.sp, color = onPri)
                     }
                 }
             }
@@ -109,9 +281,10 @@ fun ProfileScreen(
             Spacer(Modifier.height(16.dp))
 
             Row(Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-                Image(painterResource(R.drawable.test), null, Modifier
+                .fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically) {
+                Image(painterResource(R.drawable.test), null,
+                    Modifier
                     .size(84.dp)
                     .clip(CircleShape), contentScale = ContentScale.Crop)
                 Spacer(Modifier.width(16.dp))
@@ -125,8 +298,7 @@ fun ProfileScreen(
             Spacer(Modifier.height(16.dp))
 
             Row(Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 12.dp), Arrangement.spacedBy(12.dp)) {
+                .fillMaxWidth(), Arrangement.spacedBy(12.dp)) {
                 StatItem("$followCount", "关注", onPri)
                 StatItem("$fansCount", "粉丝", onPri)
                 StatItem("$likeCount", "获赞", onPri)
@@ -135,7 +307,6 @@ fun ProfileScreen(
             Spacer(Modifier.height(12.dp))
 
             Box(Modifier
-                .padding(horizontal = 12.dp)
                 .border(1.dp, onPri.copy(alpha = 0.15f), RoundedCornerShape(20.dp))
                 .background(onPri.copy(alpha = 0.3f), RoundedCornerShape(20.dp))
                 .padding(horizontal = 12.dp, vertical = 6.dp)) {
@@ -150,7 +321,6 @@ fun ProfileScreen(
             Box(
                 Modifier
                     .fillMaxWidth(0.4f)
-                    .padding(start = 12.dp)
                     .border(1.dp, onPri.copy(alpha = 0.15f), RoundedCornerShape(10.dp))
                     .background(onPri.copy(alpha = 0.3f), RoundedCornerShape(10.dp))
                     .padding(horizontal = 12.dp, vertical = 8.dp)) {
@@ -159,36 +329,13 @@ fun ProfileScreen(
                         Icon(painterResource(R.drawable.clock_white), null, Modifier.size(18.dp), tint = onPri)
                         Spacer(Modifier.width(6.dp)); Text("浏览记录", fontSize = 14.sp, color = onPri)
                     }
-                    Text("看过的笔记", fontSize = 12.sp, color = onPri.copy(alpha = 0.7f), modifier = Modifier.padding(start = 24.dp, top = 2.dp))
+                    Row {
+                        Text("看过的笔记", fontSize = 13.sp, color = onPri.copy(alpha = 0.7f))
+                    }
                 }
             }
 
-            Spacer(Modifier.height(10.dp))
-
-            Box(Modifier
-                .fillMaxWidth()
-                .weight(1f)
-                .offset(y = 10.dp)
-                .clip(RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp))
-                .background(MaterialTheme.colorScheme.surface)) {
-                ProfileTabs(
-                    state = state,
-                    onRefresh = { viewModel.load() },
-                    onPostClick = onPostClick,
-                    isRefreshing = false
-                )
-            }
-
-            Box(Modifier
-                .fillMaxWidth()
-                .height(1.dp)
-                .background(Color.Gray.copy(alpha = 0.2f)))
-            BottomBar(
-                titles = listOf("首页", "阅读", "消息", "我的"),
-                selectedIndex = 3, onTitleClick = onBottomTabClick,
-                fabIconRes = R.drawable.social_icons, onFabClick = onPublish
-            )
-            Spacer(Modifier.height(16.dp))
+            Spacer(Modifier.height(15.dp))
         }
     }
 }
@@ -202,112 +349,161 @@ private fun StatItem(num: String, label: String, color: Color) {
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun ProfileTabs(
-    state: ProfileViewModel.ProfileUiState,
-    onRefresh: () -> Unit,
-    onPostClick: (String) -> Unit,
-    isRefreshing: Boolean
-) {
-    var selected by remember { mutableIntStateOf(0) }
+private fun TabRow(selected: Int, onTabSelected: (Int) -> Unit) {
     val tabs = listOf("笔记", "评论", "收藏", "赞过")
-
-    Column(Modifier.fillMaxSize()) {
-        Row(Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 12.dp, vertical = 8.dp), Arrangement.spacedBy(15.dp)) {
-            tabs.forEachIndexed { idx, name ->
-                val isSel = selected == idx
-                Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.clickable { selected = idx }) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        if (idx != 0) {
-                            Icon(painterResource(R.drawable.lock_black), null, Modifier.size(12.dp), tint = Color.Gray)
-                            Spacer(Modifier.width(3.dp))
-                        }
-                        Text(name, fontSize = 15.sp, color = if (isSel) MaterialTheme.colorScheme.onSurface else Color.Gray)
+    Row(Modifier
+        .fillMaxWidth()
+        .background(MaterialTheme.colorScheme.surface)
+        .padding(start = 12.dp, end = 12.dp, top = 5.dp, bottom = 8.dp), Arrangement.spacedBy(15.dp)) {
+        tabs.forEachIndexed { idx, name ->
+            val isSel = selected == idx
+            Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.clickable { onTabSelected(idx) }) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (idx != 0) {
+                        Icon(painterResource(R.drawable.lock_black), null, Modifier.size(12.dp), tint = Color.Gray)
+                        Spacer(Modifier.width(3.dp))
                     }
-                    Spacer(Modifier.height(4.dp))
-                    Box(Modifier
-                        .width(30.dp)
-                        .height(2.dp)
-                        .background(if (isSel) MaterialTheme.colorScheme.primary else Color.Transparent))
+                    Text(name, fontSize = 15.sp, color = if (isSel) MaterialTheme.colorScheme.onSurface else Color.Gray)
                 }
-            }
-        }
-
-        PullToRefreshBox(isRefreshing = isRefreshing, onRefresh = onRefresh, modifier = Modifier.fillMaxSize()) {
-            when (selected) {
-                0 -> NotesGrid(state.posts, state.draftCount, state.latestPostImage, onPostClick)
-                1 -> CommentsTab(state.commentCount)
-                2 -> NotesGrid(state.favoritedPosts, 0, "", onPostClick)
-                3 -> NotesGrid(state.likedPosts, 0, "", onPostClick)
+                Spacer(Modifier.height(4.dp))
+                Box(Modifier
+                    .width(30.dp)
+                    .height(2.dp)
+                    .background(if (isSel) MaterialTheme.colorScheme.primary else Color.Transparent))
             }
         }
     }
 }
 
 @Composable
-private fun NotesGrid(posts: List<Note>, draftCount: Int, draftImage: String, onPostClick: (String) -> Unit) {
-    LazyVerticalGrid(
-        columns = GridCells.Fixed(2),
-        modifier = Modifier
-            .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background),
-        contentPadding = PaddingValues(8.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        item {
+private fun DraftBox(draftImage: String, draftCount: Int, onDraftClick: () -> Unit = {}) {
+    val firstUrl = draftImage.split(",").firstOrNull { it.isNotBlank() } ?: ""
+    val isVideo = firstUrl.startsWith("video:")
+
+    Box(Modifier
+        .fillMaxWidth()
+        .aspectRatio(2f)
+        .clip(RoundedCornerShape(10.dp))
+        .background(Color(0xFFF0F0F0))
+        .clickable { onDraftClick() }) {
+        when {
+            isVideo -> {
+                val videoPath = firstUrl.removePrefix("video:")
+                val thumb = remember(videoPath) {
+                    val retriever = MediaMetadataRetriever()
+                    try {
+                        retriever.setDataSource(videoPath)
+                        retriever.frameAtTime
+                    } catch (e: Exception) {
+                        null
+                    } finally {
+                        try { retriever.release() } catch (e: Exception) { }
+                    }
+                }
+                if (thumb != null) {
+                    Image(bitmap = thumb.asImageBitmap(), contentDescription = null,
+                        modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+                }
+            }
+            firstUrl.isNotBlank() -> {
+                AsyncImage(
+                    model = ImageRequest
+                        .Builder(LocalContext.current)
+                        .data(firstUrl).crossfade(true).build(),
+                    contentDescription = null,
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Crop)
+            }
+        }
+        if (firstUrl.isNotBlank()) {
             Box(Modifier
-                .fillMaxWidth()
-                .aspectRatio(2f)
-                .clip(RoundedCornerShape(10.dp))) {
-                    if (draftImage.isNotBlank()) {
-                        AsyncImage(
-                            model = ImageRequest
-                                .Builder(LocalContext.current)
-                                .data(draftImage).crossfade(true).build(),
-                            contentDescription = null,
-                            modifier = Modifier.fillMaxSize(),
-                            contentScale = ContentScale.Crop)
-                    } else {
-                        Box(Modifier
-                            .fillMaxSize()
-                            .background(Color(0xFFF0F0F0)))
-                    }
-                    Box(Modifier
-                        .fillMaxWidth()
-                        .height(36.dp)
-                        .align(Alignment.TopStart)
-                        .background(
-                            Color.Black.copy(alpha = 0.5f),
-                            RoundedCornerShape(topStart = 10.dp, topEnd = 10.dp)
-                        ),
-                        contentAlignment = Alignment.CenterStart) {
-                        Row(
-                            Modifier
-                                .padding(horizontal=8.dp),
-                            verticalAlignment = Alignment.CenterVertically) {
-                            Icon(
-                                painterResource(R.drawable.inbox), null,
-                                Modifier.size(16.dp), tint = Color.Unspecified)
-                            Spacer(Modifier.width(4.dp));
-                            Text("草稿箱·$draftCount", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface)
-                        }
-                    }
-                }
-            }
-        items(posts, key = { it.id }) { note ->
-            PostCard(imageRes = note.imageRes, title = note.title, avatarRes = note.avatarRes,
-                userName = note.userName, isLiked = note.isLiked, likeCount = note.likeCount.toString(),
-                onCardClick = { onPostClick(note.id) }, imageUrl = note.imageUrl)
+                .fillMaxSize()
+                .background(Color.White.copy(alpha = 0.12f)))
         }
+        Row(
+            Modifier
+                .align(Alignment.TopStart)
+                .padding(8.dp)
+                .clip(RoundedCornerShape(12.dp))
+                .background(Color.White.copy(alpha = 0.3f))
+                .padding(horizontal = 10.dp, vertical = 6.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(painterResource(R.drawable.inbox), null, Modifier.size(16.dp), tint = Color.Unspecified)
+                Spacer(Modifier.width(4.dp))
+                Text("草稿箱·$draftCount", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface)
+            }
+        }
+
     }
 }
 
 @Composable
-private fun CommentsTab(commentCount: Int) {
-    Box(Modifier.fillMaxSize(), Alignment.Center) {
-        Text(if (commentCount > 0) "$commentCount 条评论" else "暂无评论", color = Color.Gray, fontSize = 14.sp)
+private fun ProfileCommentItem(comment: UserComment, onCommentClick: (String, String) -> Unit) {
+    val locale = LocalLocale.current.platformLocale
+    val timeText = remember(comment.timestamp) {
+        SimpleDateFormat("yyyy-MM-dd HH:mm", locale).format(comment.timestamp)
+    }
+    Row(Modifier
+        .fillMaxWidth()
+        .background(MaterialTheme.colorScheme.surface)
+        .padding(horizontal = 16.dp, vertical = 8.dp)) {
+        Image(
+            painter = painterResource(R.drawable.test),
+            contentDescription = null,
+            modifier = Modifier
+                .size(32.dp)
+                .clip(CircleShape),
+            contentScale = ContentScale.Crop
+        )
+        Column(Modifier
+            .weight(1f)
+            .padding(start = 8.dp)) {
+            Text(comment.authorName, fontSize = 14.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
+            Text(comment.content, fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.padding(vertical = 2.dp))
+            if (comment.isReply && comment.parentUser.isNotBlank()) {
+                Text(
+                    text = "@${comment.parentUser}：${comment.parentContent}",
+                    fontSize = 12.sp,
+                    color = getOnSurfaceSecondary(),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier
+                        .padding(top = 2.dp)
+                        .fillMaxWidth()
+                )
+            }
+            Text(
+                text = "来自笔记·${comment.postTitle}",
+                fontSize = 12.sp,
+                color = getOnSurfaceSecondary(),
+                modifier = Modifier
+                    .padding(top = 4.dp)
+                    .clickable { onCommentClick(comment.postId, comment.commentId) }
+            )
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(top = 4.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("$timeText · IP", fontSize = 12.sp, color = getOnSurfaceTertiary())
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        painter = painterResource(R.drawable.favorite_light),
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp),
+                        tint = getOnSurfaceSecondary()
+                    )
+                    Text(
+                        text = if (comment.likeCount > 0) comment.likeCount.toString() else "",
+                        fontSize = 12.sp,
+                        color = getOnSurfaceTertiary(),
+                        modifier = Modifier.padding(start = 2.dp)
+                    )
+                }
+            }
+        }
     }
 }

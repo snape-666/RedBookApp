@@ -1,0 +1,21 @@
+-- 点赞表
+CREATE TABLE IF NOT EXISTS likes (
+  id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  like_id TEXT UNIQUE NOT NULL,
+  user_xhs_id TEXT NOT NULL,
+  post_id TEXT NOT NULL,
+  created_at BIGINT NOT NULL
+);
+ALTER TABLE likes DISABLE ROW LEVEL SECURITY;
+GRANT ALL ON likes TO anon, authenticated;
+
+-- 收藏表
+CREATE TABLE IF NOT EXISTS favorites (
+  id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  fav_id TEXT UNIQUE NOT NULL,
+  user_xhs_id TEXT NOT NULL,
+  post_id TEXT NOT NULL,
+  created_at BIGINT NOT NULL
+);
+ALTER TABLE favorites DISABLE ROW LEVEL SECURITY;
+GRANT ALL ON favorites TO anon, authenticated;

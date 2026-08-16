@@ -10,7 +10,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
-class HomeViewModel(application: Application) : AndroidViewModel(application) {
+class HomeViewModel(application: Application, private val userUid: String = "") : AndroidViewModel(application) {
 
     private val repository = HomeRepository(SupabaseAuthRepository(application))
 
@@ -23,7 +23,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             _uiState.value = HomeUiState.Loading
             try {
-                val notes = repository.getNotes()
+                val notes = repository.getNotes(userUid)
                 _uiState.value = HomeUiState.Success(notes)
             } catch (e: Exception) {
                 _uiState.value = HomeUiState.Error(e.message ?: "加载失败")

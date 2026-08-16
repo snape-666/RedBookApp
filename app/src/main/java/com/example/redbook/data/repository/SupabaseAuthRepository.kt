@@ -1,6 +1,7 @@
 package com.example.redbook.data.repository
 
 import android.app.Application
+import com.android.volley.DefaultRetryPolicy
 import com.android.volley.Request.Method.*
 import com.android.volley.VolleyError
 import com.android.volley.toolbox.JsonObjectRequest
@@ -359,17 +360,21 @@ class SupabaseAuthRepository(private val app: Application) {
             try {
                 val cr = app.contentResolver
                 val mime = cr.getType(uri) ?: "image/jpeg"
-                val inputStream = cr.openInputStream(uri) ?: return@withContext null
+                val inputStream = cr.openInputStream(uri)
+                if (inputStream == null) {
+                    android.util.Log.e("RedBook", "uploadImage open failed: $uri")
+                    return@withContext null
+                }
                 val bytes = inputStream.readBytes()
                 inputStream.close()
                 val isVideo = mime.contains("video")
                 val ext = when { isVideo -> "mp4"; mime.contains("png") -> "png"; mime.contains("webp") -> "webp"; else -> "jpg" }
                 val prefix = if (isVideo) "video:" else ""
-                val fileName = "img_${System.currentTimeMillis()}.$ext"
+                val fileName = "img_${System.nanoTime()}.$ext"
                 uploadToStorage("post-images", fileName, bytes, mime)
                 "$prefix${SupabaseConfig.url}/storage/v1/object/public/post-images/$fileName"
             } catch (e: Exception) { 
-                e.printStackTrace()
+                android.util.Log.e("RedBook", "uploadImage error: ${e.message}")
                 null 
             }
         }
@@ -389,6 +394,7 @@ class SupabaseAuthRepository(private val app: Application) {
                     "Authorization" to "Bearer ${SupabaseConfig.anonKey}"
                 )
             }
+            request.retryPolicy = DefaultRetryPolicy(60000, 2, 1f)
             requestQueue.add(request)
         }
     }
@@ -409,7 +415,7 @@ class SupabaseAuthRepository(private val app: Application) {
     }
 
     suspend fun saveDraft(draftId: String, title: String, content: String,
-                          authorUid: String, authorXhsId: String, authorName: String) {
+                          authorUid: String, authorXhsId: String, authorName: String, imageUrl: String = "") {
         val body = JSONObject().apply {
             put("draft_id", draftId)
             put("title", title)
@@ -417,6 +423,7 @@ class SupabaseAuthRepository(private val app: Application) {
             put("author_uid", authorUid)
             put("author_xhs_id", authorXhsId)
             put("author_name", authorName)
+            put("image_url", imageUrl)
             put("created_at", System.currentTimeMillis())
             put("updated_at", System.currentTimeMillis())
         }
@@ -431,6 +438,33 @@ class SupabaseAuthRepository(private val app: Application) {
     suspend fun deleteDraft(draftId: String) {
         val body = JSONObject().apply { put("draft_id", draftId) }
         supabaseDelete("/rest/v1/drafts?draft_id=eq.$draftId")
+    }
+
+    suspend fun updateDraft(draftId: String, title: String, content: String, imageUrl: String) {
+        val body = JSONObject().apply {
+            put("title", title)
+            put("content", content)
+            put("image_url", imageUrl)
+            put("updated_at", System.currentTimeMillis())
+        }
+        patchDraftRow(draftId, body)
+    }
+
+    private suspend fun patchDraftRow(draftId: String, body: JSONObject) {
+        val bodyStr = body.toString()
+        suspendCancellableCoroutine<String> { cont ->
+            val request = object : StringRequest(PATCH, "${SupabaseConfig.url}/rest/v1/drafts?draft_id=eq.$draftId",
+                { cont.resume(it) },
+                { error -> cont.resumeWithException(Exception(extractVolleyError(error))) }
+            ) {
+                override fun getBody() = bodyStr.toByteArray()
+                override fun getBodyContentType() = "application/json"
+                override fun getHeaders() = mapOf(
+                    "apikey" to SupabaseConfig.anonKey, "Prefer" to "return=minimal"
+                )
+            }
+            requestQueue.add(request)
+        }
     }
 
     private suspend fun supabaseDelete(path: String) {
@@ -490,68 +524,112 @@ class SupabaseAuthRepository(private val app: Application) {
         val arr = resp.optJSONArray("users") ?: resp.optJSONArray("posts") ?: return null
         return if (arr.length() > 0) arr.getJSONObject(0) else null
     }
-    // 记录点赞/取消点赞（按小红书id绑定）
-    suspend fun recordLike(userXhsId: String, postId: String, liked: Boolean) {
+    // 记录点赞/取消点赞（按uid绑定）
+    suspend fun recordLike(userUid: String, postId: String, liked: Boolean) {
         if (liked) {
             val body = JSONObject().apply {
-                put("like_id", "l_${userXhsId}_$postId")
-                put("user_xhs_id", userXhsId)
+                put("like_id", "l_${userUid}_$postId")
+                put("user_uid", userUid)
                 put("post_id", postId)
                 put("created_at", System.currentTimeMillis())
             }
             supabasePostBody("/rest/v1/likes", body)
         } else {
-            supabaseDelete("/rest/v1/likes?user_xhs_id=eq.$userXhsId&post_id=eq.$postId")
+            supabaseDelete("/rest/v1/likes?user_uid=eq.$userUid&post_id=eq.$postId")
         }
     }
 
     // 记录收藏/取消收藏
-    suspend fun recordFavorite(userXhsId: String, postId: String, favorited: Boolean) {
+    suspend fun recordFavorite(userUid: String, postId: String, favorited: Boolean) {
         if (favorited) {
             val body = JSONObject().apply {
-                put("fav_id", "f_${userXhsId}_$postId")
-                put("user_xhs_id", userXhsId)
+                put("fav_id", "f_${userUid}_$postId")
+                put("user_uid", userUid)
                 put("post_id", postId)
                 put("created_at", System.currentTimeMillis())
             }
             supabasePostBody("/rest/v1/favorites", body)
         } else {
-            supabaseDelete("/rest/v1/favorites?user_xhs_id=eq.$userXhsId&post_id=eq.$postId")
+            supabaseDelete("/rest/v1/favorites?user_uid=eq.$userUid&post_id=eq.$postId")
         }
     }
 
-    // 用户发布的帖子
-    suspend fun getUserPosts(userXhsId: String): JSONArray {
-        val resp = queryRest("posts", "select=*&author_xhs_id=eq.$userXhsId&order=created_at.desc")
-        return resp.optJSONArray("users") ?: resp.optJSONArray("posts") ?: JSONArray()
+    // 是否已点赞
+    suspend fun hasLiked(userUid: String, postId: String): Boolean {
+        return try {
+            val resp = queryRest("likes", "select=like_id&user_uid=eq.$userUid&post_id=eq.$postId&limit=1")
+            (resp.optJSONArray("users")?.length() ?: 0) > 0
+        } catch (e: Exception) { false }
+    }
+
+    // 是否已收藏
+    suspend fun hasFavorited(userUid: String, postId: String): Boolean {
+        return try {
+            val resp = queryRest("favorites", "select=fav_id&user_uid=eq.$userUid&post_id=eq.$postId&limit=1")
+            (resp.optJSONArray("users")?.length() ?: 0) > 0
+        } catch (e: Exception) { false }
+    }
+
+    // 用户发布的帖子（按小红书id或uid兜底）
+    suspend fun getUserPosts(userUid: String, userXhsId: String): JSONArray {
+        android.util.Log.d("RedBook", "getUserPosts uid=$userUid xhs=$userXhsId")
+        if (userXhsId.isNotBlank()) {
+            val resp = queryRest("posts", "select=*&author_xhs_id=eq.$userXhsId&order=created_at.desc")
+            val arr = resp.optJSONArray("users") ?: resp.optJSONArray("posts") ?: JSONArray()
+            android.util.Log.d("RedBook", "getUserPosts by xhs_id count=${arr.length()}")
+            if (arr.length() > 0) return arr
+        }
+        if (userUid.isNotBlank()) {
+            val resp = queryRest("posts", "select=*&author_uid=eq.$userUid&order=created_at.desc")
+            val arr = resp.optJSONArray("users") ?: resp.optJSONArray("posts") ?: JSONArray()
+            android.util.Log.d("RedBook", "getUserPosts by uid count=${arr.length()}")
+            return arr
+        }
+        return JSONArray()
+    }
+
+    // 用户点赞的帖子 id 集合
+    suspend fun getLikedPostIds(userUid: String): Set<String> {
+        return try {
+            val resp = queryRest("likes", "select=post_id&user_uid=eq.$userUid")
+            val arr = resp.optJSONArray("users") ?: resp.optJSONArray("likes") ?: JSONArray()
+            (0 until arr.length()).map { arr.getJSONObject(it).getString("post_id") }.toSet()
+        } catch (e: Exception) { emptySet() }
     }
 
     // 用户点赞的帖子
-    suspend fun getUserLikedPosts(userXhsId: String): JSONArray {
-        val resp = queryRest("likes", "select=post_id&user_xhs_id=eq.$userXhsId")
+    suspend fun getUserLikedPosts(userUid: String): JSONArray {
+        val resp = queryRest("likes", "select=post_id&user_uid=eq.$userUid")
         val arr = resp.optJSONArray("users") ?: resp.optJSONArray("likes") ?: JSONArray()
         val postIds = (0 until arr.length()).map { arr.getJSONObject(it).getString("post_id") }
         if (postIds.isEmpty()) return JSONArray()
-        val filters = postIds.joinToString(",") { "post_id=eq.$it" }
+        val filters = postIds.joinToString(",") { "post_id.eq.$it" }
         val postsResp = queryRest("posts", "select=*&or=($filters)")
         return postsResp.optJSONArray("users") ?: postsResp.optJSONArray("posts") ?: JSONArray()
     }
 
     // 用户收藏的帖子
-    suspend fun getUserFavoritedPosts(userXhsId: String): JSONArray {
-        val resp = queryRest("favorites", "select=post_id&user_xhs_id=eq.$userXhsId")
+    suspend fun getUserFavoritedPosts(userUid: String): JSONArray {
+        val resp = queryRest("favorites", "select=post_id&user_uid=eq.$userUid")
         val arr = resp.optJSONArray("users") ?: resp.optJSONArray("favorites") ?: JSONArray()
         val postIds = (0 until arr.length()).map { arr.getJSONObject(it).getString("post_id") }
         if (postIds.isEmpty()) return JSONArray()
-        val filters = postIds.joinToString(",") { "post_id=eq.$it" }
+        val filters = postIds.joinToString(",") { "post_id.eq.$it" }
         val postsResp = queryRest("posts", "select=*&or=($filters)")
         return postsResp.optJSONArray("users") ?: postsResp.optJSONArray("posts") ?: JSONArray()
     }
 
     // 用户的评论和回复
-    suspend fun getUserComments(userXhsId: String): JSONArray {
-        val resp = queryRest("comments", "select=*&author_xhs_id=eq.$userXhsId&order=created_at.desc")
-        val arr = resp.optJSONArray("users") ?: resp.optJSONArray("comments") ?: JSONArray()
+    suspend fun getUserComments(userUid: String, userXhsId: String): JSONArray {
+        var arr = JSONArray()
+        if (userXhsId.isNotBlank()) {
+            val resp = queryRest("comments", "select=*&author_xhs_id=eq.$userXhsId&order=created_at.desc")
+            arr = resp.optJSONArray("users") ?: resp.optJSONArray("comments") ?: JSONArray()
+        }
+        if (arr.length() == 0 && userUid.isNotBlank()) {
+            val resp = queryRest("comments", "select=*&author_uid=eq.$userUid&order=created_at.desc")
+            arr = resp.optJSONArray("users") ?: resp.optJSONArray("comments") ?: JSONArray()
+        }
         val result = JSONArray()
         for (i in 0 until arr.length()) {
             val c = arr.getJSONObject(i)
@@ -563,6 +641,7 @@ class SupabaseAuthRepository(private val app: Application) {
             obj.put("author_name", c.optString("author_name"))
             obj.put("created_at", c.optLong("created_at"))
             obj.put("like_count", c.optInt("like_count"))
+            obj.put("post_title", c.optString("post_title", ""))
             val parentId = c.optString("parent_id")
             if (parentId.isNotEmpty()) {
                 val pr = queryRest("comments", "select=content,author_name&comment_id=eq.$parentId&limit=1")
@@ -579,9 +658,18 @@ class SupabaseAuthRepository(private val app: Application) {
     }
 
     // 用户的草稿
-    suspend fun getUserDrafts(userXhsId: String): JSONArray {
-        val resp = queryRest("drafts", "select=*&author_xhs_id=eq.$userXhsId&order=updated_at.desc")
-        return resp.optJSONArray("users") ?: resp.optJSONArray("drafts") ?: JSONArray()
+    suspend fun getUserDrafts(userUid: String, userXhsId: String): JSONArray {
+        var arr = JSONArray()
+        if (userXhsId.isNotBlank()) {
+            val resp = queryRest("drafts", "select=*&author_xhs_id=eq.$userXhsId&order=updated_at.desc")
+            arr = resp.optJSONArray("users") ?: resp.optJSONArray("drafts") ?: JSONArray()
+        }
+        if (arr.length() == 0 && userUid.isNotBlank()) {
+            val resp = queryRest("drafts", "select=*&author_uid=eq.$userUid&order=updated_at.desc")
+            arr = resp.optJSONArray("users") ?: resp.optJSONArray("drafts") ?: JSONArray()
+        }
+        android.util.Log.d("RedBook", "getUserDrafts uid=$userUid xhs=$userXhsId count=${arr.length()}")
+        return arr
     }
 
     suspend fun getComments(postId: String): JSONArray {
@@ -590,7 +678,8 @@ class SupabaseAuthRepository(private val app: Application) {
     }
 
     suspend fun insertComment(commentId: String, postId: String, content: String,
-                              authorUid: String, authorName: String, authorAvatar: String) {
+                              authorUid: String, authorName: String, authorAvatar: String,
+                              authorXhsId: String, postTitle: String) {
         val body = JSONObject().apply {
             put("comment_id", commentId)
             put("post_id", postId)
@@ -598,13 +687,15 @@ class SupabaseAuthRepository(private val app: Application) {
             put("author_uid", authorUid)
             put("author_name", authorName)
             put("author_avatar", authorAvatar)
+            put("author_xhs_id", authorXhsId)
+            put("post_title", postTitle)
             put("created_at", System.currentTimeMillis())
         }
         supabasePostBody("/rest/v1/comments", body)
     }
 
     suspend fun insertReply(replyId: String, postId: String, parentId: String, content: String,
-                            authorUid: String, authorName: String, authorAvatar: String) {
+                            authorUid: String, authorName: String, authorAvatar: String, authorXhsId: String, postTitle: String) {
         val body = JSONObject().apply {
             put("comment_id", replyId)
             put("post_id", postId)
@@ -613,6 +704,8 @@ class SupabaseAuthRepository(private val app: Application) {
             put("author_uid", authorUid)
             put("author_name", authorName)
             put("author_avatar", authorAvatar)
+            put("author_xhs_id", authorXhsId)
+            put("post_title", postTitle)
             put("created_at", System.currentTimeMillis())
         }
         supabasePostBody("/rest/v1/comments", body)

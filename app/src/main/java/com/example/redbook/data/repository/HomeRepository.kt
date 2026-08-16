@@ -6,31 +6,33 @@ import org.json.JSONArray
 
 class HomeRepository(private val supabase: SupabaseAuthRepository) {
 
-    suspend fun getNotes(): List<Note> {
+    suspend fun getNotes(userUid: String = ""): List<Note> {
         return try {
             val posts = supabase.getPosts()
+            val likedIds = try { supabase.getLikedPostIds(userUid) } catch (e: Exception) { emptySet() }
             if (posts.length() == 0) {
                 seedMockPosts()
-                return try { parsePosts(supabase.getPosts()) } catch (e: Exception) { mockNotes() }
+                return try { parsePosts(supabase.getPosts(), likedIds) } catch (e: Exception) { mockNotes() }
             }
-            parsePosts(posts)
+            parsePosts(posts, likedIds)
         } catch (e: Exception) {
             mockNotes()
         }
     }
 
-    private fun parsePosts(posts: JSONArray): List<Note> {
+    private fun parsePosts(posts: JSONArray, likedIds: Set<String> = emptySet()): List<Note> {
         return (0 until posts.length()).map { i ->
             val p = posts.getJSONObject(i)
+            val postId = p.optString("post_id", "")
                     Note(
-                        id = p.optString("post_id", ""),
+                        id = postId,
                         title = p.optString("title", ""),
                         imageRes = R.drawable.test,
                         imageUrl = p.optString("image_url", ""),
                 avatarRes = R.drawable.test,
                 userName = p.optString("author_name", ""),
                 likeCount = p.optInt("like_count", 0),
-                isLiked = false
+                isLiked = likedIds.contains(postId)
             )
         }
     }

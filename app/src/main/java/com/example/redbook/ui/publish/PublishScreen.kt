@@ -1,6 +1,9 @@
 package com.example.redbook.ui.publish
 
 
+import android.media.MediaMetadataRetriever
+import android.net.Uri
+import android.widget.VideoView
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -10,6 +13,7 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -35,10 +39,12 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
@@ -52,12 +58,13 @@ fun PublishScreen(
     authorUid: String,
     authorXhsId: String,
     authorName: String,
+    editDraft: com.example.redbook.data.model.Draft? = null,
     onBack: () -> Unit,
     onPublished: () -> Unit
 ) {
     val context = LocalContext.current
-    val viewModel = remember(authorUid, authorXhsId, authorName) {
-        PublishViewModelBuilder.build(context.applicationContext as android.app.Application, authorUid, authorXhsId, authorName)
+    val viewModel = remember(authorUid, authorXhsId, authorName, editDraft?.draftId) {
+        PublishViewModelBuilder.build(context.applicationContext as android.app.Application, authorUid, authorXhsId, authorName, editDraft)
     }
     val state by viewModel.uiState.collectAsStateWithLifecycle()
 
@@ -92,10 +99,7 @@ fun PublishScreen(
             modifier = Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = 16.dp)
         ) {
             if (viewModel.isVideoMode && state.images.isNotEmpty()) {
-                Box(modifier = Modifier.fillMaxWidth().height(300.dp).background(Color.Black.copy(alpha = 0.8f), RoundedCornerShape(10.dp)),
-                    contentAlignment = Alignment.Center) {
-                    Text("🎬 视频已选择", color = Color.White, fontSize = 16.sp)
-                }
+                VideoPreview(state.images.first())
                 Spacer(Modifier.height(16.dp))
             } else {
             // 图片区
@@ -198,6 +202,56 @@ fun PublishScreen(
 
 object PublishViewModelBuilder {
     fun build(
-        app: android.app.Application, uid: String, xhsId: String, name: String
-    ): PublishViewModel = PublishViewModel(app, uid, xhsId, name)
+        app: android.app.Application, uid: String, xhsId: String, name: String,
+        editDraft: com.example.redbook.data.model.Draft? = null
+    ): PublishViewModel = PublishViewModel(app, uid, xhsId, name, editDraft)
+}
+
+@Composable
+private fun VideoPreview(uri: Uri) {
+    val context = LocalContext.current
+    val (vw, vh) = remember(uri) {
+        val retriever = MediaMetadataRetriever()
+        try {
+            retriever.setDataSource(context, uri)
+            val w = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toIntOrNull() ?: 0
+            val h = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)?.toIntOrNull() ?: 0
+            w to h
+        } catch (e: Exception) {
+            0 to 0
+        } finally {
+            try { retriever.release() } catch (_: Exception) { }
+        }
+    }
+    val ratio = if (vw > 0 && vh > 0) vw.toFloat() / vh else 16f / 9f
+
+    BoxWithConstraints(Modifier.fillMaxWidth()) {
+        val maxW = constraints.maxWidth.toFloat()
+        val maxH = maxW * 4f / 3f
+        val naturalH = maxW / ratio
+        val displayH = naturalH.coerceAtMost(maxH)
+        val displayW = displayH * ratio
+        val density = LocalDensity.current
+        Box(
+            Modifier
+                .align(Alignment.Center)
+                .size(with(density) { displayW.toDp() }, with(density) { displayH.toDp() })
+                .clip(RoundedCornerShape(10.dp))
+                .background(Color.Black)
+        ) {
+            AndroidView(
+                factory = { ctx ->
+                    VideoView(ctx).apply {
+                        setVideoURI(uri)
+                        setOnPreparedListener { mp ->
+                            mp.isLooping = true
+                            start()
+                        }
+                        setOnErrorListener { _, _, _ -> false }
+                    }
+                },
+                modifier = Modifier.fillMaxSize()
+            )
+        }
+    }
 }

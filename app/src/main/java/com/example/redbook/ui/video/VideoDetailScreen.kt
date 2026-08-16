@@ -38,6 +38,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -45,6 +46,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
@@ -56,10 +58,12 @@ import androidx.lifecycle.LifecycleEventObserver
 import com.example.redbook.R
 import com.example.redbook.data.model.Comment
 import com.example.redbook.data.model.Reply
+import com.example.redbook.data.repository.SupabaseAuthRepository
 import com.example.redbook.ui.component.CommentItem
 import com.example.redbook.ui.component.KeyboardInputBar
 import com.example.redbook.ui.theme.getOnSurfaceSecondary
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 private val videoComments = mutableMapOf<String, MutableList<Comment>>()
 
@@ -68,13 +72,23 @@ private val videoComments = mutableMapOf<String, MutableList<Comment>>()
 fun VideoDetailScreen(
     videoUrl: String, title: String, authorName: String, authorAvatar: Int,
     isFollowed: Boolean, likeCount: Int, favoriteCount: Int, commentCount: Int,
+    videoId: String = "",
+    userUid: String = "",
+    userXhsId: String = "",
     onBack: () -> Unit, onFollowClick: (Boolean) -> Unit,
     onLikeClick: (Int) -> Unit, onFavoriteClick: (Int) -> Unit
 ) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val repository = remember { SupabaseAuthRepository(context.applicationContext as android.app.Application) }
     var curMs by remember { mutableIntStateOf(0) }
     var durMs by remember { mutableIntStateOf(0) }
     var vv by remember { mutableStateOf<VideoView?>(null) }
     var followed by remember { mutableStateOf(isFollowed) }
+    var liked by remember { mutableStateOf(false) }
+    var faved by remember { mutableStateOf(false) }
+    var likeCnt by remember { mutableIntStateOf(likeCount) }
+    var favCnt by remember { mutableIntStateOf(favoriteCount) }
     var showCmt by remember { mutableStateOf(false) }
     var cmtText by remember { mutableStateOf("") }
     var kbVisible by remember { mutableStateOf(false) }
@@ -88,6 +102,19 @@ fun VideoDetailScreen(
     }
 
     LaunchedEffect(vv) { while (true) { delay(50); vv?.let { curMs = it.currentPosition } } }
+    LaunchedEffect(videoId, userUid) {
+        if (videoId.isNotBlank() && userUid.isNotBlank()) {
+            try {
+                liked = repository.hasLiked(userUid, videoId)
+                faved = repository.hasFavorited(userUid, videoId)
+                val p = repository.getPost(videoId)
+                if (p != null) {
+                    likeCnt = p.optInt("like_count", 0)
+                    favCnt = p.optInt("favorite_count", 0)
+                }
+            } catch (_: Exception) { }
+        }
+    }
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner) {
         val obs = LifecycleEventObserver { _, e -> if (e == Lifecycle.Event.ON_RESUME) vv?.start() }
@@ -151,8 +178,32 @@ fun VideoDetailScreen(
                 }
                 Spacer(Modifier.width(36.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    ActIcon(R.drawable.favorite_light, likeCount) { onLikeClick(likeCount) }
-                    ActIcon(R.drawable.star, favoriteCount) { onFavoriteClick(favoriteCount) }
+                    ActIcon(if (liked) R.drawable.favorite_fill else R.drawable.favorite_light, likeCnt, if (liked) Color.Unspecified else Color.White) {
+                        liked = !liked
+                        likeCnt = (likeCnt + if (liked) 1 else -1).coerceAtLeast(0)
+                        onLikeClick(likeCnt)
+                        if (videoId.isNotBlank()) {
+                            scope.launch {
+                                try {
+                                    repository.recordLike(userUid, videoId, liked)
+                                    repository.updatePostLike(videoId, if (liked) 1 else -1)
+                                } catch (_: Exception) { }
+                            }
+                        }
+                    }
+                    ActIcon(if (faved) R.drawable.star_fill else R.drawable.star, favCnt, if (faved) Color.Unspecified else Color.White) {
+                        faved = !faved
+                        favCnt = (favCnt + if (faved) 1 else -1).coerceAtLeast(0)
+                        onFavoriteClick(favCnt)
+                        if (videoId.isNotBlank()) {
+                            scope.launch {
+                                try {
+                                    repository.recordFavorite(userUid, videoId, faved)
+                                    repository.updatePostFav(videoId, if (faved) 1 else -1)
+                                } catch (_: Exception) { }
+                            }
+                        }
+                    }
                     ActIcon(R.drawable.chat, cmts.size) { showCmt = true }
                 }
             }
@@ -239,9 +290,9 @@ private fun toggleLike(cid: String, cmts: MutableList<Comment>) {
 }
 
 @Composable
-private fun ActIcon(iconRes: Int, count: Int, onClick: () -> Unit) {
+private fun ActIcon(iconRes: Int, count: Int, tint: Color = Color.White, onClick: () -> Unit) {
     Row(Modifier.clickable { onClick() }.padding(4.dp), verticalAlignment = Alignment.CenterVertically) {
-        Icon(painterResource(iconRes), null, Modifier.size(24.dp), tint = Color.White)
+        Icon(painterResource(iconRes), null, Modifier.size(24.dp), tint = tint)
         Spacer(Modifier.width(4.dp)); Text("$count", color = Color.White.copy(alpha = 0.7f), fontSize = 14.sp)
     }
 }

@@ -16,7 +16,12 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
-class DetailViewModel(application: Application) : AndroidViewModel(application) {
+class DetailViewModel(
+    application: Application,
+    private val userUid: String,
+    private val userXhsId: String,
+    private val userName: String
+) : AndroidViewModel(application) {
 
     private val repository = SupabaseAuthRepository(application)
 
@@ -87,7 +92,10 @@ class DetailViewModel(application: Application) : AndroidViewModel(application) 
                             replies = emptyList()
                         )
                     }
-                    _uiState.value = DetailUiState.Success(post, comments)
+                    val isLiked = repository.hasLiked(userUid, post.postId)
+                    val isFavorited = repository.hasFavorited(userUid, post.postId)
+                    val finalPost = post.copy(isLiked = isLiked, isFavorited = isFavorited)
+                    _uiState.value = DetailUiState.Success(finalPost, comments)
                     repository.incrementViewCount(postId)
                     return@launch
                 }
@@ -170,18 +178,34 @@ class DetailViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun togglePostLike() {
-        updatePost { post ->
+        val currentState = _uiState.value
+        if (currentState is DetailUiState.Success) {
+            val post = currentState.post
             val newLiked = !post.isLiked
-            val newCount = if (newLiked) post.likeCount + 1 else post.likeCount - 1
-            post.copy(isLiked = newLiked, likeCount = newCount)
+            val newCount = (if (newLiked) post.likeCount + 1 else post.likeCount - 1).coerceAtLeast(0)
+            _uiState.value = currentState.copy(post = post.copy(isLiked = newLiked, likeCount = newCount))
+            viewModelScope.launch {
+                try {
+                    repository.recordLike(userUid, post.postId, newLiked)
+                    repository.updatePostLike(post.postId, if (newLiked) 1 else -1)
+                } catch (_: Exception) { }
+            }
         }
     }
 
     fun togglePostFavorite() {
-        updatePost { post ->
+        val currentState = _uiState.value
+        if (currentState is DetailUiState.Success) {
+            val post = currentState.post
             val newFavorited = !post.isFavorited
-            val newCount = if (newFavorited) post.favoriteCount + 1 else post.favoriteCount - 1
-            post.copy(isFavorited = newFavorited, favoriteCount = newCount)
+            val newCount = (if (newFavorited) post.favoriteCount + 1 else post.favoriteCount - 1).coerceAtLeast(0)
+            _uiState.value = currentState.copy(post = post.copy(isFavorited = newFavorited, favoriteCount = newCount))
+            viewModelScope.launch {
+                try {
+                    repository.recordFavorite(userUid, post.postId, newFavorited)
+                    repository.updatePostFav(post.postId, if (newFavorited) 1 else -1)
+                } catch (_: Exception) { }
+            }
         }
     }
 
@@ -222,12 +246,12 @@ class DetailViewModel(application: Application) : AndroidViewModel(application) 
             val currentState = _uiState.value
             if (currentState is DetailUiState.Success) {
                 val post = currentState.post
-                val currentUserId = "me"
-                val isAuthor = currentUserId == post.authorId
+                val name = userName.ifBlank { "我" }
+                val isAuthor = userUid == post.authorId
                 val newComment = Comment(
                     id = "new_${System.currentTimeMillis()}",
-                    userId = currentUserId,
-                    userName = "我",
+                    userId = userUid,
+                    userName = name,
                     avatarRes = R.drawable.test,
                     images = images,
                     content = content,
@@ -243,7 +267,7 @@ class DetailViewModel(application: Application) : AndroidViewModel(application) 
                 val updatedPost = currentState.post.copy(commentCount = updatedComments.size)
                 _uiState.value = currentState.copy(comments = updatedComments, post = updatedPost)
 
-                repository.insertComment(newComment.id, post.postId, content, "me", "我", "")
+                repository.insertComment(newComment.id, post.postId, content, userUid, name, "", userXhsId, post.title)
 
                 _commentText.value = ""
                 clearSelectedImages()
@@ -257,12 +281,12 @@ class DetailViewModel(application: Application) : AndroidViewModel(application) 
             val currentState = _uiState.value
             if (currentState is DetailUiState.Success) {
                 val post = currentState.post
-                val currentUserId = "me"
-                val isAuthor = currentUserId == post.authorId
+                val name = userName.ifBlank { "我" }
+                val isAuthor = userUid == post.authorId
                 val newReply = Reply(
                     id = "reply_${System.currentTimeMillis()}",
-                    userId = "me",
-                    userName = "我",
+                    userId = userUid,
+                    userName = name,
                     avatarRes = R.drawable.test,
                     images = images,
                     content = content,
@@ -279,7 +303,7 @@ class DetailViewModel(application: Application) : AndroidViewModel(application) 
                 }
                 _uiState.value = currentState.copy(comments = updatedComments)
 
-                repository.insertReply(newReply.id, post.postId, parentCommentId, content, "me", "我", "")
+                repository.insertReply(newReply.id, post.postId, parentCommentId, content, userUid, name, "", userXhsId, post.title)
             }
         }
     }

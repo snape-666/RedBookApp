@@ -17,12 +17,14 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -35,14 +37,17 @@ import com.example.redbook.ui.utils.formatCount
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun HomeScreen(
-    viewModel: HomeViewModel = viewModel(),
+    userUid: String = "",
     onNavigateToDetail: (String) -> Unit,
     onNavigateToSearch: () -> Unit = {},
     onNavigateToPublish: () -> Unit = {},
     onNavigateToVideo: (String, String) -> Unit = { _, _ -> },
     onNavigateToProfile: () -> Unit = {}
 ) {
+    val context = LocalContext.current
+    val viewModel: HomeViewModel = viewModel(factory = HomeViewModelFactory(context.applicationContext as android.app.Application, userUid))
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    LaunchedEffect(Unit) { viewModel.fetchNotes() }
     var selectedTabIndex by remember { mutableIntStateOf(1) }
     var selectedBottomIndex by remember {  mutableIntStateOf(0) }
     Column(

@@ -16,13 +16,33 @@ class PublishViewModel(
     application: Application,
     val authorUid: String,
     val authorXhsId: String,
-    val authorName: String
+    val authorName: String,
+    editDraft: com.example.redbook.data.model.Draft? = null
 ) : AndroidViewModel(application) {
 
     private val repository = SupabaseAuthRepository(application)
+    private val editDraftId: String? = editDraft?.draftId
 
     private val _uiState = MutableStateFlow(PublishUiState())
     val uiState: StateFlow<PublishUiState> = _uiState.asStateFlow()
+
+    init {
+        editDraft?.let { draft ->
+            _uiState.value = PublishUiState(
+                title = draft.title,
+                content = draft.content,
+                images = parseDraftImages(draft.imageUrl)
+            )
+        }
+    }
+
+    private fun parseDraftImages(imageUrl: String): List<Uri> {
+        if (imageUrl.isBlank()) return emptyList()
+        return imageUrl.split(",").filter { it.isNotBlank() }.map { url ->
+            val cleaned = url.removePrefix("video:")
+            if (cleaned.startsWith("/")) Uri.parse("file://$cleaned") else Uri.parse(cleaned)
+        }
+    }
 
     fun updateTitle(text: String) {
         if (text.length <= 20) _uiState.value = _uiState.value.copy(title = text)
@@ -46,16 +66,35 @@ class PublishViewModel(
 
     fun saveDraft() {
         val state = _uiState.value
+        android.util.Log.d("RedBook", "saveDraft called, images=${state.images.size} isVideo=$isVideoMode title=${state.title}")
         viewModelScope.launch {
-            _uiState.value = state.copy(isSaving = true)
+            _uiState.value = state.copy(isSaving = true, savedAsDraft = true)
             try {
-                repository.saveDraft(
-                    "draft_${System.currentTimeMillis()}",
-                    state.title, state.content,
-                    authorUid, authorXhsId, authorName
-                )
+                val imageUrl = try {
+                    if (isVideoMode) {
+                        val uri = state.images.first()
+                        val path = cacheVideo(uri) ?: uri.toString()
+                        "video:$path"
+                    } else {
+                        val paths = mutableListOf<String>()
+                        for (img in state.images) { val path = cacheImage(img); if (path != null) paths.add(path) }
+                        paths.joinToString(",")
+                    }
+                } catch (e: Exception) { "" }
+                android.util.Log.d("RedBook", "saveDraft uid=$authorUid xhs=$authorXhsId imageUrl=$imageUrl")
+                if (editDraftId != null) {
+                    repository.updateDraft(editDraftId, state.title, state.content, imageUrl)
+                } else {
+                    repository.saveDraft(
+                        "draft_${System.currentTimeMillis()}",
+                        state.title, state.content,
+                        authorUid, authorXhsId, authorName,
+                        imageUrl
+                    )
+                }
                 _uiState.value = state.copy(isSaving = false, saved = true, savedAsDraft = true)
             } catch (e: Exception) {
+                android.util.Log.e("RedBook", "saveDraft failed: ${e.message}")
                 _uiState.value = state.copy(isSaving = false, error = e.message)
             }
         }
@@ -63,6 +102,9 @@ class PublishViewModel(
 
     val isVideoMode: Boolean get() {
         val uri = _uiState.value.images.firstOrNull() ?: return false
+        val path = uri.toString().lowercase()
+        val videoExts = listOf(".mp4", ".3gp", ".webm", ".mkv", ".mov", ".avi", ".m4v")
+        if (videoExts.any { path.contains(it) }) return true
         return try {
             val mime = getApplication<android.app.Application>().contentResolver.getType(uri)
             mime?.startsWith("video") == true
@@ -72,7 +114,7 @@ class PublishViewModel(
     fun publish() {
         val state = _uiState.value
         viewModelScope.launch {
-            _uiState.value = state.copy(isSaving = true)
+            _uiState.value = state.copy(isSaving = true, savedAsDraft = false)
             try {
                 if (isVideoMode) {
                     val uri = state.images.first()
@@ -81,9 +123,17 @@ class PublishViewModel(
                         authorUid, authorName, authorXhsId, "video:$path")
                 } else {
                     val urls = mutableListOf<String>()
-                    for (img in state.images) { val url = repository.uploadImage(img, getApplication()); if (url != null) urls.add(url) }
+                    for (img in state.images) {
+                        val url = repository.uploadImage(img, getApplication())
+                        android.util.Log.d("RedBook", "publish uploadImage $img -> $url")
+                        if (url != null) urls.add(url)
+                    }
                     if (state.images.isNotEmpty() && urls.isEmpty()) { _uiState.value = state.copy(isSaving = false, error = "上传失败"); return@launch }
+                    android.util.Log.d("RedBook", "publish images=${state.images.size} urls=${urls.size} -> ${urls.joinToString(",")}")
                     repository.publishPost("post_${System.currentTimeMillis()}", state.title, state.content, authorUid, authorName, authorXhsId, urls.joinToString(","))
+                }
+                if (editDraftId != null) {
+                    try { repository.deleteDraft(editDraftId) } catch (e: Exception) { }
                 }
                 _uiState.value = state.copy(isSaving = false, saved = true, savedAsDraft = false)
             } catch (e: Exception) { _uiState.value = state.copy(isSaving = false, error = e.message) }
@@ -96,10 +146,23 @@ class PublishViewModel(
         try {
             val cr = getApplication<android.app.Application>().contentResolver
             val input = cr.openInputStream(uri) ?: return@withContext null
-            val file = java.io.File(getApplication<android.app.Application>().cacheDir, "video_${System.currentTimeMillis()}.mp4")
+            val file = java.io.File(getApplication<android.app.Application>().filesDir, "video_${System.currentTimeMillis()}.mp4")
             file.outputStream().use { input.copyTo(it) }
             input.close()
             file.absolutePath
+        } catch (e: Exception) { null }
+    }
+
+    private suspend fun cacheImage(uri: Uri): String? = withContext(Dispatchers.IO) {
+        try {
+            val cr = getApplication<android.app.Application>().contentResolver
+            val mime = cr.getType(uri) ?: "image/jpeg"
+            val ext = when { mime.contains("png") -> "png"; mime.contains("webp") -> "webp"; mime.contains("gif") -> "gif"; else -> "jpg" }
+            val input = cr.openInputStream(uri) ?: return@withContext null
+            val file = java.io.File(getApplication<android.app.Application>().filesDir, "img_${System.currentTimeMillis()}.$ext")
+            file.outputStream().use { input.copyTo(it) }
+            input.close()
+            "file://${file.absolutePath}"
         } catch (e: Exception) { null }
     }
 

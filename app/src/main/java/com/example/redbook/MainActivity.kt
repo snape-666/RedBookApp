@@ -22,6 +22,8 @@ import com.example.redbook.ui.search.SearchScreen
 import com.example.redbook.ui.publish.PublishScreen
 import com.example.redbook.ui.video.VideoDetailScreen
 import com.example.redbook.ui.profile.ProfileScreen
+import com.example.redbook.ui.draft.DraftScreen
+import com.example.redbook.data.model.Draft
 import com.example.redbook.R
 
 class MainActivity : ComponentActivity() {
@@ -42,14 +44,16 @@ class MainActivity : ComponentActivity() {
 }
 @Composable
 fun AppScreen() {
-    var currentScreen by remember { mutableStateOf<Screen>(Screen.Home) }
+    var currentScreen by remember { mutableStateOf<Screen>(Screen.Login) }
     var selectedPostId by remember { mutableStateOf("") }
     var selectedVideoId by remember { mutableStateOf("") }
     var selectedVideoUrl by remember { mutableStateOf("") }
+    var scrollToCommentId by remember { mutableStateOf("") }
     var screenStack by remember { mutableStateOf(listOf<Screen>(Screen.Login)) }
     var userUid by remember { mutableStateOf("") }
     var userXhsId by remember { mutableStateOf("") }
     var userName by remember { mutableStateOf("") }
+    var editingDraft by remember { mutableStateOf<Draft?>(null) }
 
     fun navigateTo(screen: Screen) {
         screenStack = screenStack + screen
@@ -84,6 +88,7 @@ fun AppScreen() {
         }
         Screen.Home -> {
             HomeScreen(
+                userUid = userUid,
                 onNavigateToDetail = { postId ->
                     selectedPostId = postId
                     navigateTo(Screen.Detail)
@@ -101,6 +106,11 @@ fun AppScreen() {
         Screen.Detail -> {
             DetailScreen(
                 postId = selectedPostId,
+                userUid = userUid,
+                userXhsId = userXhsId,
+                userName = userName,
+                scrollToCommentId = scrollToCommentId,
+                onCommentScrolled = { scrollToCommentId = "" },
                 onBack = { goBack() }
             )
         }
@@ -109,12 +119,14 @@ fun AppScreen() {
                 authorUid = userUid,
                 authorXhsId = userXhsId,
                 authorName = userName,
-                onBack = { goBack() },
-                onPublished = { goBack() }
+                editDraft = editingDraft,
+                onBack = { editingDraft = null; goBack() },
+                onPublished = { editingDraft = null; goBack() }
             )
         }
         Screen.Profile -> {
             ProfileScreen(
+                userUid = userUid,
                 userName = userName.ifBlank { "用户" },
                 userXhsId = userXhsId.ifBlank { "00000000000" },
                 ipLocation = "未知",
@@ -123,7 +135,29 @@ fun AppScreen() {
                 onEditProfile = { },
                 onBottomTabClick = { idx -> if (idx == 0) { screenStack = listOf(Screen.Home); currentScreen = Screen.Home } },
                 onPostClick = { postId -> selectedPostId = postId; navigateTo(Screen.Detail) },
-                onPublish = { navigateTo(Screen.Publish) }
+                onVideoClick = { videoId, videoUrl ->
+                    selectedVideoId = videoId
+                    selectedVideoUrl = videoUrl
+                    navigateTo(Screen.Video)
+                },
+                onCommentClick = { postId, commentId ->
+                    selectedPostId = postId
+                    scrollToCommentId = commentId
+                    navigateTo(Screen.Detail)
+                },
+                onPublish = { navigateTo(Screen.Publish) },
+                onDraftClick = { navigateTo(Screen.Draft) }
+            )
+        }
+        Screen.Draft -> {
+            DraftScreen(
+                userUid = userUid,
+                userXhsId = userXhsId,
+                onBack = { goBack() },
+                onEditDraft = { draft ->
+                    editingDraft = draft
+                    navigateTo(Screen.Publish)
+                }
             )
         }
         Screen.Video -> {
@@ -134,6 +168,9 @@ fun AppScreen() {
                 authorAvatar = R.drawable.test,
                 isFollowed = false,
                 likeCount = 0, favoriteCount = 0, commentCount = 0,
+                videoId = selectedVideoId,
+                userUid = userUid,
+                userXhsId = userXhsId,
                 onBack = { goBack() },
                 onFollowClick = {},
                 onLikeClick = {},
@@ -162,4 +199,5 @@ sealed class Screen {
     object Publish : Screen()
     object Video : Screen()
     object Profile : Screen()
+    object Draft : Screen()
 }
