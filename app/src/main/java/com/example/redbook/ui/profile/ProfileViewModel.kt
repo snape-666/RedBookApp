@@ -7,6 +7,8 @@ import com.example.redbook.R
 import com.example.redbook.data.model.Note
 import com.example.redbook.data.model.UserComment
 import com.example.redbook.data.repository.SupabaseAuthRepository
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -25,12 +27,26 @@ class ProfileViewModel(application: Application, private val userUid: String, pr
     fun refresh() {
         viewModelScope.launch {
             _refreshing.value = true
-            val posts = safe { repository.getUserPosts(userUid, userXhsId) }
-            val drafts = safe { repository.getUserDrafts(userUid, userXhsId) }
-            val liked = safe { repository.getUserLikedPosts(userUid) }
-            val favorited = safe { repository.getUserFavoritedPosts(userUid) }
-            val comments = safe { repository.getUserComments(userUid, userXhsId) }
-            val likedIds = try { repository.getLikedPostIds(userUid) } catch (e: Exception) { emptySet() }
+            lateinit var posts: org.json.JSONArray
+            lateinit var drafts: org.json.JSONArray
+            lateinit var liked: org.json.JSONArray
+            lateinit var favorited: org.json.JSONArray
+            lateinit var comments: org.json.JSONArray
+            var likedIds: Set<String> = emptySet()
+            kotlinx.coroutines.coroutineScope {
+                val d1 = async { safe { repository.getUserPosts(userUid, userXhsId) } }
+                val d2 = async { safe { repository.getUserDrafts(userUid, userXhsId) } }
+                val d3 = async { safe { repository.getUserLikedPosts(userUid) } }
+                val d4 = async { safe { repository.getUserFavoritedPosts(userUid) } }
+                val d5 = async { safe { repository.getUserComments(userUid, userXhsId) } }
+                val d6 = async { try { repository.getLikedPostIds(userUid) } catch (e: Exception) { emptySet() } }
+                posts = d1.await()
+                drafts = d2.await()
+                liked = d3.await()
+                favorited = d4.await()
+                comments = d5.await()
+                likedIds = d6.await()
+            }
             val parsedPosts = parsePosts(posts, likedIds)
             val latestDraftImage = if (drafts.length() > 0) drafts.getJSONObject(0).optString("image_url", "") else ""
             _uiState.value = ProfileUiState(

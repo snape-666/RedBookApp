@@ -54,6 +54,7 @@ import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import com.example.redbook.R
 import com.example.redbook.data.model.Draft
+import com.example.redbook.ui.component.VideoThumb
 import com.example.redbook.ui.theme.getOnSurfaceSecondary
 import com.example.redbook.ui.theme.getOnSurfaceTertiary
 import com.example.redbook.ui.theme.getOutline
@@ -200,27 +201,11 @@ private fun DraftCard(
             if (isVideo) {
                 Box(Modifier.fillMaxWidth().aspectRatio(3f / 4f)) {
                     val videoPath = firstUrl.removePrefix("video:")
-                    val ctx = LocalContext.current
-                    val thumb = remember(videoPath) {
-                        val retriever = MediaMetadataRetriever()
-                        try {
-                            retriever.setDataSource(ctx, Uri.parse("file://$videoPath"))
-                            retriever.frameAtTime
-                        } catch (e: Exception) {
-                            null
-                        } finally {
-                            try { retriever.release() } catch (e: Exception) { }
-                        }
-                    }
-                    if (thumb != null) {
-                        Image(bitmap = thumb.asImageBitmap(), contentDescription = null,
-                            modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(topStart = 10.dp, topEnd = 10.dp)),
-                            contentScale = ContentScale.Crop)
-                    } else {
-                        Image(painter = painterResource(id = imageRes), contentDescription = null,
-                            modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(topStart = 10.dp, topEnd = 10.dp)),
-                            contentScale = ContentScale.Crop)
-                    }
+                    VideoThumb(
+                        videoUrl = videoPath,
+                        modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(topStart = 10.dp, topEnd = 10.dp)),
+                        placeholder = imageRes
+                    )
                     Icon(
                         painter = painterResource(R.drawable.video_fill),
                         contentDescription = "视频",

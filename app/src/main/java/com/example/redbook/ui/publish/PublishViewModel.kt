@@ -73,8 +73,7 @@ class PublishViewModel(
                 val imageUrl = try {
                     if (isVideoMode) {
                         val uri = state.images.first()
-                        val path = cacheVideo(uri) ?: uri.toString()
-                        "video:$path"
+                        repository.uploadImage(uri, getApplication()) ?: ""
                     } else {
                         val paths = mutableListOf<String>()
                         for (img in state.images) { val path = cacheImage(img); if (path != null) paths.add(path) }
@@ -118,9 +117,10 @@ class PublishViewModel(
             try {
                 if (isVideoMode) {
                     val uri = state.images.first()
-                    val path = cacheVideo(uri) ?: uri.toString()
+                    val url = repository.uploadImage(uri, getApplication())
+                    if (url == null) { _uiState.value = state.copy(isSaving = false, error = "上传失败"); return@launch }
                     repository.publishPost("vid_${System.currentTimeMillis()}", state.title, "",
-                        authorUid, authorName, authorXhsId, "video:$path")
+                        authorUid, authorName, authorXhsId, url)
                 } else {
                     val urls = mutableListOf<String>()
                     for (img in state.images) {

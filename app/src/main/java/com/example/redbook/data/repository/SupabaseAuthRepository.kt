@@ -81,21 +81,27 @@ class SupabaseAuthRepository(private val app: Application) {
                     val userData = parseUserData(supabasePost("/auth/v1/token?grant_type=password", body)).getOrNull()
                     if (userData == null) {
                         Result.failure(Exception("登录失败"))
-                    } else if (userData.xhsId.isBlank()) {
-                        val res = queryRest("users", "select=xhs_id,account,nickname&uid=eq.${userData.uid}&limit=1")
-                        val arr = res.optJSONArray("users")
-                        if (arr != null && arr.length() > 0) {
-                            val row = arr.getJSONObject(0)
-                            Result.success(userData.copy(
-                                xhsId = row.optString("xhs_id", ""),
-                                account = userData.account.ifBlank { row.optString("account", "") },
-                                nickname = userData.nickname.ifBlank { row.optString("nickname", "") }
-                            ))
-                        } else {
+                    } else {
+                        try {
+                            val res = queryRest("users", "select=xhs_id,account,nickname,gender,birthday,avatar_url,background_url&uid=eq.${userData.uid}&limit=1")
+                            val arr = res.optJSONArray("users")
+                            if (arr != null && arr.length() > 0) {
+                                val row = arr.getJSONObject(0)
+                                Result.success(userData.copy(
+                                    xhsId = row.optString("xhs_id", userData.xhsId),
+                                    account = userData.account.ifBlank { row.optString("account", "") },
+                                    nickname = row.optString("nickname", "").ifBlank { userData.nickname },
+                                    gender = row.optString("gender", ""),
+                                    birthday = row.optString("birthday", ""),
+                                    avatarUrl = row.optString("avatar_url", ""),
+                                    backgroundUrl = row.optString("background_url", "")
+                                ))
+                            } else {
+                                Result.success(userData)
+                            }
+                        } catch (e: Exception) {
                             Result.success(userData)
                         }
-                    } else {
-                        Result.success(userData)
                     }
                 }
                 result ?: Result.failure(Exception("网络连接超时"))
@@ -630,6 +636,12 @@ class SupabaseAuthRepository(private val app: Application) {
             val resp = queryRest("comments", "select=*&author_uid=eq.$userUid&order=created_at.desc")
             arr = resp.optJSONArray("users") ?: resp.optJSONArray("comments") ?: JSONArray()
         }
+        // 先建内存 map，避免 N+1 查询
+        val map = mutableMapOf<String, Pair<String, String>>()
+        for (i in 0 until arr.length()) {
+            val c = arr.getJSONObject(i)
+            map[c.optString("comment_id")] = c.optString("content") to c.optString("author_name")
+        }
         val result = JSONArray()
         for (i in 0 until arr.length()) {
             val c = arr.getJSONObject(i)
@@ -645,12 +657,18 @@ class SupabaseAuthRepository(private val app: Application) {
             obj.put("ip_location", c.optString("ip_location", ""))
             val parentId = c.optString("parent_id")
             if (parentId.isNotEmpty()) {
-                val pr = queryRest("comments", "select=content,author_name&comment_id=eq.$parentId&limit=1")
-                val parr = pr.optJSONArray("users") ?: pr.optJSONArray("comments") ?: JSONArray()
-                if (parr.length() > 0) {
-                    val p = parr.getJSONObject(0)
-                    obj.put("parent_content", p.optString("content"))
-                    obj.put("parent_user", p.optString("author_name"))
+                val cached = map[parentId]
+                if (cached != null) {
+                    obj.put("parent_content", cached.first)
+                    obj.put("parent_user", cached.second)
+                } else {
+                    val pr = queryRest("comments", "select=content,author_name&comment_id=eq.$parentId&limit=1")
+                    val parr = pr.optJSONArray("users") ?: pr.optJSONArray("comments") ?: JSONArray()
+                    if (parr.length() > 0) {
+                        val p = parr.getJSONObject(0)
+                        obj.put("parent_content", p.optString("content"))
+                        obj.put("parent_user", p.optString("author_name"))
+                    }
                 }
             }
             result.put(obj)
@@ -714,6 +732,45 @@ class SupabaseAuthRepository(private val app: Application) {
 
     suspend fun deleteComment(commentId: String) {
         supabaseDelete("/rest/v1/comments?comment_id=eq.$commentId")
+    }
+
+    // 记录浏览（去重后插入最新）
+    suspend fun recordBrowse(userUid: String, postId: String) {
+        try { supabaseDelete("/rest/v1/browsing_history?user_uid=eq.$userUid&post_id=eq.$postId") } catch (_: Exception) { }
+        val body = JSONObject().apply {
+            put("user_uid", userUid)
+            put("post_id", postId)
+            put("created_at", System.currentTimeMillis())
+        }
+        supabasePostBody("/rest/v1/browsing_history", body)
+    }
+
+    // 获取浏览记录（返回帖子）
+    suspend fun getBrowseHistory(userUid: String): JSONArray {
+        val resp = queryRest("browsing_history", "select=post_id&user_uid=eq.$userUid&order=created_at.desc")
+        val arr = resp.optJSONArray("users") ?: resp.optJSONArray("browsing_history") ?: JSONArray()
+        val postIds = (0 until arr.length()).map { arr.getJSONObject(it).getString("post_id") }
+        if (postIds.isEmpty()) return JSONArray()
+        val filters = postIds.joinToString(",") { "post_id.eq.$it" }
+        val postsResp = queryRest("posts", "select=*&or=($filters)")
+        return postsResp.optJSONArray("users") ?: postsResp.optJSONArray("posts") ?: JSONArray()
+    }
+
+    // 删除浏览记录
+    suspend fun deleteBrowse(userUid: String, postId: String) {
+        supabaseDelete("/rest/v1/browsing_history?user_uid=eq.$userUid&post_id=eq.$postId")
+    }
+
+    // 更新用户资料
+    suspend fun updateUserProfile(uid: String, nickname: String? = null, backgroundUrl: String? = null, avatarUrl: String? = null, gender: String? = null, birthday: String? = null) {
+        val body = JSONObject()
+        nickname?.let { body.put("nickname", it) }
+        backgroundUrl?.let { body.put("background_url", it) }
+        avatarUrl?.let { body.put("avatar_url", it) }
+        gender?.let { body.put("gender", it) }
+        birthday?.let { body.put("birthday", it) }
+        if (body.length() == 0) return
+        patchUserRow(uid, body)
     }
 
     suspend fun updatePostLike(postId: String, delta: Int) {
@@ -797,6 +854,10 @@ class SupabaseAuthRepository(private val app: Application) {
         val account: String,
         val nickname: String,
         val xhsId: String,
-        val emailVerified: Boolean
+        val emailVerified: Boolean,
+        val gender: String = "",
+        val birthday: String = "",
+        val avatarUrl: String = "",
+        val backgroundUrl: String = ""
     )
 }

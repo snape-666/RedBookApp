@@ -70,22 +70,11 @@ fun PostCard(
             if (isVideo) {
                 Box(modifier = Modifier.fillMaxWidth().aspectRatio(3f / 4f)) {
                     val videoPath = firstUrl.removePrefix("video:")
-                    val thumb = remember(videoPath) {
-                        val retriever = MediaMetadataRetriever()
-                        try {
-                            retriever.setDataSource(videoPath)
-                            retriever.frameAtTime
-                        } finally { retriever.release() }
-                    }
-                    if (thumb != null) {
-                        Image(bitmap = thumb.asImageBitmap(), contentDescription = null,
-                            modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(topStart = 10.dp, topEnd = 10.dp)),
-                            contentScale = ContentScale.Crop)
-                    } else {
-                        Image(painter = painterResource(id = imageRes), contentDescription = null,
-                            modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(topStart = 10.dp, topEnd = 10.dp)),
-                            contentScale = ContentScale.Crop)
-                    }
+                    VideoThumb(
+                        videoUrl = videoPath,
+                        modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(topStart = 10.dp, topEnd = 10.dp)),
+                        placeholder = imageRes
+                    )
                     Icon(
                         painter = painterResource(R.drawable.video_fill),
                         contentDescription = "视频",

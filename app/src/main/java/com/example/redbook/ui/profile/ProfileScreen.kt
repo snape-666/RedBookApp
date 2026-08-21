@@ -1,6 +1,8 @@
 package com.example.redbook.ui.profile
 
 import android.media.MediaMetadataRetriever
+import android.net.Uri
+import android.widget.Toast
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
@@ -34,6 +36,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -41,10 +44,12 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
@@ -61,13 +66,16 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import com.example.redbook.R
+import com.example.redbook.data.model.Note
 import com.example.redbook.data.model.UserComment
+import com.example.redbook.data.repository.SupabaseAuthRepository
 import com.example.redbook.ui.component.BottomBar
 import com.example.redbook.ui.component.PostCard
 import com.example.redbook.ui.theme.getOnSurfaceSecondary
 import com.example.redbook.ui.theme.getOnSurfaceTertiary
 import com.example.redbook.ui.theme.getOutline
 import java.text.SimpleDateFormat
+import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -79,6 +87,10 @@ fun ProfileScreen(
     followCount: Int,
     fansCount: Int,
     likeCount: Int,
+    gender: String = "",
+    birthday: String = "",
+    avatarUrl: String = "",
+    backgroundUrl: String = "",
     onBack: () -> Unit,
     onEditProfile: () -> Unit,
     onBottomTabClick: (Int) -> Unit,
@@ -86,7 +98,13 @@ fun ProfileScreen(
     onVideoClick: (String, String) -> Unit = { _, _ -> },
     onCommentClick: (String, String) -> Unit = { _, _ -> },
     onPublish: () -> Unit = {},
-    onDraftClick: () -> Unit = {}
+    onDraftClick: () -> Unit = {},
+    onBrowseClick: () -> Unit = {},
+    account: String = "",
+    email: String = "",
+    isDarkTheme: Boolean = false,
+    onToggleDarkTheme: () -> Unit = {},
+    onLogout: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val viewModel: ProfileViewModel = viewModel(factory = ProfileViewModelFactory(context.applicationContext as android.app.Application, userUid, userXhsId))
@@ -96,22 +114,35 @@ fun ProfileScreen(
     var bottomIndex by remember { mutableIntStateOf(3) }
     var selectedTab by remember { mutableIntStateOf(0) }
     var deletingComment by remember { mutableStateOf<String?>(null) }
+    var showDrawer by remember { mutableStateOf(false) }
+    var changePasswordVisible by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) { viewModel.refresh() }
 
     Box(Modifier.fillMaxSize()) {
-        Column(Modifier.fillMaxSize()) {
-            ProfileHeader(
-                userName = userName,
-                userXhsId = userXhsId,
-                ipLocation = ipLocation,
-                followCount = followCount,
-                fansCount = fansCount,
-                likeCount = likeCount,
-                onBack = onBack,
-                onEditProfile = onEditProfile,
-                noRipple = noRipple
-            )
+        PullToRefreshBox(
+            isRefreshing = refreshing,
+            onRefresh = { viewModel.refresh() },
+            modifier = Modifier.fillMaxSize()
+        ) {
+            Column(Modifier.fillMaxSize()) {
+                ProfileHeader(
+                    userName = userName,
+                    userXhsId = userXhsId,
+                    ipLocation = ipLocation,
+                    followCount = followCount,
+                    fansCount = fansCount,
+                    likeCount = likeCount,
+                    gender = gender,
+                    birthday = birthday,
+                    avatarUrl = avatarUrl,
+                    backgroundUrl = backgroundUrl,
+                    onBack = onBack,
+                    onMenuClick = { showDrawer = true },
+                    onEditProfile = onEditProfile,
+                    onBrowseClick = onBrowseClick,
+                    noRipple = noRipple
+                )
 
             Surface(
                 modifier = Modifier
@@ -124,22 +155,16 @@ fun ProfileScreen(
                 Column(Modifier.fillMaxSize()) {
                     TabRow(selectedTab, onTabSelected = { selectedTab = it })
 
-                    PullToRefreshBox(
-                        isRefreshing = refreshing,
-                        onRefresh = { viewModel.refresh() },
+                    LazyVerticalStaggeredGrid(
+                        columns = StaggeredGridCells.Fixed(2),
                         modifier = Modifier
                             .fillMaxWidth()
                             .weight(1f)
+                            .background(MaterialTheme.colorScheme.background),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalItemSpacing = 8.dp,
+                        contentPadding = PaddingValues(start = 8.dp, end = 8.dp, bottom = 80.dp)
                     ) {
-                        LazyVerticalStaggeredGrid(
-                            columns = StaggeredGridCells.Fixed(2),
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .background(MaterialTheme.colorScheme.background),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalItemSpacing = 8.dp,
-                            contentPadding = PaddingValues(start = 8.dp, end = 8.dp, bottom = 80.dp)
-                        ) {
                             when (selectedTab) {
                                 0 -> {
                                     if (state.draftCount > 0) {
@@ -223,12 +248,12 @@ fun ProfileScreen(
                                             },
                                             imageUrl = note.imageUrl)
                                     }
-                                }
                             }
                         }
                     }
                 }
             }
+        }
         }
 
         Column(Modifier
@@ -296,6 +321,39 @@ fun ProfileScreen(
                 }
             }
         }
+
+        if (showDrawer) {
+            Box(Modifier
+                .fillMaxSize()
+                .background(Color.Black.copy(alpha = 0.3f))
+                .clickable { showDrawer = false })
+            Column(
+                Modifier
+                    .fillMaxHeight()
+                    .fillMaxWidth(0.75f)
+                    .background(MaterialTheme.colorScheme.background)
+                    .padding(horizontal = 12.dp)
+            ) {
+                DrawerContent(
+                    draftCount = state.draftCount,
+                    account = account,
+                    isDarkTheme = isDarkTheme,
+                    onDraftClick = { showDrawer = false; onDraftClick() },
+                    onBrowseClick = { showDrawer = false; onBrowseClick() },
+                    onChangePassword = { showDrawer = false; changePasswordVisible = true },
+                    onNotification = { showDrawer = false },
+                    onLogout = { showDrawer = false; onLogout() },
+                    onToggleDarkTheme = onToggleDarkTheme
+                )
+            }
+        }
+
+        if (changePasswordVisible) {
+            ChangePasswordDialog(
+                email = email,
+                onDismiss = { changePasswordVisible = false }
+            )
+        }
     }
 }
 
@@ -307,18 +365,34 @@ private fun ProfileHeader(
     followCount: Int,
     fansCount: Int,
     likeCount: Int,
+    gender: String = "",
+    birthday: String = "",
+    avatarUrl: String = "",
+    backgroundUrl: String = "",
     onBack: () -> Unit,
+    onMenuClick: () -> Unit = {},
     onEditProfile: () -> Unit,
+    onBrowseClick: () -> Unit = {},
     noRipple: MutableInteractionSource
 ) {
     val onPri = Color.White
+    val ageText = remember(birthday) { calculateAge(birthday) }
     Box(Modifier.fillMaxWidth()) {
-        Image(
-            painterResource(R.drawable.test2),
-            null,
-            Modifier.matchParentSize(),
-            contentScale = ContentScale.Crop,
-            alignment = Alignment.TopCenter)
+        if (backgroundUrl.isNotBlank()) {
+            AsyncImage(
+                model = ImageRequest.Builder(LocalContext.current).data(backgroundUrl).crossfade(true).build(),
+                contentDescription = null,
+                modifier = Modifier.matchParentSize(),
+                contentScale = ContentScale.Crop,
+                alignment = Alignment.TopCenter)
+        } else {
+            Image(
+                painterResource(R.drawable.test2),
+                null,
+                Modifier.matchParentSize(),
+                contentScale = ContentScale.Crop,
+                alignment = Alignment.TopCenter)
+        }
         Box(Modifier.matchParentSize().background(onPri.copy(alpha = 0.22f)))
         Column(Modifier
             .fillMaxWidth()
@@ -328,9 +402,9 @@ private fun ProfileHeader(
                 .padding(vertical = 8.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically) {
-                Icon(painterResource(R.drawable.arrow_left), null, Modifier
+                Icon(painterResource(R.drawable.menu_white), null, Modifier
                     .size(28.dp)
-                    .clickable(noRipple, null) { onBack() },
+                    .clickable(noRipple, null) { onMenuClick() },
                     tint = onPri.copy(alpha = 0.8f))
                 Box(Modifier
                     .border(1.dp, onPri.copy(alpha = 0.22f), RoundedCornerShape(20.dp))
@@ -338,7 +412,7 @@ private fun ProfileHeader(
                     .clickable(noRipple, null) { onEditProfile() }
                     .padding(horizontal = 12.dp, vertical = 6.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(painterResource(R.drawable.edit_grey), null,
+                        Icon(painterResource(R.drawable.edit_white), null,
                             Modifier.size(16.dp), tint = onPri)
                         Spacer(Modifier.width(4.dp));
                         Text("编辑主页", fontSize = 13.sp, color = onPri)
@@ -351,15 +425,23 @@ private fun ProfileHeader(
             Row(Modifier
                 .fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically) {
-                Image(painterResource(R.drawable.test), null,
-                    Modifier
-                    .size(84.dp)
-                    .clip(CircleShape), contentScale = ContentScale.Crop)
+                if (avatarUrl.isNotBlank()) {
+                    AsyncImage(
+                        model = ImageRequest.Builder(LocalContext.current).data(avatarUrl).crossfade(true).build(),
+                        contentDescription = null,
+                        modifier = Modifier.size(84.dp).clip(CircleShape),
+                        contentScale = ContentScale.Crop)
+                } else {
+                    Image(painterResource(R.drawable.test), null,
+                        Modifier
+                            .size(84.dp)
+                            .clip(CircleShape), contentScale = ContentScale.Crop)
+                }
                 Spacer(Modifier.width(16.dp))
                 Column {
                     Text(userName, fontSize = 18.sp, fontWeight = FontWeight.Bold, color = onPri)
-                    Text("小红书号：$userXhsId", fontSize = 13.sp, color = onPri.copy(alpha = 0.7f))
-                    Text("IP：$ipLocation", fontSize = 13.sp, color = onPri.copy(alpha = 0.7f))
+                    Text("小红书号：$userXhsId", fontSize = 13.sp, color = onPri.copy(alpha = 0.9f))
+                    Text("IP：$ipLocation", fontSize = 13.sp, color = onPri.copy(alpha = 0.9f))
                 }
             }
 
@@ -379,8 +461,19 @@ private fun ProfileHeader(
                 .background(onPri.copy(alpha = 0.3f), RoundedCornerShape(20.dp))
                 .padding(horizontal = 12.dp, vertical = 6.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(painterResource(R.drawable.female), null, Modifier.size(20.dp), tint = Color.Unspecified)
-                    Spacer(Modifier.width(4.dp)); Text("24岁", fontSize = 13.sp, color = onPri)
+                    val genderIcon = when (gender) {
+                        "男" -> R.drawable.male
+                        "女" -> R.drawable.female
+                        else -> null
+                    }
+                    if (genderIcon != null) {
+                        Icon(painterResource(genderIcon), null, Modifier.size(20.dp), tint = Color.Unspecified)
+                        Spacer(Modifier.width(4.dp))
+                    }
+                    val ageTextVal = if (ageText > 0) "${ageText}岁" else ""
+                    if (ageTextVal.isNotBlank()) {
+                        Text(ageTextVal, fontSize = 13.sp, color = onPri)
+                    }
                 }
             }
 
@@ -391,6 +484,7 @@ private fun ProfileHeader(
                     .fillMaxWidth(0.4f)
                     .border(1.dp, onPri.copy(alpha = 0.15f), RoundedCornerShape(10.dp))
                     .background(onPri.copy(alpha = 0.3f), RoundedCornerShape(10.dp))
+                    .clickable(noRipple, null) { onBrowseClick() }
                     .padding(horizontal = 12.dp, vertical = 8.dp)) {
                 Column {
                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -398,7 +492,7 @@ private fun ProfileHeader(
                         Spacer(Modifier.width(6.dp)); Text("浏览记录", fontSize = 14.sp, color = onPri)
                     }
                     Row {
-                        Text("看过的笔记", fontSize = 13.sp, color = onPri.copy(alpha = 0.7f))
+                        Text("看过的笔记", fontSize = 13.sp, color = onPri.copy(alpha = 0.9f))
                     }
                 }
             }
@@ -408,12 +502,30 @@ private fun ProfileHeader(
     }
 }
 
+private fun calculateAge(birthday: String): Int {
+    if (birthday.isBlank() || birthday == "不显示") return -1
+    return try {
+        val parts = birthday.split("-")
+        if (parts.size < 3) return -1
+        val year = parts[0].toInt()
+        val month = parts[1].toInt()
+        val day = parts[2].toInt()
+        val now = java.util.Calendar.getInstance()
+        val cy = now.get(java.util.Calendar.YEAR)
+        val cm = now.get(java.util.Calendar.MONTH) + 1
+        val cd = now.get(java.util.Calendar.DAY_OF_MONTH)
+        var age = cy - year
+        if (cm < month || (cm == month && cd < day)) age--
+        age
+    } catch (e: Exception) { -1 }
+}
+
 @Composable
 private fun StatItem(num: String, label: String, color: Color) {
     Row(verticalAlignment = Alignment.CenterVertically) {
         Text(num, fontSize = 16.sp, fontWeight = FontWeight.Bold, color = color)
         Spacer(Modifier.width(4.dp))
-        Text(label, fontSize = 14.sp, color = color.copy(alpha = 0.8f))
+        Text(label, fontSize = 14.sp, color = color.copy(alpha = 0.9f))
     }
 }
 
@@ -423,7 +535,7 @@ private fun TabRow(selected: Int, onTabSelected: (Int) -> Unit) {
     Row(Modifier
         .fillMaxWidth()
         .background(MaterialTheme.colorScheme.surface)
-        .padding(start = 12.dp, end = 12.dp, top = 5.dp, bottom = 8.dp), Arrangement.spacedBy(15.dp)) {
+        .padding(start = 12.dp, end = 12.dp, top =10.dp, bottom = 8.dp), Arrangement.spacedBy(15.dp)) {
         tabs.forEachIndexed { idx, name ->
             val isSel = selected == idx
             Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.clickable { onTabSelected(idx) }) {
@@ -591,6 +703,229 @@ private fun ProfileCommentItem(comment: UserComment, onCommentClick: (String, St
                         modifier = Modifier.padding(start = 2.dp)
                     )
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun DrawerContent(
+    draftCount: Int,
+    account: String,
+    isDarkTheme: Boolean,
+    onDraftClick: () -> Unit,
+    onBrowseClick: () -> Unit,
+    onChangePassword: () -> Unit,
+    onNotification: () -> Unit,
+    onLogout: () -> Unit,
+    onToggleDarkTheme: () -> Unit
+) {
+    Column(Modifier.fillMaxSize().padding(top = 36.dp)) {
+        Column(Modifier
+            .fillMaxWidth()
+            .shadow(4.dp, RoundedCornerShape(16.dp))
+            .clip(RoundedCornerShape(16.dp))
+            .background(MaterialTheme.colorScheme.surface)
+            .padding(horizontal = 10.dp, vertical = 5.dp)
+        ) {
+            Row(Modifier
+                .padding(vertical = 5.dp)
+                .fillMaxWidth()
+                .clickable { onDraftClick() },
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(painterResource(R.drawable.inbox), null, Modifier.size(20.dp), tint = MaterialTheme.colorScheme.onSurface)
+                Spacer(Modifier.width(5.dp))
+                Text("草稿箱", fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurface)
+                Spacer(Modifier.weight(1f))
+                Text("$draftCount", fontSize = 14.sp, color = getOnSurfaceSecondary())
+            }
+            Row(Modifier
+                .padding(vertical = 5.dp)
+                .fillMaxWidth()
+                .clickable { onBrowseClick() },
+                verticalAlignment = Alignment.CenterVertically) {
+                Icon(painterResource(R.drawable.clock_black), null, Modifier.size(20.dp), tint = MaterialTheme.colorScheme.onSurface)
+                Spacer(Modifier.width(5.dp))
+                Text("浏览记录", fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurface)
+            }
+        }
+
+        Spacer(Modifier.height(20.dp))
+
+        Column(Modifier
+            .fillMaxWidth()
+            .shadow(4.dp, RoundedCornerShape(16.dp))
+            .clip(RoundedCornerShape(16.dp))
+            .background(MaterialTheme.colorScheme.surface)
+            .padding(horizontal = 10.dp, vertical = 5.dp)
+        ) {
+            Row(Modifier
+                .padding(vertical = 5.dp)
+                .fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically) {
+                Icon(painterResource(R.drawable.user_cicrle), null, Modifier.size(22.dp), tint = MaterialTheme.colorScheme.onSurface)
+                Spacer(Modifier.width(5.dp))
+                Text("账号", fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurface)
+                Spacer(Modifier.weight(1f))
+                Text(account, fontSize = 14.sp, color = getOnSurfaceSecondary())
+            }
+            Row(Modifier
+                .fillMaxWidth()
+                .padding(vertical = 5.dp)
+                .clickable { onChangePassword() },
+                verticalAlignment = Alignment.CenterVertically) {
+                Icon(painterResource(R.drawable.lock_black), null, Modifier.size(20.dp), tint = MaterialTheme.colorScheme.onSurface)
+                Spacer(Modifier.width(5.dp))
+                Text("更改密码", fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurface)
+                Spacer(Modifier.weight(1f))
+                Icon(painterResource(R.drawable.arrow_right), null, Modifier.size(20.dp), tint = getOnSurfaceTertiary())
+            }
+        }
+
+        Spacer(Modifier.height(20.dp))
+
+        Column(Modifier
+            .fillMaxWidth()
+            .shadow(4.dp, RoundedCornerShape(16.dp))
+            .clip(RoundedCornerShape(16.dp))
+            .background(MaterialTheme.colorScheme.surface)
+            .padding(horizontal = 10.dp, vertical = 5.dp)
+        ) {
+            Row(Modifier
+                .fillMaxWidth()
+                .padding(vertical = 8.dp)
+                .clickable { onNotification() },
+                verticalAlignment = Alignment.CenterVertically) {
+                Icon(painterResource(R.drawable.bell), null, Modifier.size(20.dp), tint = MaterialTheme.colorScheme.onSurface)
+                Spacer(Modifier.width(5.dp))
+                Text("通知设置", fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurface)
+                Spacer(Modifier.weight(1f))
+                Icon(painterResource(R.drawable.arrow_right), null, Modifier.size(20.dp), tint = getOnSurfaceTertiary())
+            }
+        }
+
+        Spacer(Modifier.weight(1f))
+        Box(Modifier
+            .fillMaxWidth()
+            .height(44.dp)
+            .border(1.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(16.dp))
+            .clickable { onLogout() },
+            contentAlignment = Alignment.Center) {
+            Text("退出登录", fontSize = 15.sp, color = MaterialTheme.colorScheme.primary)
+        }
+        Spacer(Modifier.height(12.dp))
+        Column(Modifier
+            .align(Alignment.End)
+            .padding(bottom = 16.dp)
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null
+            ) { onToggleDarkTheme() },
+            horizontalAlignment = Alignment.CenterHorizontally) {
+            Box(Modifier
+                .size(48.dp)
+                .clip(CircleShape)
+                .background(getOnSurfaceTertiary().copy(alpha = 0.05f)),
+                contentAlignment = Alignment.Center) {
+                Icon(
+                    painter = painterResource(if (isDarkTheme) R.drawable.sun else R.drawable.moon),
+                    contentDescription = null,
+                    modifier = Modifier.size(24.dp),
+                    tint = MaterialTheme.colorScheme.onSurface
+                )
+            }
+            Spacer(Modifier.height(4.dp))
+            Text(
+                if (isDarkTheme) "日间" else "夜间",
+                fontSize = 12.sp,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+        }
+    }
+}
+
+@Composable
+private fun ChangePasswordDialog(email: String, onDismiss: () -> Unit) {
+    val context = LocalContext.current
+    val repository = remember { SupabaseAuthRepository(context.applicationContext as android.app.Application) }
+    val scope = rememberCoroutineScope()
+    var step by remember { mutableIntStateOf(0) }
+    var emailInput by remember { mutableStateOf(email) }
+    var codeInput by remember { mutableStateOf("") }
+    var passwordInput by remember { mutableStateOf("") }
+    var error by remember { mutableStateOf<String?>(null) }
+
+    Dialog(onDismissRequest = onDismiss) {
+        Column(Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(MaterialTheme.colorScheme.surface)
+            .padding(20.dp)) {
+            Text("修改密码", fontWeight = FontWeight.Bold, fontSize = 18.sp, color = MaterialTheme.colorScheme.onSurface)
+            Spacer(Modifier.height(12.dp))
+            if (step == 0) {
+                OutlinedTextField(
+                    value = emailInput,
+                    onValueChange = { emailInput = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    label = { Text("邮箱") }
+                )
+                Spacer(Modifier.height(12.dp))
+                Box(Modifier
+                    .fillMaxWidth()
+                    .height(44.dp)
+                    .clip(RoundedCornerShape(20.dp))
+                    .background(MaterialTheme.colorScheme.primary)
+                    .clickable {
+                        scope.launch {
+                            repository.requestResetCode(emailInput).onSuccess {
+                                step = 1
+                                error = null
+                            }.onFailure { error = it.message }
+                        }
+                    },
+                    contentAlignment = Alignment.Center) {
+                    Text("发送验证码", color = Color.White, fontSize = 15.sp)
+                }
+            } else {
+                OutlinedTextField(
+                    value = codeInput,
+                    onValueChange = { codeInput = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    label = { Text("验证码") }
+                )
+                Spacer(Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = passwordInput,
+                    onValueChange = { passwordInput = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    label = { Text("新密码") }
+                )
+                Spacer(Modifier.height(12.dp))
+                Box(Modifier
+                    .fillMaxWidth()
+                    .height(44.dp)
+                    .clip(RoundedCornerShape(20.dp))
+                    .background(MaterialTheme.colorScheme.primary)
+                    .clickable {
+                        scope.launch {
+                            repository.verifyCodeAndReset(emailInput, codeInput, passwordInput).onSuccess {
+                                Toast.makeText(context, "密码修改成功", Toast.LENGTH_SHORT).show()
+                                onDismiss()
+                            }.onFailure { error = it.message }
+                        }
+                    },
+                    contentAlignment = Alignment.Center) {
+                    Text("确定", color = Color.White, fontSize = 15.sp)
+                }
+            }
+            if (error != null) {
+                Spacer(Modifier.height(8.dp))
+                Text(error!!, color = MaterialTheme.colorScheme.error, fontSize = 13.sp)
             }
         }
     }

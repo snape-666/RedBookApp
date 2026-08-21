@@ -55,6 +55,7 @@ import com.example.redbook.ui.component.AuthInputRow
 
 @Composable
 fun LoginScreen(
+    resetKey: Int = 0,
     onLoginSuccess: (SupabaseAuthRepository.UserData) -> Unit,
     onNavigateToRegister: () -> Unit
 ) {
@@ -62,6 +63,7 @@ fun LoginScreen(
     val focusManager = LocalFocusManager.current
     val interactionSource = remember { MutableInteractionSource() }
     val viewModel: AuthViewModel = viewModel(
+        key = "login_$resetKey",
         factory = AuthViewModelFactory(context.applicationContext as android.app.Application)
     )
     val loginState by viewModel.loginUiState.collectAsStateWithLifecycle()

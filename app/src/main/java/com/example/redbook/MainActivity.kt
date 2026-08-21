@@ -9,10 +9,13 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import com.example.redbook.ui.PostDetail.DetailScreen
 import com.example.redbook.ui.auth.LoginScreen
 import com.example.redbook.ui.auth.RegisterScreen
@@ -23,27 +26,41 @@ import com.example.redbook.ui.publish.PublishScreen
 import com.example.redbook.ui.video.VideoDetailScreen
 import com.example.redbook.ui.profile.ProfileScreen
 import com.example.redbook.ui.draft.DraftScreen
+import com.example.redbook.ui.browse.BrowseScreen
+import com.example.redbook.ui.editprofile.EditProfileScreen
 import com.example.redbook.data.model.Draft
+import com.example.redbook.data.repository.SupabaseAuthRepository
 import com.example.redbook.R
+import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContent {
-            RedBookTheme {
+            var isDarkTheme by remember { mutableStateOf(false) }
+            RedBookTheme(darkTheme = isDarkTheme) {
                 Surface(
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
                 ) {
-                    AppScreen()
+                    AppScreen(
+                        isDarkTheme = isDarkTheme,
+                        onToggleDarkTheme = { isDarkTheme = !isDarkTheme }
+                    )
                 }
             }
         }
     }
 }
 @Composable
-fun AppScreen() {
+fun AppScreen(
+    isDarkTheme: Boolean = false,
+    onToggleDarkTheme: () -> Unit = {}
+) {
+    val context = LocalContext.current
+    val browseRepo = remember { SupabaseAuthRepository(context.applicationContext as android.app.Application) }
+    val scope = rememberCoroutineScope()
     var currentScreen by remember { mutableStateOf<Screen>(Screen.Login) }
     var selectedPostId by remember { mutableStateOf("") }
     var selectedVideoId by remember { mutableStateOf("") }
@@ -53,7 +70,14 @@ fun AppScreen() {
     var userUid by remember { mutableStateOf("") }
     var userXhsId by remember { mutableStateOf("") }
     var userName by remember { mutableStateOf("") }
+    var userAccount by remember { mutableStateOf("") }
+    var userEmail by remember { mutableStateOf("") }
+    var userGender by remember { mutableStateOf("") }
+    var userBirthday by remember { mutableStateOf("") }
+    var userAvatarUrl by remember { mutableStateOf("") }
+    var userBackgroundUrl by remember { mutableStateOf("") }
     var editingDraft by remember { mutableStateOf<Draft?>(null) }
+    var loginResetKey by remember { mutableIntStateOf(0) }
 
     fun navigateTo(screen: Screen) {
         screenStack = screenStack + screen
@@ -67,13 +91,26 @@ fun AppScreen() {
         }
     }
 
+    fun recordBrowse(postId: String) {
+        if (userUid.isNotBlank() && postId.isNotBlank()) {
+            scope.launch { try { browseRepo.recordBrowse(userUid, postId) } catch (_: Exception) { } }
+        }
+    }
+
     when (currentScreen) {
         Screen.Login -> {
             LoginScreen(
+                resetKey = loginResetKey,
                 onLoginSuccess = { userData ->
                     userUid = userData.uid
                     userXhsId = userData.xhsId
                     userName = userData.nickname.ifBlank { userData.account }
+                    userAccount = userData.account
+                    userEmail = userData.email
+                    userGender = userData.gender
+                    userBirthday = userData.birthday
+                    userAvatarUrl = userData.avatarUrl
+                    userBackgroundUrl = userData.backgroundUrl
                     screenStack = listOf(Screen.Home)
                     currentScreen = Screen.Home
                 },
@@ -91,6 +128,7 @@ fun AppScreen() {
                 userUid = userUid,
                 onNavigateToDetail = { postId ->
                     selectedPostId = postId
+                    recordBrowse(postId)
                     navigateTo(Screen.Detail)
                 },
                 onNavigateToSearch = { navigateTo(Screen.Search) },
@@ -99,6 +137,7 @@ fun AppScreen() {
                 onNavigateToVideo = { videoId, videoUrl ->
                     selectedVideoId = videoId
                     selectedVideoUrl = videoUrl
+                    recordBrowse(videoId)
                     navigateTo(Screen.Video)
                 }
             )
@@ -131,22 +170,83 @@ fun AppScreen() {
                 userXhsId = userXhsId.ifBlank { "00000000000" },
                 ipLocation = "未知",
                 followCount = 0, fansCount = 0, likeCount = 0,
+                gender = userGender,
+                birthday = userBirthday,
+                avatarUrl = userAvatarUrl,
+                backgroundUrl = userBackgroundUrl,
                 onBack = { goBack() },
-                onEditProfile = { },
+                onEditProfile = { navigateTo(Screen.EditProfile) },
                 onBottomTabClick = { idx -> if (idx == 0) { screenStack = listOf(Screen.Home); currentScreen = Screen.Home } },
-                onPostClick = { postId -> selectedPostId = postId; navigateTo(Screen.Detail) },
+                onPostClick = { postId -> selectedPostId = postId; recordBrowse(postId); navigateTo(Screen.Detail) },
                 onVideoClick = { videoId, videoUrl ->
                     selectedVideoId = videoId
                     selectedVideoUrl = videoUrl
+                    recordBrowse(videoId)
                     navigateTo(Screen.Video)
                 },
                 onCommentClick = { postId, commentId ->
                     selectedPostId = postId
                     scrollToCommentId = commentId
+                    recordBrowse(postId)
                     navigateTo(Screen.Detail)
                 },
                 onPublish = { navigateTo(Screen.Publish) },
-                onDraftClick = { navigateTo(Screen.Draft) }
+                onDraftClick = { navigateTo(Screen.Draft) },
+                onBrowseClick = { navigateTo(Screen.Browse) },
+                account = userAccount,
+                email = userEmail,
+                isDarkTheme = isDarkTheme,
+                onToggleDarkTheme = onToggleDarkTheme,
+                onLogout = {
+                    userUid = ""
+                    userXhsId = ""
+                    userName = ""
+                    userAccount = ""
+                    userEmail = ""
+                    userGender = ""
+                    userBirthday = ""
+                    userAvatarUrl = ""
+                    userBackgroundUrl = ""
+                    loginResetKey++
+                    screenStack = listOf(Screen.Login)
+                    currentScreen = Screen.Login
+                }
+            )
+        }
+        Screen.Browse -> {
+            BrowseScreen(
+                userUid = userUid,
+                onBack = { goBack() },
+                onPostClick = { postId ->
+                    selectedPostId = postId
+                    recordBrowse(postId)
+                    navigateTo(Screen.Detail)
+                },
+                onVideoClick = { videoId, videoUrl ->
+                    selectedVideoId = videoId
+                    selectedVideoUrl = videoUrl
+                    recordBrowse(videoId)
+                    navigateTo(Screen.Video)
+                }
+            )
+        }
+        Screen.EditProfile -> {
+            EditProfileScreen(
+                userUid = userUid,
+                userName = userName,
+                userXhsId = userXhsId,
+                gender = userGender,
+                birthday = userBirthday,
+                avatarUrl = userAvatarUrl,
+                backgroundUrl = userBackgroundUrl,
+                onBack = { goBack() },
+                onDataChanged = { name, gender, birthday, avatarUrl, backgroundUrl ->
+                    userName = name
+                    userGender = gender
+                    userBirthday = birthday
+                    userAvatarUrl = avatarUrl
+                    userBackgroundUrl = backgroundUrl
+                }
             )
         }
         Screen.Draft -> {
@@ -182,6 +282,7 @@ fun AppScreen() {
                 onBack = { goBack() },
                 onNavigateToDetail = { postId ->
                     selectedPostId = postId
+                    recordBrowse(postId)
                     navigateTo(Screen.Detail)
                 }
             )
@@ -200,4 +301,6 @@ sealed class Screen {
     object Video : Screen()
     object Profile : Screen()
     object Draft : Screen()
+    object Browse : Screen()
+    object EditProfile : Screen()
 }
