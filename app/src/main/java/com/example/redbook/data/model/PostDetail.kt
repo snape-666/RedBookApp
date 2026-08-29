@@ -17,5 +17,6 @@ data class PostDetail(
     val isFollowed: Boolean,
     val authorId: String,
     val authorName: String,
-    val authorAvatar: Int
+    val authorAvatar: Int,
+    val authorAvatarUrl: String = ""
 )

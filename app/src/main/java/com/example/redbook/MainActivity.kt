@@ -28,6 +28,12 @@ import com.example.redbook.ui.profile.ProfileScreen
 import com.example.redbook.ui.draft.DraftScreen
 import com.example.redbook.ui.browse.BrowseScreen
 import com.example.redbook.ui.editprofile.EditProfileScreen
+import com.example.redbook.ui.notificationsetting.NotificationSettingScreen
+import com.example.redbook.ui.messages.MessagesScreen
+import com.example.redbook.ui.messages.ReceivedReactionsScreen
+import com.example.redbook.ui.messages.ReceivedCommentsScreen
+import com.example.redbook.ui.messages.FollowersScreen
+import com.example.redbook.ui.messages.ChatScreen
 import com.example.redbook.data.model.Draft
 import com.example.redbook.data.repository.SupabaseAuthRepository
 import com.example.redbook.R
@@ -65,6 +71,8 @@ fun AppScreen(
     var selectedPostId by remember { mutableStateOf("") }
     var selectedVideoId by remember { mutableStateOf("") }
     var selectedVideoUrl by remember { mutableStateOf("") }
+    var chatUserName by remember { mutableStateOf("") }
+    var chatUserAvatarUrl by remember { mutableStateOf("") }
     var scrollToCommentId by remember { mutableStateOf("") }
     var screenStack by remember { mutableStateOf(listOf<Screen>(Screen.Login)) }
     var userUid by remember { mutableStateOf("") }
@@ -134,6 +142,7 @@ fun AppScreen(
                 onNavigateToSearch = { navigateTo(Screen.Search) },
                 onNavigateToPublish = { navigateTo(Screen.Publish) },
                 onNavigateToProfile = { navigateTo(Screen.Profile) },
+                onNavigateToMessages = { navigateTo(Screen.Messages) },
                 onNavigateToVideo = { videoId, videoUrl ->
                     selectedVideoId = videoId
                     selectedVideoUrl = videoUrl
@@ -148,6 +157,7 @@ fun AppScreen(
                 userUid = userUid,
                 userXhsId = userXhsId,
                 userName = userName,
+                userAvatarUrl = userAvatarUrl,
                 scrollToCommentId = scrollToCommentId,
                 onCommentScrolled = { scrollToCommentId = "" },
                 onBack = { goBack() }
@@ -158,6 +168,7 @@ fun AppScreen(
                 authorUid = userUid,
                 authorXhsId = userXhsId,
                 authorName = userName,
+                authorAvatar = userAvatarUrl,
                 editDraft = editingDraft,
                 onBack = { editingDraft = null; goBack() },
                 onPublished = { editingDraft = null; goBack() }
@@ -197,6 +208,7 @@ fun AppScreen(
                 email = userEmail,
                 isDarkTheme = isDarkTheme,
                 onToggleDarkTheme = onToggleDarkTheme,
+                onNotification = { navigateTo(Screen.NotificationSetting) },
                 onLogout = {
                     userUid = ""
                     userXhsId = ""
@@ -228,6 +240,59 @@ fun AppScreen(
                     recordBrowse(videoId)
                     navigateTo(Screen.Video)
                 }
+            )
+        }
+        Screen.Messages -> {
+            MessagesScreen(
+                onBottomTabClick = { idx ->
+                    when (idx) {
+                        0 -> { screenStack = listOf(Screen.Home); currentScreen = Screen.Home }
+                        3 -> navigateTo(Screen.Profile)
+                    }
+                },
+                onPublish = { navigateTo(Screen.Publish) },
+                onLikeFavoriteClick = { navigateTo(Screen.ReceivedReactions) },
+                onCommentClick = { navigateTo(Screen.ReceivedComments) },
+                onFollowClick = { navigateTo(Screen.Followers) },
+                onConversationClick = { name, avatar ->
+                    chatUserName = name
+                    chatUserAvatarUrl = avatar
+                    navigateTo(Screen.Chat)
+                }
+            )
+        }
+        Screen.ReceivedReactions -> {
+            ReceivedReactionsScreen(
+                onBack = { goBack() },
+                onPostClick = { postId ->
+                    selectedPostId = postId
+                    recordBrowse(postId)
+                    navigateTo(Screen.Detail)
+                }
+            )
+        }
+        Screen.ReceivedComments -> {
+            ReceivedCommentsScreen(
+                onBack = { goBack() },
+                onPostClick = { postId ->
+                    selectedPostId = postId
+                    recordBrowse(postId)
+                    navigateTo(Screen.Detail)
+                }
+            )
+        }
+        Screen.Chat -> {
+            ChatScreen(
+                userName = chatUserName,
+                avatarUrl = chatUserAvatarUrl,
+                onBack = { goBack() }
+            )
+        }
+        Screen.Followers -> {
+            FollowersScreen(
+                userUid = userUid,
+                onBack = { goBack() },
+                onSendMessage = { }
             )
         }
         Screen.EditProfile -> {
@@ -271,6 +336,7 @@ fun AppScreen(
                 videoId = selectedVideoId,
                 userUid = userUid,
                 userXhsId = userXhsId,
+                authorAvatarUrl = userAvatarUrl,
                 onBack = { goBack() },
                 onFollowClick = {},
                 onLikeClick = {},
@@ -285,6 +351,11 @@ fun AppScreen(
                     recordBrowse(postId)
                     navigateTo(Screen.Detail)
                 }
+            )
+        }
+        Screen.NotificationSetting -> {
+            NotificationSettingScreen(
+                onBack = { goBack() }
             )
         }
     }
@@ -302,5 +373,11 @@ sealed class Screen {
     object Profile : Screen()
     object Draft : Screen()
     object Browse : Screen()
+    object Messages : Screen()
+    object ReceivedReactions : Screen()
+    object ReceivedComments : Screen()
+    object Followers : Screen()
+    object Chat : Screen()
     object EditProfile : Screen()
+    object NotificationSetting : Screen()
 }

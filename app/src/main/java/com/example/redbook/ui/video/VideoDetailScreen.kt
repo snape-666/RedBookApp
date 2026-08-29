@@ -56,6 +56,8 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
+import coil.compose.AsyncImage
+import coil.request.ImageRequest
 import com.example.redbook.R
 import com.example.redbook.data.model.Comment
 import com.example.redbook.data.model.Reply
@@ -76,6 +78,7 @@ fun VideoDetailScreen(
     videoId: String = "",
     userUid: String = "",
     userXhsId: String = "",
+    authorAvatarUrl: String = "",
     onBack: () -> Unit, onFollowClick: (Boolean) -> Unit,
     onLikeClick: (Int) -> Unit, onFavoriteClick: (Int) -> Unit
 ) {
@@ -86,6 +89,7 @@ fun VideoDetailScreen(
     var durMs by remember { mutableIntStateOf(0) }
     var vv by remember { mutableStateOf<VideoView?>(null) }
     var followed by remember { mutableStateOf(isFollowed) }
+    var authorUid by remember { mutableStateOf("") }
     var liked by remember { mutableStateOf(false) }
     var faved by remember { mutableStateOf(false) }
     var likeCnt by remember { mutableIntStateOf(likeCount) }
@@ -112,6 +116,10 @@ fun VideoDetailScreen(
                 if (p != null) {
                     likeCnt = p.optInt("like_count", 0)
                     favCnt = p.optInt("favorite_count", 0)
+                    authorUid = p.optString("author_uid", "")
+                    if (authorUid.isNotBlank()) {
+                        followed = repository.isFollowing(userUid, authorUid)
+                    }
                 }
             } catch (_: Exception) { }
         }
@@ -150,16 +158,35 @@ fun VideoDetailScreen(
             }
             // 作者
             Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                Image(painterResource(authorAvatar), null, Modifier.size(32.dp).clip(CircleShape), contentScale = ContentScale.Crop)
+                if (authorAvatarUrl.isNotBlank()) {
+                    AsyncImage(
+                        model = ImageRequest.Builder(LocalContext.current).data(authorAvatarUrl).crossfade(true).build(),
+                        contentDescription = null,
+                        modifier = Modifier.size(32.dp).clip(CircleShape),
+                        contentScale = ContentScale.Crop
+                    )
+                } else {
+                    Image(painterResource(authorAvatar), null, Modifier.size(32.dp).clip(CircleShape), contentScale = ContentScale.Crop)
+                }
                 Spacer(Modifier.width(5.dp))
                 Text(authorName, color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Medium)
                 Spacer(Modifier.width(5.dp))
-                if (followed) {
-                    Box(Modifier.border(1.dp, MaterialTheme.colorScheme.onPrimary, RoundedCornerShape(12.dp)).padding(horizontal = 10.dp, vertical = 2.dp).clickable { followed = false; onFollowClick(false) }) {
-                        Text("已关注", fontSize = 12.sp, color = MaterialTheme.colorScheme.onPrimary) }
-                } else {
-                    Box(Modifier.clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.primary).clickable { followed = true; onFollowClick(true) }.padding(horizontal = 10.dp, vertical = 2.dp)) {
-                        Text("关注", fontSize = 12.sp, color = MaterialTheme.colorScheme.onPrimary) }
+                if (authorUid != userUid) {
+                    if (followed) {
+                        Box(Modifier.border(1.dp, MaterialTheme.colorScheme.onPrimary, RoundedCornerShape(12.dp)).padding(horizontal = 10.dp, vertical = 2.dp).clickable {
+                            followed = false
+                            onFollowClick(false)
+                            if (authorUid.isNotBlank()) scope.launch { try { repository.follow(userUid, authorUid, false) } catch (_: Exception) { } }
+                        }) {
+                            Text("已关注", fontSize = 12.sp, color = MaterialTheme.colorScheme.onPrimary) }
+                    } else {
+                        Box(Modifier.clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.primary).clickable {
+                            followed = true
+                            onFollowClick(true)
+                            if (authorUid.isNotBlank()) scope.launch { try { repository.follow(userUid, authorUid, true) } catch (_: Exception) { } }
+                        }.padding(horizontal = 10.dp, vertical = 2.dp)) {
+                            Text("关注", fontSize = 12.sp, color = MaterialTheme.colorScheme.onPrimary) }
+                    }
                 }
                 Spacer(Modifier.weight(1f))
                 if (durMs > 0) Text("${left / 60}:${String.format("%02d", left % 60)}", color = Color.White.copy(alpha = 0.7f), fontSize = 12.sp)

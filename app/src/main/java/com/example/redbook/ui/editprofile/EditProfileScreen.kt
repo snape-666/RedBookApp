@@ -189,7 +189,7 @@ fun EditProfileScreen(
                             painter = painterResource(R.drawable.camera),
                             contentDescription = "更换头像",
                             modifier = Modifier.fillMaxSize(),
-                            tint = MaterialTheme.colorScheme.onSurface
+                            tint = Color.Unspecified
                         )
                     }
                 }

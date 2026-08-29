@@ -64,6 +64,7 @@ fun RegisterScreen(
 
     LaunchedEffect(registerState.registerSuccess) {
         if (registerState.registerSuccess) {
+            viewModel.clearRegisterState()
             onRegisterSuccess()
         }
     }

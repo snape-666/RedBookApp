@@ -243,6 +243,14 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
         _registerUiState.value = _registerUiState.value.copy(registerSuccess = false)
     }
 
+    fun clearLoginState() {
+        _loginUiState.value = LoginUiState()
+    }
+
+    fun clearRegisterState() {
+        _registerUiState.value = RegisterUiState()
+    }
+
     data class LoginUiState(
         val email: String = "",
         val password: String = "",

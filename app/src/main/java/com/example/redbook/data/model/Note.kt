@@ -6,6 +6,7 @@ data class Note(
     val imageUrl: String = "",
     val title: String = "",
     val avatarRes: Int = 0,
+    val avatarUrl: String = "",
     val userName: String = "",
     val likeCount: Int = 0,
     val isLiked: Boolean = false

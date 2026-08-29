@@ -35,11 +35,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import coil.compose.AsyncImage
+import coil.request.ImageRequest
 import com.example.redbook.R
 import com.example.redbook.ui.theme.RedBookTheme
 import com.example.redbook.ui.theme.getOnSurfaceSecondary
@@ -368,10 +371,12 @@ fun NoteCardBar(
     backIconRes:Int,
     onBackIconClick:()-> Unit,
     avatarRes:Int,
+    avatarUrl: String = "",
     name:String,
     onUserClick:()-> Unit,
     isFollowed: Boolean,
     onFollowClick:(Boolean)-> Unit,
+    showFollow: Boolean = true,
 ){
     val primaryColor= MaterialTheme.colorScheme.primary
     val borderColor = if (isFollowed) getOnSurfaceSecondary() else primaryColor
@@ -414,14 +419,25 @@ fun NoteCardBar(
          )
 
          Spacer(modifier = Modifier.width(5.dp))
-         Image(
-             painter = painterResource(id = avatarRes),
-             contentDescription = "头像",
-             modifier = Modifier
-                 .size(32.dp)
-                 .clip(CircleShape),
-                     contentScale = ContentScale.Crop
-         )
+         if (avatarUrl.isNotBlank()) {
+             AsyncImage(
+                 model = ImageRequest.Builder(LocalContext.current).data(avatarUrl).crossfade(true).build(),
+                 contentDescription = "头像",
+                 modifier = Modifier
+                     .size(32.dp)
+                     .clip(CircleShape),
+                 contentScale = ContentScale.Crop
+             )
+         } else {
+             Image(
+                 painter = painterResource(id = avatarRes),
+                 contentDescription = "头像",
+                 modifier = Modifier
+                     .size(32.dp)
+                     .clip(CircleShape),
+                 contentScale = ContentScale.Crop
+             )
+         }
          Spacer(modifier = Modifier.width(5.dp))
 
          Text(
@@ -434,29 +450,31 @@ fun NoteCardBar(
 
      }
 
-     Box(
-         modifier= Modifier
-             .clip(RoundedCornerShape(20.dp))
-             .border(
-                 width = 1.dp,
-                 color = borderColor,
-                 shape = RoundedCornerShape(20.dp)
-             )
-             .padding(horizontal = 15.dp, vertical = 5.dp)
-             .clickable(
-                 interactionSource = remember { MutableInteractionSource() },
-                 indication = null
+     if (showFollow) {
+         Box(
+             modifier= Modifier
+                 .clip(RoundedCornerShape(20.dp))
+                 .border(
+                     width = 1.dp,
+                     color = borderColor,
+                     shape = RoundedCornerShape(20.dp)
+                 )
+                 .padding(horizontal = 15.dp, vertical = 5.dp)
+                 .clickable(
+                     interactionSource = remember { MutableInteractionSource() },
+                     indication = null
+                 ){
+                     onFollowClick(!isFollowed)
+                 },
+                 contentAlignment = Alignment.Center
              ){
-                 onFollowClick(!isFollowed)
-             },
-             contentAlignment = Alignment.Center
-         ){
-         Text(
-             text = if (isFollowed)"已关注" else "关注",
-             fontSize = 12.sp,
-             fontWeight = FontWeight.Medium,
-             color = textColor
-         )
+             Text(
+                 text = if (isFollowed)"已关注" else "关注",
+                 fontSize = 12.sp,
+                 fontWeight = FontWeight.Medium,
+                 color = textColor
+             )
+         }
      }
 
  }
@@ -527,16 +545,18 @@ fun NoteCardBottomBar(
     initialFavoriteCount: Int = 0,
     initialIsFavorited: Boolean = false,
     initialCommentCount: Int = 0,
+    likeEnabled: Boolean = true,
+    favoriteEnabled: Boolean = true,
     onCommentInputClick: () -> Unit,
     onLikeClick: (Int) -> Unit,
     onFavoriteClick: (Int) -> Unit,
     onCommentIconClick: () -> Unit,
 ){
 
-    var isLiked by remember { mutableStateOf(initialIsLiked) }
-    var likeCount by remember { mutableIntStateOf(initialLikeCount) }
-    var favoriteCount by remember { mutableIntStateOf(initialFavoriteCount) }
-    var isFavorited by remember { mutableStateOf(initialIsFavorited) }
+    var isLiked by remember(initialIsLiked) { mutableStateOf(initialIsLiked) }
+    var likeCount by remember(initialLikeCount) { mutableIntStateOf(initialLikeCount) }
+    var favoriteCount by remember(initialFavoriteCount) { mutableIntStateOf(initialFavoriteCount) }
+    var isFavorited by remember(initialIsFavorited) { mutableStateOf(initialIsFavorited) }
 
     val primaryColor = MaterialTheme.colorScheme.primary
 
@@ -589,10 +609,12 @@ fun NoteCardBottomBar(
                     isActive = isLiked,
                     activeColor = primaryColor,
                     onActionClick = {
-                        isLiked = !isLiked
-                        val newCount = if (isLiked) likeCount + 1 else likeCount - 1
-                        likeCount = newCount
-                        onLikeClick(newCount)
+                        if (likeEnabled) {
+                            isLiked = !isLiked
+                            val newCount = if (isLiked) likeCount + 1 else likeCount - 1
+                            likeCount = newCount
+                            onLikeClick(newCount)
+                        }
                     }
                 )
 
@@ -602,10 +624,12 @@ fun NoteCardBottomBar(
                     isActive = isFavorited,
                     activeColor = primaryColor,
                     onActionClick = {
-                        isFavorited = !isFavorited
-                        val newCount = if (isFavorited) favoriteCount + 1 else favoriteCount - 1
-                        favoriteCount = newCount
-                        onFavoriteClick(newCount)
+                        if (favoriteEnabled) {
+                            isFavorited = !isFavorited
+                            val newCount = if (isFavorited) favoriteCount + 1 else favoriteCount - 1
+                            favoriteCount = newCount
+                            onFavoriteClick(newCount)
+                        }
                     }
                 )
 

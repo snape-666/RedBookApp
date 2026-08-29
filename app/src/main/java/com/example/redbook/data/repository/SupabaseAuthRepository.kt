@@ -50,9 +50,15 @@ class SupabaseAuthRepository(private val app: Application) {
                     }
                     val response = supabasePost("/auth/v1/signup", body)
                     val uid = response.getJSONObject("user").getString("id")
-                    insertUserMapping(uid, account, email)
-                    // 存储 xhs_id 到 users 表（失败不阻断注册）
-                    try { patchUserRow(uid, JSONObject().apply { put("xhs_id", xhsId) }) } catch (_: Exception) { }
+                    // 插入 users 表（失败不阻断注册，登录时会补全）
+                    try { insertUserMapping(uid, account, email, nickname ?: account) } catch (_: Exception) { }
+                    // 存储 xhs_id 和 nickname 到 users 表（失败不阻断注册）
+                    try {
+                        patchUserRow(uid, JSONObject().apply {
+                            put("xhs_id", xhsId)
+                            if (!nickname.isNullOrBlank()) put("nickname", nickname)
+                        })
+                    } catch (_: Exception) { }
                     Result.success(uid)
                 }
                 result ?: Result.failure(Exception("网络连接超时"))
@@ -303,9 +309,10 @@ class SupabaseAuthRepository(private val app: Application) {
         }
     }
 
-    private suspend fun insertUserMapping(uid: String, account: String, email: String) {
+    private suspend fun insertUserMapping(uid: String, account: String, email: String, nickname: String = "") {
         val body = JSONObject().apply {
             put("uid", uid); put("account", account); put("email", email)
+            if (nickname.isNotBlank()) put("nickname", nickname)
         }.toString()
         suspendCancellableCoroutine<String> { cont ->
             val request = object : StringRequest(
@@ -338,10 +345,10 @@ class SupabaseAuthRepository(private val app: Application) {
         val msg = (e.message ?: "").lowercase()
         return when {
             msg.contains("超时") || msg.contains("timeout") -> "网络连接超时"
-            msg.contains("user already registered") -> "该邮箱已被注册"
+            msg.contains("user already registered") || (msg.contains("422") && msg.contains("registered")) -> "该邮箱已被注册"
             msg.contains("invalid login credentials") -> "账号或密码错误"
             msg.contains("password should be at least") -> "密码长度至少需要6位"
-            msg.contains("422") -> msg.removePrefix("422: ").ifBlank { "请求格式不正确" }
+            msg.contains("422") -> "注册信息有误，请检查邮箱或密码"
             msg.contains("429") -> "操作太频繁，请稍后再试"
             else -> msg.ifBlank { "操作失败，请重试" }
         }
@@ -406,7 +413,7 @@ class SupabaseAuthRepository(private val app: Application) {
     }
 
     suspend fun publishPost(postId: String, title: String, content: String,
-                            authorUid: String, authorName: String, authorXhsId: String, imageUrl: String = "") {
+                            authorUid: String, authorName: String, authorXhsId: String, imageUrl: String = "", authorAvatar: String = "") {
         val body = JSONObject().apply {
             put("post_id", postId)
             put("title", title)
@@ -414,6 +421,7 @@ class SupabaseAuthRepository(private val app: Application) {
             put("author_uid", authorUid)
             put("author_name", authorName)
             put("author_xhs_id", authorXhsId)
+            put("author_avatar", authorAvatar)
             put("image_url", imageUrl)
             put("created_at", System.currentTimeMillis())
         }
@@ -530,6 +538,7 @@ class SupabaseAuthRepository(private val app: Application) {
         val arr = resp.optJSONArray("users") ?: resp.optJSONArray("posts") ?: return null
         return if (arr.length() > 0) arr.getJSONObject(0) else null
     }
+
     // 记录点赞/取消点赞（按uid绑定）
     suspend fun recordLike(userUid: String, postId: String, liked: Boolean) {
         if (liked) {
@@ -759,6 +768,67 @@ class SupabaseAuthRepository(private val app: Application) {
     // 删除浏览记录
     suspend fun deleteBrowse(userUid: String, postId: String) {
         supabaseDelete("/rest/v1/browsing_history?user_uid=eq.$userUid&post_id=eq.$postId")
+    }
+
+    // 关注/取消关注（按用户 uid）
+    suspend fun follow(followerUid: String, followedUid: String, following: Boolean) {
+        if (followerUid.isBlank() || followedUid.isBlank() || followerUid == followedUid) return
+        if (following) {
+            val body = JSONObject().apply {
+                put("follower_uid", followerUid)
+                put("followed_uid", followedUid)
+                put("created_at", System.currentTimeMillis())
+            }
+            supabasePostBody("/rest/v1/follows", body)
+        } else {
+            supabaseDelete("/rest/v1/follows?follower_uid=eq.$followerUid&followed_uid=eq.$followedUid")
+        }
+    }
+
+    // 是否已关注
+    suspend fun isFollowing(followerUid: String, followedUid: String): Boolean {
+        if (followerUid.isBlank() || followedUid.isBlank()) return false
+        return try {
+            val resp = queryRest("follows", "select=follower_uid&follower_uid=eq.$followerUid&followed_uid=eq.$followedUid&limit=1")
+            (resp.optJSONArray("users")?.length() ?: 0) > 0
+        } catch (e: Exception) { false }
+    }
+
+    // 关注我的用户列表（按关注时间倒序），返回 uid,nickname,avatar_url,created_at
+    suspend fun getMyFollowers(userUid: String): JSONArray {
+        val resp = queryRest("follows", "select=follower_uid,created_at&followed_uid=eq.$userUid&order=created_at.desc")
+        val arr = resp.optJSONArray("users") ?: resp.optJSONArray("follows") ?: JSONArray()
+        if (arr.length() == 0) return JSONArray()
+        val followerUids = (0 until arr.length()).map { arr.getJSONObject(it).getString("follower_uid") }
+        val filters = followerUids.joinToString(",") { "uid.eq.$it" }
+        val usersResp = queryRest("users", "select=uid,nickname,avatar_url&or=($filters)")
+        val usersArr = usersResp.optJSONArray("users") ?: JSONArray()
+        val userMap = (0 until usersArr.length()).associateBy(
+            { usersArr.getJSONObject(it).optString("uid", "") },
+            { usersArr.getJSONObject(it) }
+        )
+        val result = JSONArray()
+        for (i in 0 until arr.length()) {
+            val f = arr.getJSONObject(i)
+            val uid = f.optString("follower_uid", "")
+            val u = userMap[uid] ?: continue
+            result.put(JSONObject().apply {
+                put("uid", uid)
+                put("nickname", u.optString("nickname", ""))
+                put("avatar_url", u.optString("avatar_url", ""))
+                put("created_at", f.optLong("created_at", 0L))
+            })
+        }
+        return result
+    }
+
+    // 我已关注的 uid 集合
+    suspend fun getFollowingUids(userUid: String): Set<String> {
+        return try {
+            val resp = queryRest("follows", "select=followed_uid&follower_uid=eq.$userUid")
+            val arr = resp.optJSONArray("users") ?: resp.optJSONArray("follows") ?: JSONArray()
+            (0 until arr.length()).map { arr.getJSONObject(it).getString("followed_uid") }.toSet()
+        } catch (e: Exception) { emptySet() }
     }
 
     // 更新用户资料

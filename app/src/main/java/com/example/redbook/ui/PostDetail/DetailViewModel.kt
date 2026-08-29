@@ -73,7 +73,8 @@ class DetailViewModel(
                         isLiked = false, isFavorited = false, isFollowed = false,
                         authorId = p.optString("author_uid", ""),
                         authorName = p.optString("author_name", ""),
-                        authorAvatar = R.drawable.test
+                        authorAvatar = R.drawable.test,
+                        authorAvatarUrl = p.optString("author_avatar", "")
                     )
                     val cloudComments = repository.getComments(post.postId)
                     val raw = (0 until cloudComments.length()).map { i ->
@@ -114,7 +115,36 @@ class DetailViewModel(
                     }
                     val isLiked = repository.hasLiked(userUid, post.postId)
                     val isFavorited = repository.hasFavorited(userUid, post.postId)
-                    val finalPost = post.copy(isLiked = isLiked, isFavorited = isFavorited)
+                    val isFollowed = repository.isFollowing(userUid, post.authorId)
+                    android.util.Log.d("RedBook", "isFollowing uid=$userUid author=${post.authorId} = $isFollowed")
+                    var cleanLiked = isLiked
+                    var cleanFavorited = isFavorited
+                    var likeCount = post.likeCount
+                    var favoriteCount = post.favoriteCount
+                    if (post.authorId == userUid) {
+                        // 作者不能赞/收藏自己的笔记：若历史误操作留下了自己的记录，打开时自动清理
+                        try {
+                            if (isLiked) {
+                                repository.recordLike(userUid, post.postId, false)
+                                repository.updatePostLike(post.postId, -1)
+                                cleanLiked = false
+                                likeCount = (likeCount - 1).coerceAtLeast(0)
+                            }
+                            if (isFavorited) {
+                                repository.recordFavorite(userUid, post.postId, false)
+                                repository.updatePostFav(post.postId, -1)
+                                cleanFavorited = false
+                                favoriteCount = (favoriteCount - 1).coerceAtLeast(0)
+                            }
+                        } catch (_: Exception) { }
+                    }
+                    val finalPost = post.copy(
+                        isLiked = cleanLiked,
+                        isFavorited = cleanFavorited,
+                        isFollowed = isFollowed,
+                        likeCount = likeCount,
+                        favoriteCount = favoriteCount
+                    )
                     _uiState.value = DetailUiState.Success(finalPost, comments)
                     repository.incrementViewCount(postId)
                     return@launch
@@ -201,6 +231,7 @@ class DetailViewModel(
         val currentState = _uiState.value
         if (currentState is DetailUiState.Success) {
             val post = currentState.post
+            if (post.authorId == userUid) return
             val newLiked = !post.isLiked
             val newCount = (if (newLiked) post.likeCount + 1 else post.likeCount - 1).coerceAtLeast(0)
             _uiState.value = currentState.copy(post = post.copy(isLiked = newLiked, likeCount = newCount))
@@ -217,6 +248,7 @@ class DetailViewModel(
         val currentState = _uiState.value
         if (currentState is DetailUiState.Success) {
             val post = currentState.post
+            if (post.authorId == userUid) return
             val newFavorited = !post.isFavorited
             val newCount = (if (newFavorited) post.favoriteCount + 1 else post.favoriteCount - 1).coerceAtLeast(0)
             _uiState.value = currentState.copy(post = post.copy(isFavorited = newFavorited, favoriteCount = newCount))
@@ -230,11 +262,20 @@ class DetailViewModel(
     }
 
     fun toggleFollowAuthor() {
-        updatePost { post ->
-            post.copy(isFollowed = !post.isFollowed)
+        val currentState = _uiState.value
+        if (currentState is DetailUiState.Success) {
+            val post = currentState.post
+            val newFollowed = !post.isFollowed
+            android.util.Log.d("RedBook", "toggleFollow uid=$userUid author=${post.authorId} new=$newFollowed")
+            updatePost { it.copy(isFollowed = newFollowed) }
+            viewModelScope.launch {
+                try {
+                    repository.follow(userUid, post.authorId, newFollowed)
+                    android.util.Log.d("RedBook", "follow ok")
+                } catch (e: Exception) { android.util.Log.e("RedBook", "follow err: ${e.message}") }
+            }
         }
     }
-
 
     fun toggleCommentLike(commentId: String) {
         val currentState = _uiState.value

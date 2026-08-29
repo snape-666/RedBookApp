@@ -17,6 +17,7 @@ class PublishViewModel(
     val authorUid: String,
     val authorXhsId: String,
     val authorName: String,
+    val authorAvatar: String = "",
     editDraft: com.example.redbook.data.model.Draft? = null
 ) : AndroidViewModel(application) {
 
@@ -120,7 +121,7 @@ class PublishViewModel(
                     val url = repository.uploadImage(uri, getApplication())
                     if (url == null) { _uiState.value = state.copy(isSaving = false, error = "上传失败"); return@launch }
                     repository.publishPost("vid_${System.currentTimeMillis()}", state.title, "",
-                        authorUid, authorName, authorXhsId, url)
+                        authorUid, authorName, authorXhsId, url, authorAvatar)
                 } else {
                     val urls = mutableListOf<String>()
                     for (img in state.images) {
@@ -130,7 +131,7 @@ class PublishViewModel(
                     }
                     if (state.images.isNotEmpty() && urls.isEmpty()) { _uiState.value = state.copy(isSaving = false, error = "上传失败"); return@launch }
                     android.util.Log.d("RedBook", "publish images=${state.images.size} urls=${urls.size} -> ${urls.joinToString(",")}")
-                    repository.publishPost("post_${System.currentTimeMillis()}", state.title, state.content, authorUid, authorName, authorXhsId, urls.joinToString(","))
+                    repository.publishPost("post_${System.currentTimeMillis()}", state.title, state.content, authorUid, authorName, authorXhsId, urls.joinToString(","), authorAvatar)
                 }
                 if (editDraftId != null) {
                     try { repository.deleteDraft(editDraftId) } catch (e: Exception) { }

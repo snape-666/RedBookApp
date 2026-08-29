@@ -39,6 +39,8 @@ class SearchViewModel(application: Application) : AndroidViewModel(application) 
                         title = p.optString("title", ""),
                         imageRes = R.drawable.test,
                         avatarRes = R.drawable.test,
+                        avatarUrl = p.optString("author_avatar", ""),
+                        imageUrl = p.optString("image_url", ""),
                         userName = p.optString("author_name", ""),
                         likeCount = p.optInt("like_count", 0)
                     )

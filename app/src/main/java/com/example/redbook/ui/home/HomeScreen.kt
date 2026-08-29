@@ -42,7 +42,8 @@ fun HomeScreen(
     onNavigateToSearch: () -> Unit = {},
     onNavigateToPublish: () -> Unit = {},
     onNavigateToVideo: (String, String) -> Unit = { _, _ -> },
-    onNavigateToProfile: () -> Unit = {}
+    onNavigateToProfile: () -> Unit = {},
+    onNavigateToMessages: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val viewModel: HomeViewModel = viewModel(factory = HomeViewModelFactory(context.applicationContext as android.app.Application, userUid))
@@ -116,7 +117,8 @@ fun HomeScreen(
                                 if (note.imageUrl.startsWith("video:")) onNavigateToVideo(note.id, note.imageUrl.removePrefix("video:"))
                                 else onNavigateToDetail(note.id)
                             },
-                            imageUrl = note.imageUrl
+                            imageUrl = note.imageUrl,
+                            avatarUrl = note.avatarUrl
                         )
                     }
                 }
@@ -140,6 +142,7 @@ fun HomeScreen(
             selectedIndex = selectedBottomIndex,
             onTitleClick = {index->
                 selectedBottomIndex=index
+                if (index == 2) onNavigateToMessages()
                 if (index == 3) onNavigateToProfile()
             },
             fabIconRes = R.drawable.social_icons,

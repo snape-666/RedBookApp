@@ -58,13 +58,14 @@ fun PublishScreen(
     authorUid: String,
     authorXhsId: String,
     authorName: String,
+    authorAvatar: String = "",
     editDraft: com.example.redbook.data.model.Draft? = null,
     onBack: () -> Unit,
     onPublished: () -> Unit
 ) {
     val context = LocalContext.current
-    val viewModel = remember(authorUid, authorXhsId, authorName, editDraft?.draftId) {
-        PublishViewModelBuilder.build(context.applicationContext as android.app.Application, authorUid, authorXhsId, authorName, editDraft)
+    val viewModel = remember(authorUid, authorXhsId, authorName, authorAvatar, editDraft?.draftId) {
+        PublishViewModelBuilder.build(context.applicationContext as android.app.Application, authorUid, authorXhsId, authorName, authorAvatar, editDraft)
     }
     val state by viewModel.uiState.collectAsStateWithLifecycle()
 
@@ -202,9 +203,9 @@ fun PublishScreen(
 
 object PublishViewModelBuilder {
     fun build(
-        app: android.app.Application, uid: String, xhsId: String, name: String,
+        app: android.app.Application, uid: String, xhsId: String, name: String, avatar: String = "",
         editDraft: com.example.redbook.data.model.Draft? = null
-    ): PublishViewModel = PublishViewModel(app, uid, xhsId, name, editDraft)
+    ): PublishViewModel = PublishViewModel(app, uid, xhsId, name, avatar, editDraft)
 }
 
 @Composable

@@ -104,7 +104,8 @@ fun ProfileScreen(
     email: String = "",
     isDarkTheme: Boolean = false,
     onToggleDarkTheme: () -> Unit = {},
-    onLogout: () -> Unit = {}
+    onLogout: () -> Unit = {},
+    onNotification: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val viewModel: ProfileViewModel = viewModel(factory = ProfileViewModelFactory(context.applicationContext as android.app.Application, userUid, userXhsId))
@@ -182,7 +183,8 @@ fun ProfileScreen(
                                                 if (note.imageUrl.startsWith("video:")) onVideoClick(note.id, note.imageUrl.removePrefix("video:"))
                                                 else onPostClick(note.id)
                                             },
-                                            imageUrl = note.imageUrl)
+                                            imageUrl = note.imageUrl,
+                                            avatarUrl = note.avatarUrl)
                                     }
                                 }
                                 1 -> {
@@ -230,7 +232,8 @@ fun ProfileScreen(
                                                 if (note.imageUrl.startsWith("video:")) onVideoClick(note.id, note.imageUrl.removePrefix("video:"))
                                                 else onPostClick(note.id)
                                             },
-                                            imageUrl = note.imageUrl)
+                                            imageUrl = note.imageUrl,
+                                            avatarUrl = note.avatarUrl)
                                     }
                                 }
                                 3 -> {
@@ -246,7 +249,8 @@ fun ProfileScreen(
                                                 if (note.imageUrl.startsWith("video:")) onVideoClick(note.id, note.imageUrl.removePrefix("video:"))
                                                 else onPostClick(note.id)
                                             },
-                                            imageUrl = note.imageUrl)
+                                            imageUrl = note.imageUrl,
+                                            avatarUrl = note.avatarUrl)
                                     }
                             }
                         }
@@ -292,7 +296,7 @@ fun ProfileScreen(
                             .padding(horizontal = 24.dp, vertical = 20.dp),
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
-                        Text("删除评论", fontWeight = FontWeight.Bold, fontSize = 18.sp, color = MaterialTheme.colorScheme.onSurface)
+                        Text("删除评论", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurface)
                         Spacer(Modifier.height(8.dp))
                         Text("确定删除该评论吗？", fontSize = 14.sp, color = getOnSurfaceSecondary())
                     }
@@ -341,7 +345,7 @@ fun ProfileScreen(
                     onDraftClick = { showDrawer = false; onDraftClick() },
                     onBrowseClick = { showDrawer = false; onBrowseClick() },
                     onChangePassword = { showDrawer = false; changePasswordVisible = true },
-                    onNotification = { showDrawer = false },
+                    onNotification = { showDrawer = false; onNotification() },
                     onLogout = { showDrawer = false; onLogout() },
                     onToggleDarkTheme = onToggleDarkTheme
                 )
@@ -440,8 +444,8 @@ private fun ProfileHeader(
                 Spacer(Modifier.width(16.dp))
                 Column {
                     Text(userName, fontSize = 18.sp, fontWeight = FontWeight.Bold, color = onPri)
-                    Text("小红书号：$userXhsId", fontSize = 13.sp, color = onPri.copy(alpha = 0.9f))
-                    Text("IP：$ipLocation", fontSize = 13.sp, color = onPri.copy(alpha = 0.9f))
+                    Text("小红书号：$userXhsId", fontSize = 13.sp, color = onPri.copy(alpha = 0.95f))
+                    Text("IP：$ipLocation", fontSize = 13.sp, color = onPri.copy(alpha = 0.95f))
                 }
             }
 
@@ -862,7 +866,7 @@ private fun ChangePasswordDialog(email: String, onDismiss: () -> Unit) {
             .clip(RoundedCornerShape(12.dp))
             .background(MaterialTheme.colorScheme.surface)
             .padding(20.dp)) {
-            Text("修改密码", fontWeight = FontWeight.Bold, fontSize = 18.sp, color = MaterialTheme.colorScheme.onSurface)
+            Text("修改密码", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurface)
             Spacer(Modifier.height(12.dp))
             if (step == 0) {
                 OutlinedTextField(

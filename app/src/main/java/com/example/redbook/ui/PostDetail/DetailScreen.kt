@@ -15,12 +15,15 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -37,6 +40,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -60,6 +64,7 @@ fun DetailScreen(
     userUid: String = "",
     userXhsId: String = "",
     userName: String = "",
+    userAvatarUrl: String = "",
     scrollToCommentId: String = "",
     onCommentScrolled: () -> Unit = {},
     onBack: () -> Unit = {}
@@ -82,7 +87,7 @@ fun DetailScreen(
             val comments = (uiState as DetailUiState.Success).comments
             val idx = comments.indexOfFirst { it.id == scrollToCommentId }
             if (idx >= 0) {
-                lazyListState.animateScrollToItem(2 + idx)
+                lazyListState.animateScrollToItem(3 + idx)
             }
             onCommentScrolled()
         }
@@ -104,10 +109,12 @@ fun DetailScreen(
                     backIconRes = R.drawable.arrow_left,
                     onBackIconClick = onBack,
                     avatarRes = post?.authorAvatar ?: R.drawable.test,
+                    avatarUrl = post?.authorAvatarUrl ?: "",
                     name = post?.authorName ?: "",
                     onUserClick = { /* 跳转作者主页 */ },
                     isFollowed = post?.isFollowed ?: false,
-                    onFollowClick = { viewModel.toggleFollowAuthor() }
+                    onFollowClick = { viewModel.toggleFollowAuthor() },
+                    showFollow = post?.authorId != userUid
                 )
             }
         },
@@ -123,6 +130,8 @@ fun DetailScreen(
                         initialFavoriteCount = post?.favoriteCount ?: 0,
                         initialIsFavorited = post?.isFavorited ?: false,
                         initialCommentCount = comments?.size ?: 0,
+                        likeEnabled = post?.authorId != userUid,
+                        favoriteEnabled = post?.authorId != userUid,
                         onCommentInputClick = {
                             viewModel.setKeyboardVisible(true)
                             focusRequester.requestFocus()
@@ -168,8 +177,36 @@ fun DetailScreen(
                         }
 
                         item {
+                            HorizontalDivider(
+                                color = getOutline().copy(alpha = 0.3f),
+                                thickness = 0.5.dp
+                            )
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = "共${comments.size}条评论",
+                                    fontSize = 15.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Icon(
+                                    painter = painterResource(id = R.drawable.sort),
+                                    contentDescription = "排序",
+                                    modifier = Modifier.size(20.dp),
+                                    tint = MaterialTheme.colorScheme.onSurface
+                                )
+                            }
+                        }
+
+                        item {
                             CommentInputArea(
                                 avatarRes = R.drawable.test,
+                                avatarUrl = userAvatarUrl,
                                 onInputFocus = {
                                     viewModel.setKeyboardVisible(true)
                                     focusRequester.requestFocus()

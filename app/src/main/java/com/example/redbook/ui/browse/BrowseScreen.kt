@@ -378,14 +378,25 @@ private fun BrowseCard(
                     .padding(start = 10.dp, end = 10.dp, bottom = 5.dp)
             ) {
                 Row(modifier = Modifier.weight(1f)) {
-                    Image(
-                        painter = painterResource(id = note.avatarRes),
-                        contentDescription = "头像",
-                        modifier = Modifier
-                            .size(28.dp)
-                            .clip(CircleShape),
-                        contentScale = ContentScale.Crop
-                    )
+                    if (note.avatarUrl.isNotBlank()) {
+                        AsyncImage(
+                            model = ImageRequest.Builder(LocalContext.current).data(note.avatarUrl).crossfade(true).build(),
+                            contentDescription = "头像",
+                            modifier = Modifier
+                                .size(28.dp)
+                                .clip(CircleShape),
+                            contentScale = ContentScale.Crop
+                        )
+                    } else {
+                        Image(
+                            painter = painterResource(id = note.avatarRes),
+                            contentDescription = "头像",
+                            modifier = Modifier
+                                .size(28.dp)
+                                .clip(CircleShape),
+                            contentScale = ContentScale.Crop
+                        )
+                    }
                     Text(
                         text = note.userName,
                         modifier = Modifier.padding(start = 8.dp),

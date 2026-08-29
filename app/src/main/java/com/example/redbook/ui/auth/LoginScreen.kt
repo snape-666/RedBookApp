@@ -75,6 +75,7 @@ fun LoginScreen(
     LaunchedEffect(loginState.loginSuccess) {
         if (loginState.loginSuccess) {
             loginState.loggedInUser?.let { user ->
+                viewModel.clearLoginState()
                 onLoginSuccess(user)
             }
         }

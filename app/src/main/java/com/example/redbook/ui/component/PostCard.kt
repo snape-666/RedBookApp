@@ -54,7 +54,8 @@ fun PostCard(
     likeCount : String,
     modifier: Modifier = Modifier,
     onCardClick: () -> Unit = {},
-    imageUrl: String = ""
+    imageUrl: String = "",
+    avatarUrl: String = ""
 ) {
     val likeIconRes = if (isLiked) R.drawable.favorite_fill else R.drawable.favorite_light
     Card(
@@ -133,14 +134,25 @@ fun PostCard(
                     modifier = Modifier.weight(1f)
 
                 ) {
-                    Image(
-                        painter = painterResource(id = avatarRes),
-                        contentDescription = "Avatar",
-                        modifier = Modifier
-                            .size(28.dp)
-                            .clip(CircleShape),
-                        contentScale = ContentScale.Crop
-                    )
+                    if (avatarUrl.isNotBlank()) {
+                        AsyncImage(
+                            model = ImageRequest.Builder(LocalContext.current).data(avatarUrl).crossfade(true).build(),
+                            contentDescription = "Avatar",
+                            modifier = Modifier
+                                .size(28.dp)
+                                .clip(CircleShape),
+                            contentScale = ContentScale.Crop
+                        )
+                    } else {
+                        Image(
+                            painter = painterResource(id = avatarRes),
+                            contentDescription = "Avatar",
+                            modifier = Modifier
+                                .size(28.dp)
+                                .clip(CircleShape),
+                            contentScale = ContentScale.Crop
+                        )
+                    }
                     Text(
                         text = userName,
                         modifier = Modifier.padding(start = 8.dp),

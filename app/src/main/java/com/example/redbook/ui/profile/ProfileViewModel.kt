@@ -104,6 +104,7 @@ class ProfileViewModel(application: Application, private val userUid: String, pr
                 imageRes = R.drawable.test,
                 imageUrl = p.optString("image_url", ""),
                 avatarRes = R.drawable.test,
+                avatarUrl = p.optString("author_avatar", ""),
                 userName = p.optString("author_name", ""),
                 likeCount = p.optInt("like_count", 0),
                 isLiked = likedIds.contains(postId)

@@ -1,0 +1,9 @@
+-- 关注表
+CREATE TABLE IF NOT EXISTS follows (
+  id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  follower_uid TEXT NOT NULL,
+  followed_uid TEXT NOT NULL,
+  created_at BIGINT NOT NULL
+);
+ALTER TABLE follows DISABLE ROW LEVEL SECURITY;
+GRANT ALL ON follows TO anon, authenticated;

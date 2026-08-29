@@ -195,7 +195,9 @@ fun SearchScreen(
                             userName = note.userName,
                             isLiked = note.isLiked,
                             likeCount = note.likeCount.toString(),
-                            onCardClick = { onNavigateToDetail(note.id) }
+                            onCardClick = { onNavigateToDetail(note.id) },
+                            imageUrl = note.imageUrl,
+                            avatarUrl = note.avatarUrl
                         )
                     }
                 }
