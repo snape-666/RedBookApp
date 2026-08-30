@@ -4,7 +4,7 @@ import com.example.redbook.R
 import com.example.redbook.data.model.Note
 import org.json.JSONArray
 
-class HomeRepository(private val supabase: SupabaseAuthRepository) {
+class HomeRepository(val supabase: SupabaseAuthRepository) {
 
     suspend fun getNotes(userUid: String = ""): List<Note> {
         return try {

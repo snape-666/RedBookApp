@@ -38,6 +38,7 @@ import com.example.redbook.ui.utils.formatCount
 @Composable
 fun HomeScreen(
     userUid: String = "",
+    unreadMessageCount: Int = 0,
     onNavigateToDetail: (String) -> Unit,
     onNavigateToSearch: () -> Unit = {},
     onNavigateToPublish: () -> Unit = {},
@@ -118,7 +119,8 @@ fun HomeScreen(
                                 else onNavigateToDetail(note.id)
                             },
                             imageUrl = note.imageUrl,
-                            avatarUrl = note.avatarUrl
+                            avatarUrl = note.avatarUrl,
+                            onLikeClick = { viewModel.toggleLike(note.id) }
                         )
                     }
                 }
@@ -149,6 +151,7 @@ fun HomeScreen(
             onFabClick = onNavigateToPublish,
             indicatorHeight =3,
             indicatorWidth = 30,
+            unreadCounts = listOf(0, 0, unreadMessageCount, 0)
         )
 
         Box(modifier = Modifier

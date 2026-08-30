@@ -105,7 +105,8 @@ fun ProfileScreen(
     isDarkTheme: Boolean = false,
     onToggleDarkTheme: () -> Unit = {},
     onLogout: () -> Unit = {},
-    onNotification: () -> Unit = {}
+    onNotification: () -> Unit = {},
+    unreadMessageCount: Int = 0
 ) {
     val context = LocalContext.current
     val viewModel: ProfileViewModel = viewModel(factory = ProfileViewModelFactory(context.applicationContext as android.app.Application, userUid, userXhsId))
@@ -274,7 +275,8 @@ fun ProfileScreen(
                     bottomIndex = idx
                     if (idx == 0) onBottomTabClick(0)
                 },
-                fabIconRes = R.drawable.social_icons, onFabClick = onPublish
+                fabIconRes = R.drawable.social_icons, onFabClick = onPublish,
+                unreadCounts = listOf(0, 0, unreadMessageCount, 0)
             )
             Spacer(Modifier
                 .fillMaxWidth()

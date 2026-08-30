@@ -14,11 +14,13 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.layout.wrapContentWidth
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
@@ -50,6 +52,38 @@ import com.example.redbook.ui.theme.getOnSurfaceTertiary
 import com.example.redbook.ui.utils.formatCount
 
 
+/**
+ * 圆形未读角标：primary 背景 + surface 数字，右上角叠加使用
+ */
+@Composable
+fun CountBadge(
+    count: Int,
+    modifier: Modifier = Modifier,
+    maxCount: Int = 99
+) {
+    if (count <= 0) return
+    val text = if (count > maxCount) "${maxCount}+" else count.toString()
+    val backgroundColor = MaterialTheme.colorScheme.primary
+    val textColor = MaterialTheme.colorScheme.surface
+    Box(
+        modifier = modifier
+            .defaultMinSize(minWidth = 15.dp, minHeight = 15.dp)
+            .clip(CircleShape)
+            .background(backgroundColor)
+            .padding(horizontal = 3.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            text = text,
+            fontSize = 9.sp,
+            fontWeight = FontWeight.Bold,
+            color = textColor,
+            maxLines = 1
+        )
+    }
+}
+
+
 @Composable
 fun BottomBar(
     modifier: Modifier = Modifier,
@@ -60,6 +94,7 @@ fun BottomBar(
     onFabClick: () -> Unit,
     indicatorHeight: Int = 2,
     indicatorWidth: Int = 30,
+    unreadCounts: List<Int> = emptyList(),
 
 ) {
     val primaryColor = MaterialTheme.colorScheme.primary
@@ -82,6 +117,7 @@ fun BottomBar(
                 indicatorHeight = indicatorHeight,
                 indicatorWidth = indicatorWidth,
                 index = index,
+                badgeCount = unreadCounts.getOrElse(index) { 0 },
                 onItemClick = onTitleClick
             )
         }
@@ -124,6 +160,7 @@ fun BottomBar(
                 indicatorHeight = indicatorHeight,
                 indicatorWidth = indicatorWidth,
                 index = realIndex,
+                badgeCount = unreadCounts.getOrElse(realIndex) { 0 },
                 onItemClick = onTitleClick
             )
         }
@@ -140,6 +177,7 @@ private fun TextItem(
     indicatorHeight: Int,
     indicatorWidth: Int,
     index: Int,
+    badgeCount: Int = 0,
     onItemClick: (Int) -> Unit
 ) {
     Box(
@@ -161,12 +199,22 @@ private fun TextItem(
             val frontSelected = MaterialTheme.colorScheme.onSurface
             val frontUnselected = getOnSurfaceSecondary()
 
-            Text(
-                text = title,
-                fontSize = 16.sp,
-                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-                color = if (isSelected) frontSelected else frontUnselected
-            )
+            Box(contentAlignment = Alignment.TopCenter) {
+                Text(
+                    text = title,
+                    fontSize = 16.sp,
+                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                    color = if (isSelected) frontSelected else frontUnselected
+                )
+                if (badgeCount > 0) {
+                    CountBadge(
+                        count = badgeCount,
+                        modifier = Modifier
+                            .align(Alignment.TopEnd)
+                            .offset(x = 14.dp, y = (-4).dp)
+                    )
+                }
+            }
 
             if (isSelected) {
                 Box(
@@ -377,6 +425,8 @@ fun NoteCardBar(
     isFollowed: Boolean,
     onFollowClick:(Boolean)-> Unit,
     showFollow: Boolean = true,
+    showMessage: Boolean = false,
+    onMessageClick: () -> Unit = {},
 ){
     val primaryColor= MaterialTheme.colorScheme.primary
     val borderColor = if (isFollowed) getOnSurfaceSecondary() else primaryColor
@@ -450,30 +500,65 @@ fun NoteCardBar(
 
      }
 
-     if (showFollow) {
-         Box(
-             modifier= Modifier
-                 .clip(RoundedCornerShape(20.dp))
-                 .border(
-                     width = 1.dp,
-                     color = borderColor,
-                     shape = RoundedCornerShape(20.dp)
-                 )
-                 .padding(horizontal = 15.dp, vertical = 5.dp)
-                 .clickable(
-                     interactionSource = remember { MutableInteractionSource() },
-                     indication = null
+     Row(
+         modifier = Modifier.wrapContentWidth(),
+         horizontalArrangement = Arrangement.spacedBy(8.dp),
+         verticalAlignment = Alignment.CenterVertically
+     ) {
+         if (showFollow) {
+             Box(
+                 modifier= Modifier
+                     .width(72.dp)
+                     .clip(RoundedCornerShape(20.dp))
+                     .border(
+                         width = 1.dp,
+                         color = borderColor,
+                         shape = RoundedCornerShape(20.dp)
+                     )
+                     .padding(vertical = 5.dp)
+                     .clickable(
+                         interactionSource = remember { MutableInteractionSource() },
+                         indication = null
+                     ){
+                         onFollowClick(!isFollowed)
+                     },
+                     contentAlignment = Alignment.Center
                  ){
-                     onFollowClick(!isFollowed)
-                 },
-                 contentAlignment = Alignment.Center
-             ){
-             Text(
-                 text = if (isFollowed)"已关注" else "关注",
-                 fontSize = 12.sp,
-                 fontWeight = FontWeight.Medium,
-                 color = textColor
-             )
+                 Text(
+                     text = if (isFollowed)"已关注" else "关注",
+                     fontSize = 12.sp,
+                     fontWeight = FontWeight.Medium,
+                     color = textColor
+                 )
+             }
+         }
+
+         if (showMessage) {
+             Box(
+                 modifier= Modifier
+                     .width(72.dp)
+                     .clip(RoundedCornerShape(20.dp))
+                     .border(
+                         width = 1.dp,
+                         color = getOnSurfaceSecondary(),
+                         shape = RoundedCornerShape(20.dp)
+                     )
+                     .padding(vertical = 5.dp)
+                     .clickable(
+                         interactionSource = remember { MutableInteractionSource() },
+                         indication = null
+                     ){
+                         onMessageClick()
+                     },
+                     contentAlignment = Alignment.Center
+                 ){
+                 Text(
+                     text = "发私信",
+                     fontSize = 12.sp,
+                     fontWeight = FontWeight.Medium,
+                     color = getOnSurfaceTertiary()
+                 )
+             }
          }
      }
 

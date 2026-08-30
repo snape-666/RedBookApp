@@ -18,10 +18,13 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -33,6 +36,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import com.example.redbook.R
@@ -40,27 +45,24 @@ import com.example.redbook.ui.theme.getOnSurfaceSecondary
 import com.example.redbook.ui.theme.getOnSurfaceTertiary
 import com.example.redbook.ui.theme.getOutline
 
-private data class CommentItem(
-    val userName: String,
-    val avatarUrl: String,
-    val isReply: Boolean,
-    val postId: String,
-    val postCoverUrl: String,
-    val time: Long
-)
-
-private val mockComments = listOf(
-    CommentItem("小红薯", "", false, "post1", "", System.currentTimeMillis() - 1000L * 60 * 30),
-    CommentItem("用户A", "", true, "post2", "", System.currentTimeMillis() - 1000L * 60 * 60 * 5),
-    CommentItem("用户B", "", false, "post3", "", System.currentTimeMillis() - 1000L * 60 * 60 * 24 * 2),
-    CommentItem("用户C", "", true, "post4", "", System.currentTimeMillis() - 1000L * 60 * 60 * 24 * 45)
-)
-
 @Composable
 fun ReceivedCommentsScreen(
+    userUid: String = "",
     onBack: () -> Unit = {},
     onPostClick: (String) -> Unit = {}
 ) {
+    val context = LocalContext.current
+    val viewModel: NotificationsViewModel = viewModel(
+        factory = NotificationsViewModelFactory(
+            context.applicationContext as android.app.Application,
+            NotificationKind.COMMENT
+        )
+    )
+    val items by viewModel.items.collectAsStateWithLifecycle()
+    val loading by viewModel.loading.collectAsStateWithLifecycle()
+
+    LaunchedEffect(userUid) { viewModel.load(userUid) }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -100,17 +102,24 @@ fun ReceivedCommentsScreen(
         }
         Spacer(modifier = Modifier.fillMaxWidth().height(0.5.dp).background(getOutline()))
 
-
-        LazyColumn(modifier = Modifier.weight(1f)) {
-            items(mockComments, key = { it.userName }) { item ->
-                CommentRow(item = item, onPostClick = onPostClick)
+        when {
+            loading && items.isEmpty() -> Box(modifier = Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                CircularProgressIndicator()
+            }
+            items.isEmpty() -> Box(modifier = Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                Text(text = "暂无评论", fontSize = 14.sp, color = getOnSurfaceSecondary())
+            }
+            else -> LazyColumn(modifier = Modifier.weight(1f)) {
+                items(items, key = { it.actorName + it.time }) { item ->
+                    CommentRow(item = item, onPostClick = onPostClick)
+                }
             }
         }
     }
 }
 
 @Composable
-private fun CommentRow(item: CommentItem, onPostClick: (String) -> Unit, modifier: Modifier = Modifier) {
+private fun CommentRow(item: NotificationItem, onPostClick: (String) -> Unit, modifier: Modifier = Modifier) {
     Row(
         modifier = modifier
             .fillMaxWidth()
@@ -118,10 +127,10 @@ private fun CommentRow(item: CommentItem, onPostClick: (String) -> Unit, modifie
         verticalAlignment = Alignment.CenterVertically
     ) {
         Box(modifier = Modifier.size(42.dp).clip(CircleShape)) {
-            if (item.avatarUrl.isNotBlank()) {
+            if (item.actorAvatar.isNotBlank()) {
                 AsyncImage(
                     model = ImageRequest.Builder(LocalContext.current)
-                        .data(item.avatarUrl)
+                        .data(item.actorAvatar)
                         .crossfade(true)
                         .build(),
                     contentDescription = "头像",
@@ -142,7 +151,7 @@ private fun CommentRow(item: CommentItem, onPostClick: (String) -> Unit, modifie
 
         Column(modifier = Modifier.weight(1f)) {
             Text(
-                text = item.userName,
+                text = item.actorName,
                 fontSize = 15.sp,
                 fontWeight = FontWeight.Bold,
                 color = MaterialTheme.colorScheme.onSurface,
@@ -152,15 +161,28 @@ private fun CommentRow(item: CommentItem, onPostClick: (String) -> Unit, modifie
             Spacer(modifier = Modifier.height(2.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    text = if (item.isReply) "回复了你的笔记" else "评论了你的笔记",
+                    text = if (item.type == "reply") "回复了你的笔记" else "评论了你的笔记",
                     fontSize = 13.sp,
-                    color = getOnSurfaceSecondary()
+                    color = getOnSurfaceSecondary(),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f, fill = false)
                 )
                 Spacer(modifier = Modifier.width(8.dp))
                 Text(
                     text = formatRelativeTime(item.time),
                     fontSize = 12.sp,
                     color = getOnSurfaceTertiary()
+                )
+            }
+            if (item.commentContent.isNotBlank()) {
+                Spacer(modifier = Modifier.height(2.dp))
+                Text(
+                    text = "\"${item.commentContent}\"",
+                    fontSize = 13.sp,
+                    color = getOnSurfaceTertiary(),
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
                 )
             }
         }
@@ -176,29 +198,18 @@ private fun CommentRow(item: CommentItem, onPostClick: (String) -> Unit, modifie
                     indication = null
                 ) { onPostClick(item.postId) }
         ) {
-            if (item.postCoverUrl.isNotBlank()) {
-                AsyncImage(
-                    model = ImageRequest.Builder(LocalContext.current)
-                        .data(item.postCoverUrl)
-                        .crossfade(true)
-                        .build(),
-                    contentDescription = "帖子封面",
-                    modifier = Modifier.fillMaxSize(),
-                    contentScale = ContentScale.Crop
-                )
-            } else {
-                Image(
-                    painter = painterResource(id = R.drawable.test),
-                    contentDescription = "帖子封面",
-                    modifier = Modifier.fillMaxSize(),
-                    contentScale = ContentScale.Crop
-                )
-            }
+            Image(
+                painter = painterResource(id = R.drawable.test),
+                contentDescription = "帖子封面",
+                modifier = Modifier.fillMaxSize(),
+                contentScale = ContentScale.Crop
+            )
         }
     }
 }
 
 private fun formatRelativeTime(time: Long): String {
+    if (time <= 0) return ""
     val diff = System.currentTimeMillis() - time
     val minutes = diff / 60_000L
     val hours = diff / 3_600_000L

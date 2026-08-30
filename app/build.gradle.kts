@@ -72,6 +72,8 @@ dependencies {
     implementation(libs.androidx.lifecycle.runtime.ktx)
     //  Volley
     implementation(libs.volley)
+    //  OkHttp (Realtime WebSocket)
+    implementation(libs.okhttp)
     //  Test
     testImplementation(libs.junit)
     androidTestImplementation(platform(libs.androidx.compose.bom))

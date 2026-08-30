@@ -67,7 +67,8 @@ fun DetailScreen(
     userAvatarUrl: String = "",
     scrollToCommentId: String = "",
     onCommentScrolled: () -> Unit = {},
-    onBack: () -> Unit = {}
+    onBack: () -> Unit = {},
+    onSendMessage: (String, String, String) -> Unit = { _, _, _ -> }
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val viewModel: DetailViewModel = viewModel(factory = DetailViewModelFactory(context.applicationContext as android.app.Application, userUid, userXhsId, userName))
@@ -114,7 +115,13 @@ fun DetailScreen(
                     onUserClick = { /* 跳转作者主页 */ },
                     isFollowed = post?.isFollowed ?: false,
                     onFollowClick = { viewModel.toggleFollowAuthor() },
-                    showFollow = post?.authorId != userUid
+                    showFollow = post?.authorId != userUid,
+                    showMessage = post?.authorId != userUid,
+                    onMessageClick = {
+                        post?.let {
+                            onSendMessage(it.authorId, it.authorName, it.authorAvatarUrl)
+                        }
+                    }
                 )
             }
         },

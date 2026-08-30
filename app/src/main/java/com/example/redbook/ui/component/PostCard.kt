@@ -4,6 +4,7 @@ import android.content.res.Configuration
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -55,7 +56,8 @@ fun PostCard(
     modifier: Modifier = Modifier,
     onCardClick: () -> Unit = {},
     imageUrl: String = "",
-    avatarUrl: String = ""
+    avatarUrl: String = "",
+    onLikeClick: () -> Unit = {}
 ) {
     val likeIconRes = if (isLiked) R.drawable.favorite_fill else R.drawable.favorite_light
     Card(
@@ -163,13 +165,20 @@ fun PostCard(
                 }
 
 
-                Row(modifier= Modifier, verticalAlignment = Alignment.CenterVertically ) {
+                Row(
+                    modifier= Modifier,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
                     Icon(
                         painter = painterResource(id = likeIconRes),
-                        contentDescription = "Action icon",
-                        modifier = Modifier.size(24.dp),
+                        contentDescription = "点赞",
+                        modifier = Modifier
+                            .size(24.dp)
+                            .clickable(
+                                interactionSource = remember { MutableInteractionSource() },
+                                indication = null
+                            ) { onLikeClick() },
                         tint = Color.Unspecified
-
                     )
                     Text(
                         text=likeCount,

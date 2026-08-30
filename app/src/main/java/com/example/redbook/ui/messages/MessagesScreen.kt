@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -20,10 +21,12 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
@@ -40,10 +43,13 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import com.example.redbook.R
 import com.example.redbook.ui.component.BottomBar
+import com.example.redbook.ui.component.CountBadge
 import com.example.redbook.ui.theme.getBlueBackground
 import com.example.redbook.ui.theme.getBlueFill
 import com.example.redbook.ui.theme.getGreenBackground
@@ -55,30 +61,30 @@ import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Locale
 
-private data class Conversation(
-    val userName: String,
-    val avatarUrl: String,
-    val lastMessage: String,
-    val lastTime: Long
-)
-
-private val mockConversations = listOf(
-    Conversation("小红薯", "", "在吗？这条笔记不错", System.currentTimeMillis() - 1000L * 60 * 5),
-    Conversation("用户A", "", "你好，我想问下这条笔记的拍摄方法", System.currentTimeMillis() - 1000L * 60 * 60 * 3),
-    Conversation("用户B", "", "哈哈哈太逗了", System.currentTimeMillis() - 1000L * 60 * 60 * 24 * 2),
-    Conversation("用户C", "", "收藏了你的笔记，谢谢分享", System.currentTimeMillis() - 1000L * 60 * 60 * 24 * 30 * 6)
-)
-
 @Composable
 fun MessagesScreen(
+    userUid: String = "",
+    unreadLikesFavs: Int = 0,
+    unreadFollows: Int = 0,
+    unreadComments: Int = 0,
+    unreadMessages: Int = 0,
     onBottomTabClick: (Int) -> Unit = {},
     onPublish: () -> Unit = {},
     onLikeFavoriteClick: () -> Unit = {},
     onCommentClick: () -> Unit = {},
     onFollowClick: () -> Unit = {},
-    onConversationClick: (String, String) -> Unit = { _, _ -> }
+    onConversationClick: (String, String, String) -> Unit = { _, _, _ -> }
 ) {
     var bottomIndex by remember { mutableIntStateOf(2) }
+    val context = LocalContext.current
+    val viewModel: ConversationsViewModel = viewModel(
+        factory = ConversationsViewModelFactory(context.applicationContext as android.app.Application)
+    )
+    val conversations by viewModel.conversations.collectAsStateWithLifecycle()
+    val loading by viewModel.loading.collectAsStateWithLifecycle()
+
+    // 跟随当前账号加载会话列表
+    LaunchedEffect(userUid) { viewModel.load(userUid) }
 
     Column(
         modifier = Modifier
@@ -90,21 +96,33 @@ fun MessagesScreen(
         MessagesTopBar()
 
         ReactionGroupRow(
+            unreadLikesFavs = unreadLikesFavs,
+            unreadFollows = unreadFollows,
+            unreadComments = unreadComments,
             onLikeFavoriteClick = onLikeFavoriteClick,
             onCommentClick = onCommentClick,
             onFollowClick = onFollowClick
         )
 
-        LazyColumn(
-            modifier = Modifier.weight(1f),
-            contentPadding = PaddingValues(top = 5.dp)
-        ) {
-            items(mockConversations, key = { it.userName }) { conversation ->
-                ConversationItem(
-                    conversation = conversation,
-                    onClick = { onConversationClick(conversation.userName, conversation.avatarUrl) },
-                    modifier = Modifier.padding(vertical = 5.dp)
-                )
+        when {
+            loading && conversations.isEmpty() -> Box(
+                modifier = Modifier.weight(1f).fillMaxWidth(),
+                contentAlignment = Alignment.Center
+            ) { CircularProgressIndicator() }
+
+            else -> LazyColumn(
+                modifier = Modifier.weight(1f),
+                contentPadding = PaddingValues(top = 5.dp)
+            ) {
+                items(conversations, key = { it.conversationId }) { conversation ->
+                    ConversationItem(
+                        conversation = conversation,
+                        onClick = {
+                            onConversationClick(conversation.peerName, conversation.peerAvatar, conversation.peerUid)
+                        },
+                        modifier = Modifier.padding(vertical = 5.dp)
+                    )
+                }
             }
         }
 
@@ -118,7 +136,8 @@ fun MessagesScreen(
                     onBottomTabClick(idx)
                 },
                 fabIconRes = R.drawable.social_icons,
-                onFabClick = onPublish
+                onFabClick = onPublish,
+                unreadCounts = listOf(0, 0, unreadMessages, 0)
             )
             Spacer(Modifier.fillMaxWidth().height(16.dp).background(MaterialTheme.colorScheme.surface))
         }
@@ -164,6 +183,9 @@ private fun MessagesTopBar() {
 
 @Composable
 private fun ReactionGroupRow(
+    unreadLikesFavs: Int,
+    unreadFollows: Int,
+    unreadComments: Int,
     onLikeFavoriteClick: () -> Unit,
     onCommentClick: () -> Unit,
     onFollowClick: () -> Unit
@@ -179,6 +201,7 @@ private fun ReactionGroupRow(
             iconRes = R.drawable.favorite_fill,
             shadowColor = MaterialTheme.colorScheme.primary,
             label = "赞和收藏",
+            badgeCount = unreadLikesFavs,
             onClick = onLikeFavoriteClick
         )
         GroupItem(
@@ -186,6 +209,7 @@ private fun ReactionGroupRow(
             iconRes = R.drawable.user_alt_fill,
             shadowColor = getBlueFill(),
             label = "新增关注",
+            badgeCount = unreadFollows,
             onClick = onFollowClick
         )
         GroupItem(
@@ -193,13 +217,21 @@ private fun ReactionGroupRow(
             iconRes = R.drawable.chat_fill,
             shadowColor = getGreenFill(),
             label = "新增评论",
+            badgeCount = unreadComments,
             onClick = onCommentClick
         )
     }
 }
 
 @Composable
-private fun GroupItem(bgColor: Color, iconRes: Int, shadowColor: Color, label: String, onClick: () -> Unit = {}) {
+private fun GroupItem(
+    bgColor: Color,
+    iconRes: Int,
+    shadowColor: Color,
+    label: String,
+    badgeCount: Int = 0,
+    onClick: () -> Unit = {}
+) {
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
         modifier = Modifier.clickable(
@@ -207,27 +239,38 @@ private fun GroupItem(bgColor: Color, iconRes: Int, shadowColor: Color, label: S
             indication = null
         ) { onClick() }
     ) {
-        Box(
-            modifier = Modifier
-                .size(36.dp)
-                .clip(RoundedCornerShape(12.dp))
-                .background(bgColor),
-            contentAlignment = Alignment.Center
-        ) {
-            Icon(
-                painter = painterResource(id = iconRes),
-                contentDescription = null,
+        Box {
+            Box(
                 modifier = Modifier
-                    .size(24.dp)
-                    .shadow(
-                        elevation = 6.dp,
-                        shape = RoundedCornerShape(50),
-                        clip = false,
-                        ambientColor = shadowColor.copy(alpha = 0.25f),
-                        spotColor = shadowColor.copy(alpha = 0.25f)
-                    ),
-                tint = Color.Unspecified
-            )
+                    .size(36.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(bgColor),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    painter = painterResource(id = iconRes),
+                    contentDescription = null,
+                    modifier = Modifier
+                        .size(24.dp)
+                        .shadow(
+                            elevation = 6.dp,
+                            shape = RoundedCornerShape(50),
+                            clip = false,
+                            ambientColor = shadowColor.copy(alpha = 0.25f),
+                            spotColor = shadowColor.copy(alpha = 0.25f)
+                        ),
+                    tint = Color.Unspecified
+                )
+            }
+            // 右上角未读角标
+            if (badgeCount > 0) {
+                CountBadge(
+                    count = badgeCount,
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .offset(x = 8.dp, y = (-8).dp)
+                )
+            }
         }
         Spacer(modifier = Modifier.height(4.dp))
         Text(
@@ -239,7 +282,11 @@ private fun GroupItem(bgColor: Color, iconRes: Int, shadowColor: Color, label: S
 }
 
 @Composable
-private fun ConversationItem(conversation: Conversation, onClick: () -> Unit, modifier: Modifier = Modifier) {
+private fun ConversationItem(
+    conversation: ConversationItem,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
     Row(
         modifier = modifier
             .fillMaxWidth()
@@ -251,10 +298,10 @@ private fun ConversationItem(conversation: Conversation, onClick: () -> Unit, mo
         verticalAlignment = Alignment.CenterVertically
     ) {
         Box(modifier = Modifier.size(42.dp).clip(CircleShape)) {
-            if (conversation.avatarUrl.isNotBlank()) {
+            if (conversation.peerAvatar.isNotBlank()) {
                 AsyncImage(
                     model = ImageRequest.Builder(LocalContext.current)
-                        .data(conversation.avatarUrl)
+                        .data(conversation.peerAvatar)
                         .crossfade(true)
                         .build(),
                     contentDescription = "头像",
@@ -269,6 +316,15 @@ private fun ConversationItem(conversation: Conversation, onClick: () -> Unit, mo
                     contentScale = ContentScale.Crop
                 )
             }
+            // 未读角标：圆形，叠在头像右上角，允许覆盖一部分
+            if (conversation.unreadCount > 0) {
+                CountBadge(
+                    count = conversation.unreadCount,
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .offset(x = 8.dp, y = (-6).dp)
+                )
+            }
         }
         Spacer(modifier = Modifier.width(10.dp))
         Column(modifier = Modifier.weight(1f)) {
@@ -277,7 +333,7 @@ private fun ConversationItem(conversation: Conversation, onClick: () -> Unit, mo
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = conversation.userName,
+                    text = conversation.peerName,
                     fontSize = 16.sp,
                     fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.onSurface,
@@ -309,6 +365,7 @@ private fun ConversationItem(conversation: Conversation, onClick: () -> Unit, mo
 }
 
 private fun formatConversationDate(timestamp: Long): String {
+    if (timestamp <= 0) return ""
     val cal = Calendar.getInstance().apply { timeInMillis = timestamp }
     val now = Calendar.getInstance()
     val pattern = if (cal.get(Calendar.YEAR) == now.get(Calendar.YEAR)) "MM-dd" else "yyyy-MM-dd"

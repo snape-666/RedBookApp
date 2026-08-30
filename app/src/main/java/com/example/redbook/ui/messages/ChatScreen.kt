@@ -25,11 +25,13 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -46,9 +48,12 @@ import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import com.example.redbook.R
+import com.example.redbook.data.repository.RealtimeRepository
 import com.example.redbook.ui.theme.getBlueFill
 import com.example.redbook.ui.theme.getOnSurfaceTertiary
 import com.example.redbook.ui.theme.getOutline
+import kotlinx.coroutines.launch
+import org.json.JSONObject
 
 private data class ChatMessage(
     val content: String,
@@ -60,19 +65,72 @@ private data class ChatMessage(
 fun ChatScreen(
     userName: String,
     avatarUrl: String = "",
+    currentUserUid: String = "",
+    peerUid: String = "",
+    conversationId: String = "",
+    repository: RealtimeRepository? = null,
+    myAvatarUrl: String = "",
     onBack: () -> Unit = {}
 ) {
-    val messages = remember {
-        mutableStateListOf(
-            ChatMessage("你好呀", System.currentTimeMillis() - 1000L * 60 * 30, false),
-            ChatMessage("这条笔记是你拍的吗？", System.currentTimeMillis() - 1000L * 60 * 29, false),
-            ChatMessage("是的，上周去拍的", System.currentTimeMillis() - 1000L * 60 * 28, true),
-            ChatMessage("拍得真好看！", System.currentTimeMillis() - 1000L * 60 * 27, false)
-        )
-    }
+    val context = LocalContext.current
+    val realtimeRepo = repository ?: remember { RealtimeRepository(context.applicationContext as android.app.Application) }
+    val messages = remember { mutableStateListOf<ChatMessage>() }
     var inputText by remember { mutableStateOf("") }
+    var loading by remember { mutableStateOf(true) }
     val focusManager = LocalFocusManager.current
     val listState = rememberLazyListState()
+    val coroutineScope = rememberCoroutineScope()
+
+    // 初始加载历史消息；conversationId 为空时先尝试创建
+    LaunchedEffect(conversationId, currentUserUid, peerUid) {
+        if (currentUserUid.isBlank() || peerUid.isBlank()) return@LaunchedEffect
+        var convId = conversationId
+        if (convId.isBlank()) {
+            convId = try { realtimeRepo.getOrCreateConversation(currentUserUid, peerUid) } catch (_: Exception) { "" }
+        }
+        if (convId.isBlank()) return@LaunchedEffect
+        loading = true
+        try {
+            val arr = realtimeRepo.getMessages(convId)
+            messages.clear()
+            for (i in 0 until arr.length()) {
+                val m = arr.getJSONObject(i)
+                messages.add(
+                    ChatMessage(
+                        content = m.optString("content", ""),
+                        time = m.optLong("created_at", 0L),
+                        isMine = m.optString("sender_uid") == currentUserUid
+                    )
+                )
+            }
+        } catch (_: Exception) { }
+        loading = false
+    }
+
+    // 实时接收对方新消息：挂到全局连接上，仅处理当前会话的消息
+    DisposableEffect(conversationId, currentUserUid, peerUid) {
+        val listener = if (conversationId.isNotBlank() && currentUserUid.isNotBlank() && peerUid.isNotBlank()) {
+            object : RealtimeRepository.RealtimeListener {
+                override fun onNotification(record: JSONObject) { }
+                override fun onMessage(record: JSONObject) {
+                    val convId = record.optString("conversation_id", "")
+                    val sender = record.optString("sender_uid", "")
+                    if (convId == conversationId && sender != currentUserUid) {
+                        // 去重（避免与初始加载重复）
+                        val content = record.optString("content", "")
+                        val time = record.optLong("created_at", 0L)
+                        if (messages.none { it.content == content && it.time == time && !it.isMine }) {
+                            messages.add(ChatMessage(content, time, false))
+                        }
+                    }
+                }
+                override fun onStatus(connected: Boolean) { }
+            }.also { realtimeRepo.addListener(it) }
+        } else null
+        onDispose {
+            listener?.let { realtimeRepo.removeListener(it) }
+        }
+    }
 
     LaunchedEffect(messages.size) {
         if (messages.isNotEmpty()) listState.animateScrollToItem(messages.size - 1)
@@ -152,10 +210,10 @@ fun ChatScreen(
                     detectTapGestures { focusManager.clearFocus() }
                 }
         ) {
-            items(messages, key = { it.hashCode() }) { msg ->
+            items(messages, key = { "${it.time}_${it.content}_${it.isMine}" }) { msg ->
                 ChatBubble(
                     message = msg,
-                    avatarUrl = if (msg.isMine) "" else avatarUrl,
+                    avatarUrl = if (msg.isMine) myAvatarUrl else avatarUrl,
                     modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
                 )
             }
@@ -211,9 +269,23 @@ fun ChatScreen(
                         interactionSource = remember { MutableInteractionSource() },
                         indication = null
                     ) {
-                        if (inputText.isNotBlank()) {
-                            messages.add(ChatMessage(inputText.trim(), System.currentTimeMillis(), true))
+                        val text = inputText.trim()
+                        if (text.isNotBlank() && currentUserUid.isNotBlank() && peerUid.isNotBlank()) {
+                            val time = System.currentTimeMillis()
+                            messages.add(ChatMessage(text, time, true))
                             inputText = ""
+                            val messageId = "m_${currentUserUid}_${System.nanoTime()}"
+                            coroutineScope.launch {
+                                try {
+                                    var convId = conversationId
+                                    if (convId.isBlank()) {
+                                        convId = realtimeRepo.getOrCreateConversation(currentUserUid, peerUid)
+                                    }
+                                    if (convId.isNotBlank()) {
+                                        realtimeRepo.sendMessage(messageId, convId, currentUserUid, peerUid, text)
+                                    }
+                                } catch (_: Exception) { }
+                            }
                         }
                     }
                     .padding(horizontal = 16.dp, vertical = 5.dp),
@@ -241,7 +313,11 @@ private fun ChatBubble(message: ChatMessage, avatarUrl: String, modifier: Modifi
                 modifier = Modifier.fillMaxWidth(0.85f),
                 contentAlignment = Alignment.CenterEnd
             ) {
-                MessageBubble(message = message)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    MessageBubble(message = message)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    ChatAvatar(avatarUrl = avatarUrl, size = 32.dp)
+                }
             }
         } else {
             Box(
@@ -249,31 +325,36 @@ private fun ChatBubble(message: ChatMessage, avatarUrl: String, modifier: Modifi
                 contentAlignment = Alignment.CenterStart
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(modifier = Modifier.size(32.dp).clip(CircleShape)) {
-                        if (avatarUrl.isNotBlank()) {
-                            AsyncImage(
-                                model = ImageRequest.Builder(LocalContext.current)
-                                    .data(avatarUrl)
-                                    .crossfade(true)
-                                    .build(),
-                                contentDescription = "头像",
-                                modifier = Modifier.fillMaxSize().clip(CircleShape),
-                                contentScale = ContentScale.Crop
-                            )
-                        } else {
-                            Image(
-                                painter = painterResource(id = R.drawable.test),
-                                contentDescription = "头像",
-                                modifier = Modifier.fillMaxSize().clip(CircleShape),
-                                contentScale = ContentScale.Crop
-                            )
-                        }
-                    }
+                    ChatAvatar(avatarUrl = avatarUrl, size = 32.dp)
                     Spacer(modifier = Modifier.width(8.dp))
                     MessageBubble(message = message)
                 }
             }
             Spacer(modifier = Modifier.weight(1f))
+        }
+    }
+}
+
+@Composable
+private fun ChatAvatar(avatarUrl: String, size: androidx.compose.ui.unit.Dp) {
+    Box(modifier = Modifier.size(size).clip(CircleShape)) {
+        if (avatarUrl.isNotBlank()) {
+            AsyncImage(
+                model = ImageRequest.Builder(LocalContext.current)
+                    .data(avatarUrl)
+                    .crossfade(true)
+                    .build(),
+                contentDescription = "头像",
+                modifier = Modifier.fillMaxSize().clip(CircleShape),
+                contentScale = ContentScale.Crop
+            )
+        } else {
+            Image(
+                painter = painterResource(id = R.drawable.test),
+                contentDescription = "头像",
+                modifier = Modifier.fillMaxSize().clip(CircleShape),
+                contentScale = ContentScale.Crop
+            )
         }
     }
 }

@@ -34,12 +34,20 @@ class HomeViewModel(application: Application, private val userUid: String = "") 
     fun toggleLike(noteId: String) {
         val currentState = _uiState.value
         if (currentState is HomeUiState.Success) {
-            _uiState.value = HomeUiState.Success(currentState.notes.map { note ->
-                if (note.id == noteId) {
-                    val delta = if (note.isLiked) -1 else 1
-                    note.copy(isLiked = !note.isLiked, likeCount = note.likeCount + delta)
-                } else note
+            val note = currentState.notes.firstOrNull { it.id == noteId } ?: return
+            val newLiked = !note.isLiked
+            val newCount = note.likeCount + (if (newLiked) 1 else -1)
+            _uiState.value = HomeUiState.Success(currentState.notes.map {
+                if (it.id == noteId) it.copy(isLiked = newLiked, likeCount = newCount) else it
             })
+            if (userUid.isNotBlank()) {
+                viewModelScope.launch {
+                    try {
+                        repository.supabase.recordLike(userUid, noteId, newLiked)
+                        repository.supabase.updatePostLike(noteId, if (newLiked) 1 else -1)
+                    } catch (_: Exception) { }
+                }
+            }
         }
     }
 }

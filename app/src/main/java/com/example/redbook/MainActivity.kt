@@ -8,6 +8,8 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -35,6 +37,7 @@ import com.example.redbook.ui.messages.ReceivedCommentsScreen
 import com.example.redbook.ui.messages.FollowersScreen
 import com.example.redbook.ui.messages.ChatScreen
 import com.example.redbook.data.model.Draft
+import com.example.redbook.data.repository.RealtimeRepository
 import com.example.redbook.data.repository.SupabaseAuthRepository
 import com.example.redbook.R
 import kotlinx.coroutines.launch
@@ -66,6 +69,7 @@ fun AppScreen(
 ) {
     val context = LocalContext.current
     val browseRepo = remember { SupabaseAuthRepository(context.applicationContext as android.app.Application) }
+    val realtimeRepo = remember { RealtimeRepository(context.applicationContext as android.app.Application) }
     val scope = rememberCoroutineScope()
     var currentScreen by remember { mutableStateOf<Screen>(Screen.Login) }
     var selectedPostId by remember { mutableStateOf("") }
@@ -73,6 +77,8 @@ fun AppScreen(
     var selectedVideoUrl by remember { mutableStateOf("") }
     var chatUserName by remember { mutableStateOf("") }
     var chatUserAvatarUrl by remember { mutableStateOf("") }
+    var chatPeerUid by remember { mutableStateOf("") }
+    var chatConversationId by remember { mutableStateOf("") }
     var scrollToCommentId by remember { mutableStateOf("") }
     var screenStack by remember { mutableStateOf(listOf<Screen>(Screen.Login)) }
     var userUid by remember { mutableStateOf("") }
@@ -86,6 +92,46 @@ fun AppScreen(
     var userBackgroundUrl by remember { mutableStateOf("") }
     var editingDraft by remember { mutableStateOf<Draft?>(null) }
     var loginResetKey by remember { mutableIntStateOf(0) }
+
+    // ---- 未读角标状态 ----
+    var unreadLikesFavs by remember { mutableIntStateOf(0) }
+    var unreadFollows by remember { mutableIntStateOf(0) }
+    var unreadComments by remember { mutableIntStateOf(0) }
+    var unreadMessages by remember { mutableIntStateOf(0) }
+
+    // 建立实时连接：登录成功后拉取初始未读数 + 订阅 WebSocket 增量
+    LaunchedEffect(userUid) {
+        if (userUid.isBlank()) return@LaunchedEffect
+        SupabaseAuthRepository.currentUserName = userName
+        // 初始拉取（兜底，断线恢复也能对齐）
+        scope.launch {
+            try {
+                val counts = realtimeRepo.getUnreadCounts(userUid)
+                unreadLikesFavs = counts.likesFavs
+                unreadFollows = counts.follows
+                unreadComments = counts.comments
+            } catch (_: Exception) { }
+            try {
+                unreadMessages = realtimeRepo.getUnreadConversationCount(userUid)
+            } catch (_: Exception) { }
+        }
+        realtimeRepo.connect(userUid, object : RealtimeRepository.RealtimeListener {
+            override fun onNotification(record: org.json.JSONObject) {
+                when (record.optString("type", "")) {
+                    "like", "favorite" -> unreadLikesFavs++
+                    "follow" -> unreadFollows++
+                    "comment", "reply" -> unreadComments++
+                }
+            }
+            override fun onMessage(record: org.json.JSONObject) {
+                unreadMessages++
+            }
+            override fun onStatus(connected: Boolean) { }
+        })
+    }
+    DisposableEffect(Unit) {
+        onDispose { realtimeRepo.disconnect() }
+    }
 
     fun navigateTo(screen: Screen) {
         screenStack = screenStack + screen
@@ -105,6 +151,21 @@ fun AppScreen(
         }
     }
 
+    // 账户间桥梁：与某用户建立会话并进入聊天页
+    fun openChatWith(peerUid: String, peerName: String, peerAvatar: String) {
+        if (peerUid.isBlank() || peerUid == userUid) return
+        chatPeerUid = peerUid
+        chatUserName = peerName
+        chatUserAvatarUrl = peerAvatar
+        chatConversationId = ""
+        scope.launch {
+            try {
+                chatConversationId = realtimeRepo.getOrCreateConversation(userUid, peerUid)
+            } catch (_: Exception) { }
+            navigateTo(Screen.Chat)
+        }
+    }
+
     when (currentScreen) {
         Screen.Login -> {
             LoginScreen(
@@ -119,6 +180,7 @@ fun AppScreen(
                     userBirthday = userData.birthday
                     userAvatarUrl = userData.avatarUrl
                     userBackgroundUrl = userData.backgroundUrl
+                    SupabaseAuthRepository.currentUserName = userName
                     screenStack = listOf(Screen.Home)
                     currentScreen = Screen.Home
                 },
@@ -134,6 +196,7 @@ fun AppScreen(
         Screen.Home -> {
             HomeScreen(
                 userUid = userUid,
+                unreadMessageCount = unreadMessages,
                 onNavigateToDetail = { postId ->
                     selectedPostId = postId
                     recordBrowse(postId)
@@ -142,7 +205,14 @@ fun AppScreen(
                 onNavigateToSearch = { navigateTo(Screen.Search) },
                 onNavigateToPublish = { navigateTo(Screen.Publish) },
                 onNavigateToProfile = { navigateTo(Screen.Profile) },
-                onNavigateToMessages = { navigateTo(Screen.Messages) },
+                onNavigateToMessages = {
+                    // 点进消息页：通知已读清零
+                    unreadLikesFavs = 0
+                    unreadFollows = 0
+                    unreadComments = 0
+                    scope.launch { try { realtimeRepo.markNotificationsRead(userUid) } catch (_: Exception) { } }
+                    navigateTo(Screen.Messages)
+                },
                 onNavigateToVideo = { videoId, videoUrl ->
                     selectedVideoId = videoId
                     selectedVideoUrl = videoUrl
@@ -160,7 +230,10 @@ fun AppScreen(
                 userAvatarUrl = userAvatarUrl,
                 scrollToCommentId = scrollToCommentId,
                 onCommentScrolled = { scrollToCommentId = "" },
-                onBack = { goBack() }
+                onBack = { goBack() },
+                onSendMessage = { peerUid, peerName, peerAvatar ->
+                    openChatWith(peerUid, peerName, peerAvatar)
+                }
             )
         }
         Screen.Publish -> {
@@ -209,7 +282,14 @@ fun AppScreen(
                 isDarkTheme = isDarkTheme,
                 onToggleDarkTheme = onToggleDarkTheme,
                 onNotification = { navigateTo(Screen.NotificationSetting) },
+                unreadMessageCount = unreadMessages,
                 onLogout = {
+                    realtimeRepo.disconnect()
+                    unreadLikesFavs = 0
+                    unreadFollows = 0
+                    unreadComments = 0
+                    unreadMessages = 0
+                    SupabaseAuthRepository.currentUserName = ""
                     userUid = ""
                     userXhsId = ""
                     userName = ""
@@ -219,6 +299,10 @@ fun AppScreen(
                     userBirthday = ""
                     userAvatarUrl = ""
                     userBackgroundUrl = ""
+                    chatUserName = ""
+                    chatUserAvatarUrl = ""
+                    chatPeerUid = ""
+                    chatConversationId = ""
                     loginResetKey++
                     screenStack = listOf(Screen.Login)
                     currentScreen = Screen.Login
@@ -244,6 +328,11 @@ fun AppScreen(
         }
         Screen.Messages -> {
             MessagesScreen(
+                userUid = userUid,
+                unreadLikesFavs = unreadLikesFavs,
+                unreadFollows = unreadFollows,
+                unreadComments = unreadComments,
+                unreadMessages = unreadMessages,
                 onBottomTabClick = { idx ->
                     when (idx) {
                         0 -> { screenStack = listOf(Screen.Home); currentScreen = Screen.Home }
@@ -251,18 +340,38 @@ fun AppScreen(
                     }
                 },
                 onPublish = { navigateTo(Screen.Publish) },
-                onLikeFavoriteClick = { navigateTo(Screen.ReceivedReactions) },
-                onCommentClick = { navigateTo(Screen.ReceivedComments) },
-                onFollowClick = { navigateTo(Screen.Followers) },
-                onConversationClick = { name, avatar ->
+                onLikeFavoriteClick = {
+                    unreadLikesFavs = 0
+                    scope.launch { try { realtimeRepo.markNotificationsRead(userUid, listOf("like", "favorite")) } catch (_: Exception) { } }
+                    navigateTo(Screen.ReceivedReactions)
+                },
+                onCommentClick = {
+                    unreadComments = 0
+                    scope.launch { try { realtimeRepo.markNotificationsRead(userUid, listOf("comment", "reply")) } catch (_: Exception) { } }
+                    navigateTo(Screen.ReceivedComments)
+                },
+                onFollowClick = {
+                    unreadFollows = 0
+                    scope.launch { try { realtimeRepo.markNotificationsRead(userUid, listOf("follow")) } catch (_: Exception) { } }
+                    navigateTo(Screen.Followers)
+                },
+                onConversationClick = { name, avatar, peerUid ->
                     chatUserName = name
                     chatUserAvatarUrl = avatar
-                    navigateTo(Screen.Chat)
+                    chatPeerUid = peerUid
+                    chatConversationId = ""
+                    scope.launch {
+                        try {
+                            chatConversationId = realtimeRepo.getOrCreateConversation(userUid, peerUid)
+                        } catch (_: Exception) { }
+                        navigateTo(Screen.Chat)
+                    }
                 }
             )
         }
         Screen.ReceivedReactions -> {
             ReceivedReactionsScreen(
+                userUid = userUid,
                 onBack = { goBack() },
                 onPostClick = { postId ->
                     selectedPostId = postId
@@ -273,6 +382,7 @@ fun AppScreen(
         }
         Screen.ReceivedComments -> {
             ReceivedCommentsScreen(
+                userUid = userUid,
                 onBack = { goBack() },
                 onPostClick = { postId ->
                     selectedPostId = postId
@@ -282,9 +392,21 @@ fun AppScreen(
             )
         }
         Screen.Chat -> {
+            // 进入聊天页：私信未读清零
+            LaunchedEffect(Unit) {
+                if (chatConversationId.isNotBlank()) {
+                    unreadMessages = 0
+                    scope.launch { try { realtimeRepo.markConversationRead(chatConversationId, userUid) } catch (_: Exception) { } }
+                }
+            }
             ChatScreen(
                 userName = chatUserName,
                 avatarUrl = chatUserAvatarUrl,
+                currentUserUid = userUid,
+                peerUid = chatPeerUid,
+                conversationId = chatConversationId,
+                repository = realtimeRepo,
+                myAvatarUrl = userAvatarUrl,
                 onBack = { goBack() }
             )
         }
@@ -292,7 +414,9 @@ fun AppScreen(
             FollowersScreen(
                 userUid = userUid,
                 onBack = { goBack() },
-                onSendMessage = { }
+                onSendMessage = { peerUid, peerName, peerAvatar ->
+                    openChatWith(peerUid, peerName, peerAvatar)
+                }
             )
         }
         Screen.EditProfile -> {

@@ -49,7 +49,7 @@ import com.example.redbook.ui.theme.getOutline
 fun FollowersScreen(
     userUid: String,
     onBack: () -> Unit = {},
-    onSendMessage: (String) -> Unit = {}
+    onSendMessage: (String, String, String) -> Unit = { _, _, _ -> }
 ) {
     val context = LocalContext.current
     val viewModel: FollowersViewModel = viewModel(factory = FollowersViewModelFactory(context.applicationContext as android.app.Application, userUid))
@@ -108,8 +108,7 @@ fun FollowersScreen(
                     FollowerRow(
                         item = item,
                         onFollowClick = { viewModel.toggleFollow(item.uid, true) },
-                        onUnfollowClick = { viewModel.toggleFollow(item.uid, false) },
-                        onSendMessage = { onSendMessage(item.uid) }
+                        onSendMessage = { onSendMessage(item.uid, item.userName, item.avatarUrl) }
                     )
                 }
             }
@@ -121,7 +120,6 @@ fun FollowersScreen(
 private fun FollowerRow(
     item: FollowerItem,
     onFollowClick: () -> Unit,
-    onUnfollowClick: () -> Unit,
     onSendMessage: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -168,7 +166,7 @@ private fun FollowerRow(
                 Text(
                     text = "关注了你",
                     fontSize = 13.sp,
-                    color = getOnSurfaceSecondary()
+                    color = getOnSurfaceTertiary()
                 )
                 Spacer(modifier = Modifier.width(8.dp))
                 Text(
@@ -181,33 +179,38 @@ private fun FollowerRow(
 
         Spacer(modifier = Modifier.width(10.dp))
 
+        // 固定宽度按钮：内部 padding 不变，只改文字不改变宽度
         if (item.followed) {
             Box(
                 modifier = Modifier
+                    .width(64.dp)
                     .border(1.dp, getOutline(), RoundedCornerShape(16.dp))
                     .clip(RoundedCornerShape(16.dp))
                     .clickable(
                         interactionSource = remember { MutableInteractionSource() },
                         indication = null
-                    ) { onUnfollowClick() }
-                    .padding(horizontal = 12.dp, vertical = 6.dp)
+                    ) { onSendMessage() }
+                    .padding(vertical = 6.dp),
+                contentAlignment = Alignment.Center
             ) {
                 Text(
                     text = "发私信",
                     fontSize = 13.sp,
-                    color = getOnSurfaceSecondary()
+                    color = getOnSurfaceTertiary()
                 )
             }
         } else {
             Box(
                 modifier = Modifier
+                    .width(64.dp)
                     .border(1.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(16.dp))
                     .clip(RoundedCornerShape(16.dp))
                     .clickable(
                         interactionSource = remember { MutableInteractionSource() },
                         indication = null
                     ) { onFollowClick() }
-                    .padding(horizontal = 12.dp, vertical = 6.dp)
+                    .padding(vertical = 6.dp),
+                contentAlignment = Alignment.Center
             ) {
                 Text(
                     text = "关注",

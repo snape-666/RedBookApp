@@ -27,8 +27,17 @@ object SupabaseConfig {
 
 class SupabaseAuthRepository(private val app: Application) {
 
+    companion object {
+        /** 当前登录用户昵称（全局共享，用于通知 actor_name，由 AppScreen 登录成功后设置） */
+        @Volatile
+        var currentUserName: String = ""
+    }
+
     private val requestQueue by lazy { Volley.newRequestQueue(app) }
     private val timeoutMs = 15_000L
+
+    /** 通知仓库（写入互动通知事件） */
+    private val realtimeRepository by lazy { RealtimeRepository(app) }
 
     suspend fun register(email: String, password: String, account: String, nickname: String?): Result<String> {
         return withContext(Dispatchers.IO) {
@@ -549,6 +558,7 @@ class SupabaseAuthRepository(private val app: Application) {
                 put("created_at", System.currentTimeMillis())
             }
             supabasePostBody("/rest/v1/likes", body)
+            notifyPostOwner(userUid, postId, "like")
         } else {
             supabaseDelete("/rest/v1/likes?user_uid=eq.$userUid&post_id=eq.$postId")
         }
@@ -564,6 +574,7 @@ class SupabaseAuthRepository(private val app: Application) {
                 put("created_at", System.currentTimeMillis())
             }
             supabasePostBody("/rest/v1/favorites", body)
+            notifyPostOwner(userUid, postId, "favorite")
         } else {
             supabaseDelete("/rest/v1/favorites?user_uid=eq.$userUid&post_id=eq.$postId")
         }
@@ -720,6 +731,7 @@ class SupabaseAuthRepository(private val app: Application) {
             put("created_at", System.currentTimeMillis())
         }
         supabasePostBody("/rest/v1/comments", body)
+        notifyPostOwner(authorUid, postId, "comment", commentId, content)
     }
 
     suspend fun insertReply(replyId: String, postId: String, parentId: String, content: String,
@@ -737,6 +749,7 @@ class SupabaseAuthRepository(private val app: Application) {
             put("created_at", System.currentTimeMillis())
         }
         supabasePostBody("/rest/v1/comments", body)
+        notifyPostOwner(authorUid, postId, "reply", replyId, content)
     }
 
     suspend fun deleteComment(commentId: String) {
@@ -780,6 +793,7 @@ class SupabaseAuthRepository(private val app: Application) {
                 put("created_at", System.currentTimeMillis())
             }
             supabasePostBody("/rest/v1/follows", body)
+            notifyFollow(followerUid, followedUid)
         } else {
             supabaseDelete("/rest/v1/follows?follower_uid=eq.$followerUid&followed_uid=eq.$followedUid")
         }
@@ -916,6 +930,47 @@ class SupabaseAuthRepository(private val app: Application) {
             }
             requestQueue.add(request)
         }
+    }
+
+    // ---------- 互动通知写入 ----------
+
+    /** 查帖子作者并插入"赞/收藏/评论/回复"通知 */
+    private suspend fun notifyPostOwner(actorUid: String, postId: String, type: String, commentId: String = "", commentContent: String = "") {
+        try {
+            if (postId.isBlank()) return
+            val post = getPost(postId) ?: return
+            val ownerUid = post.optString("author_uid", "")
+            if (ownerUid.isBlank() || ownerUid == actorUid) return
+            val postTitle = post.optString("title", "")
+            val actorName = currentUserName.ifBlank { "用户" }
+            val notifId = "n_${actorUid}_${System.nanoTime()}"
+            realtimeRepository.insertNotification(
+                notifId = notifId,
+                recipientUid = ownerUid,
+                actorUid = actorUid,
+                actorName = actorName,
+                type = type,
+                postId = postId,
+                postTitle = postTitle,
+                commentId = commentId,
+                commentContent = commentContent
+            )
+        } catch (_: Exception) { }
+    }
+
+    /** 插入"关注"通知 */
+    private suspend fun notifyFollow(followerUid: String, followedUid: String) {
+        try {
+            val actorName = currentUserName.ifBlank { "用户" }
+            val notifId = "n_${followerUid}_${System.nanoTime()}"
+            realtimeRepository.insertNotification(
+                notifId = notifId,
+                recipientUid = followedUid,
+                actorUid = followerUid,
+                actorName = actorName,
+                type = "follow"
+            )
+        } catch (_: Exception) { }
     }
 
     data class UserData(
