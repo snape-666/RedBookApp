@@ -6,6 +6,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.example.redbook.data.repository.RealtimeRepository
+import com.example.redbook.data.repository.SupabaseAuthRepository
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -14,11 +15,13 @@ import kotlinx.coroutines.launch
 data class NotificationItem(
     val actorName: String,
     val actorAvatar: String,
+    val actorUid: String = "",
     val type: String,
     val postId: String,
     val postTitle: String,
     val commentContent: String,
-    val time: Long
+    val time: Long,
+    val postImage: String = ""
 )
 
 /** 通知列表类型：LIKE_FAV（赞和收藏）、COMMENT（评论/回复） */
@@ -30,6 +33,7 @@ class NotificationsViewModel(
 ) : AndroidViewModel(application) {
 
     private val repository = RealtimeRepository(application)
+    private val authRepository = SupabaseAuthRepository(application)
 
     private val _items = MutableStateFlow<List<NotificationItem>>(emptyList())
     val items: StateFlow<List<NotificationItem>> = _items.asStateFlow()
@@ -51,14 +55,37 @@ class NotificationsViewModel(
                     val n = arr.getJSONObject(i)
                     val type = n.optString("type", "")
                     if (type !in allowedTypes) return@mapNotNull null
+                    val actorUid = n.optString("actor_uid", "")
+                    var actorAvatar = n.optString("actor_avatar", "")
+                    // 历史通知可能没存头像：按 uid 兜底查用户表
+                    if (actorAvatar.isBlank() && actorUid.isNotBlank()) {
+                        try {
+                            val u = authRepository.getUserByUid(actorUid)
+                            if (u != null) actorAvatar = u.optString("avatar_url", "")
+                        } catch (_: Exception) { }
+                    }
+                    // 查帖子封面图（通知表没存，按 postId 实时查）
+                    var postImage = ""
+                    val postId = n.optString("post_id", "")
+                    if (postId.isNotBlank()) {
+                        try {
+                            val p = authRepository.getPost(postId)
+                            if (p != null) {
+                                postImage = p.optString("image_url", "")
+                                    .split(",").firstOrNull()?.trim() ?: ""
+                            }
+                        } catch (_: Exception) { }
+                    }
                     NotificationItem(
                         actorName = n.optString("actor_name", "").ifBlank { "小红书用户" },
-                        actorAvatar = n.optString("actor_avatar", ""),
+                        actorAvatar = actorAvatar,
+                        actorUid = actorUid,
                         type = type,
-                        postId = n.optString("post_id", ""),
+                        postId = postId,
                         postTitle = n.optString("post_title", "").ifBlank { "你的笔记" },
                         commentContent = n.optString("comment_content", ""),
-                        time = n.optLong("created_at", 0L)
+                        time = n.optLong("created_at", 0L),
+                        postImage = postImage
                     )
                 }
             } catch (e: Exception) {

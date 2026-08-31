@@ -20,7 +20,8 @@ class DetailViewModel(
     application: Application,
     private val userUid: String,
     private val userXhsId: String,
-    private val userName: String
+    private val userName: String,
+    private val userAvatarUrl: String
 ) : AndroidViewModel(application) {
 
     private val repository = SupabaseAuthRepository(application)
@@ -85,6 +86,7 @@ class DetailViewModel(
                             userId = c.optString("author_uid", ""),
                             userName = c.optString("author_name", ""),
                             avatarRes = R.drawable.test,
+                            avatarUrl = c.optString("author_avatar", ""),
                             content = c.optString("content", ""),
                             timestamp = c.optLong("created_at", 0),
                             ipLocation = c.optString("ip_location", "未知"),
@@ -94,15 +96,26 @@ class DetailViewModel(
                             replies = emptyList()
                         )
                     }
-                    val replies = raw.filter { it.first.isNotEmpty() }
-                    val comments = raw.filter { it.first.isEmpty() }.map { (_, comment) ->
+                    // 头像兜底：author_avatar 为空的按 author_uid 批量查 users 表
+                    val missingAvatarUids = raw.map { it.second.userId }
+                        .filter { it.isNotBlank() }
+                        .toSet()
+                    val avatarMap = try { repository.getAvatarsByUids(missingAvatarUids) } catch (_: Exception) { emptyMap() }
+                    val raw2 = raw.map { (parentId, comment) ->
+                        val fallback = avatarMap[comment.userId].orEmpty()
+                        parentId to (if (comment.avatarUrl.isBlank() && fallback.isNotBlank()) comment.copy(avatarUrl = fallback) else comment)
+                    }
+                    val replies = raw2.filter { it.first.isNotEmpty() }
+                    val comments = raw2.filter { it.first.isEmpty() }.map { (_, comment) ->
                         comment.copy(
                             replies = replies.filter { it.first == comment.id }.map { (_, r) ->
+                                val replyAvatar = if (r.avatarUrl.isBlank()) avatarMap[r.userId].orEmpty() else r.avatarUrl
                                 Reply(
                                     id = r.id,
                                     userId = r.userId,
                                     userName = r.userName,
                                     avatarRes = r.avatarRes,
+                                    avatarUrl = replyAvatar,
                                     content = r.content,
                                     timestamp = r.timestamp,
                                     ipLocation = r.ipLocation,
@@ -277,6 +290,21 @@ class DetailViewModel(
         }
     }
 
+    /** 回到页面时重新同步关注状态（可能在其他页面已关注/取关） */
+    fun refreshFollowState() {
+        val currentState = _uiState.value
+        if (currentState is DetailUiState.Success && userUid.isNotBlank()) {
+            val postId = currentState.post.postId
+            val authorId = currentState.post.authorId
+            viewModelScope.launch {
+                try {
+                    val isFollowing = repository.isFollowing(userUid, authorId)
+                    updatePost { it.copy(isFollowed = isFollowing) }
+                } catch (_: Exception) { }
+            }
+        }
+    }
+
     fun toggleCommentLike(commentId: String) {
         val currentState = _uiState.value
         if (currentState is DetailUiState.Success) {
@@ -331,6 +359,7 @@ class DetailViewModel(
                     userId = userUid,
                     userName = name,
                     avatarRes = R.drawable.test,
+                    avatarUrl = userAvatarUrl,
                     images = images,
                     content = content,
                     timestamp = System.currentTimeMillis(),
@@ -345,7 +374,7 @@ class DetailViewModel(
                 val updatedPost = currentState.post.copy(commentCount = updatedComments.size)
                 _uiState.value = currentState.copy(comments = updatedComments, post = updatedPost)
 
-                repository.insertComment(newComment.id, post.postId, content, userUid, name, "", userXhsId, post.title)
+                repository.insertComment(newComment.id, post.postId, content, userUid, name, userAvatarUrl, userXhsId, post.title)
 
                 _commentText.value = ""
                 clearSelectedImages()
@@ -366,6 +395,7 @@ class DetailViewModel(
                     userId = userUid,
                     userName = name,
                     avatarRes = R.drawable.test,
+                    avatarUrl = userAvatarUrl,
                     images = images,
                     content = content,
                     timestamp = System.currentTimeMillis(),
@@ -381,7 +411,7 @@ class DetailViewModel(
                 }
                 _uiState.value = currentState.copy(comments = updatedComments)
 
-                repository.insertReply(newReply.id, post.postId, parentCommentId, content, userUid, name, "", userXhsId, post.title)
+                repository.insertReply(newReply.id, post.postId, parentCommentId, content, userUid, name, userAvatarUrl, userXhsId, post.title)
             }
         }
     }

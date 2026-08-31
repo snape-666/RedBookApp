@@ -54,6 +54,7 @@ import com.example.redbook.ui.utils.formatCount
 
 /**
  * 圆形未读角标：primary 背景 + surface 数字，右上角叠加使用
+ * 固定 18dp 直径，保证任意数字都是正圆
  */
 @Composable
 fun CountBadge(
@@ -67,10 +68,9 @@ fun CountBadge(
     val textColor = MaterialTheme.colorScheme.surface
     Box(
         modifier = modifier
-            .defaultMinSize(minWidth = 15.dp, minHeight = 15.dp)
+            .size(18.dp)
             .clip(CircleShape)
-            .background(backgroundColor)
-            .padding(horizontal = 3.dp),
+            .background(backgroundColor),
         contentAlignment = Alignment.Center
     ) {
         Text(
@@ -211,7 +211,7 @@ private fun TextItem(
                         count = badgeCount,
                         modifier = Modifier
                             .align(Alignment.TopEnd)
-                            .offset(x = 14.dp, y = (-4).dp)
+                            .offset(x = 14.dp, y = (-8).dp)
                     )
                 }
             }
@@ -347,7 +347,7 @@ fun HomeTopBar(
 fun PreviewBottomBarLightHome() {
     RedBookTheme {
         BottomBar(
-            titles = listOf("首页", "阅读", "消息", "我的"),
+            titles = listOf("首页", "视频", "消息", "我的"),
             selectedIndex = 0,
             onTitleClick = {},
             fabIconRes = R.drawable.social_icons,
@@ -365,7 +365,7 @@ fun PreviewBottomBarLightHome() {
 fun PreviewBottomBarDarkProfile() {
     RedBookTheme {
         BottomBar(
-            titles = listOf("首页", "阅读", "消息", "我的"),
+            titles = listOf("首页", "视频", "消息", "我的"),
             selectedIndex = 3,
             onTitleClick = {},
             fabIconRes = R.drawable.social_icons,
@@ -469,10 +469,14 @@ fun NoteCardBar(
          )
 
          Spacer(modifier = Modifier.width(5.dp))
-         if (avatarUrl.isNotBlank()) {
+         var avatarFailed by remember(avatarUrl) { mutableStateOf(false) }
+         if (avatarUrl.isNotBlank() && !avatarFailed) {
              AsyncImage(
                  model = ImageRequest.Builder(LocalContext.current).data(avatarUrl).crossfade(true).build(),
                  contentDescription = "头像",
+                 onState = { state ->
+                     if (state is coil.compose.AsyncImagePainter.State.Error) avatarFailed = true
+                 },
                  modifier = Modifier
                      .size(32.dp)
                      .clip(CircleShape),

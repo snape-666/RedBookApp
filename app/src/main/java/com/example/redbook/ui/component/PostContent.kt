@@ -48,7 +48,24 @@ fun PostContent(
     Column(modifier = modifier.fillMaxWidth()) {
 
         val urls = post.imageUrl.split(",").filter { it.isNotBlank() }
-        if (urls.size > 1) {
+        // 视频笔记：image_url 可能带 video: 前缀，直接展示视频占位
+        val videoUrls = urls.filter { it.startsWith("video:") }
+        if (videoUrls.isNotEmpty()) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .aspectRatio(3f / 4f)
+                    .background(MaterialTheme.colorScheme.surfaceVariant),
+                contentAlignment = Alignment.Center
+            ) {
+                androidx.compose.material3.Icon(
+                    painter = androidx.compose.ui.res.painterResource(com.example.redbook.R.drawable.video_fill),
+                    contentDescription = "视频",
+                    modifier = Modifier.size(48.dp),
+                    tint = MaterialTheme.colorScheme.primary
+                )
+            }
+        } else if (urls.size > 1) {
             val pagerState = rememberPagerState(pageCount = { urls.size })
             val ratios = remember { mutableStateMapOf<Int, Float>() }
             val currentRatio = ratios[pagerState.currentPage] ?: (3f / 4f)
@@ -113,19 +130,31 @@ private fun AdaptiveImage(
     onRatioChanged: (Float) -> Unit = {}
 ) {
     var ratio by remember(url) { mutableStateOf(defaultRatio) }
-    AsyncImage(
-        model = ImageRequest.Builder(LocalContext.current).data(url).crossfade(true).build(),
-        contentDescription = null,
-        onState = { state ->
-            if (state is AsyncImagePainter.State.Success) {
-                val s = state.painter.intrinsicSize
-                if (s.width > 0f && s.height > 0f) {
-                    val r = s.width / s.height
-                    if (r > 0f) { ratio = r; onRatioChanged(r) }
+    var failed by remember(url) { mutableStateOf(false) }
+    if (failed || url.isBlank() || url.startsWith("video:")) {
+        Image(
+            painter = painterResource(com.example.redbook.R.drawable.test),
+            contentDescription = null,
+            modifier = Modifier.fillMaxWidth().aspectRatio(ratio),
+            contentScale = ContentScale.Crop
+        )
+    } else {
+        AsyncImage(
+            model = ImageRequest.Builder(LocalContext.current).data(url).crossfade(true).build(),
+            contentDescription = null,
+            onState = { state ->
+                if (state is AsyncImagePainter.State.Success) {
+                    val s = state.painter.intrinsicSize
+                    if (s.width > 0f && s.height > 0f) {
+                        val r = s.width / s.height
+                        if (r > 0f) { ratio = r; onRatioChanged(r) }
+                    }
+                } else if (state is AsyncImagePainter.State.Error) {
+                    failed = true
                 }
-            }
-        },
-        contentScale = ContentScale.FillWidth,
-        modifier = Modifier.fillMaxWidth().aspectRatio(ratio)
-    )
+            },
+            contentScale = ContentScale.FillWidth,
+            modifier = Modifier.fillMaxWidth().aspectRatio(ratio)
+        )
+    }
 }

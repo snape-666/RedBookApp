@@ -23,6 +23,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
@@ -49,7 +50,8 @@ import com.example.redbook.ui.theme.getOutline
 fun ReceivedReactionsScreen(
     userUid: String = "",
     onBack: () -> Unit = {},
-    onPostClick: (String) -> Unit = {}
+    onPostClick: (String) -> Unit = {},
+    onUserClick: (String) -> Unit = {}
 ) {
     val context = LocalContext.current
     val viewModel: NotificationsViewModel = viewModel(
@@ -62,6 +64,25 @@ fun ReceivedReactionsScreen(
     val loading by viewModel.loading.collectAsStateWithLifecycle()
 
     LaunchedEffect(userUid) { viewModel.load(userUid) }
+
+    // 实时同步：收到新的赞/收藏/评论通知时刷新列表
+    val realtimeRepo = remember {
+        com.example.redbook.data.repository.RealtimeRepository(context.applicationContext as android.app.Application)
+    }
+    DisposableEffect(userUid) {
+        val listener = object : com.example.redbook.data.repository.RealtimeRepository.RealtimeListener {
+            override fun onNotification(record: org.json.JSONObject) {
+                val type = record.optString("type", "")
+                if (type == "like" || type == "favorite") {
+                    viewModel.load(userUid)
+                }
+            }
+            override fun onMessage(record: org.json.JSONObject) { }
+            override fun onStatus(connected: Boolean) { }
+        }
+        realtimeRepo.addListener(listener)
+        onDispose { realtimeRepo.removeListener(listener) }
+    }
 
     Column(
         modifier = Modifier
@@ -111,7 +132,7 @@ fun ReceivedReactionsScreen(
             }
             else -> LazyColumn(modifier = Modifier.weight(1f)) {
                 items(items, key = { it.actorName + it.time }) { item ->
-                    ReactionRow(item = item, onPostClick = onPostClick)
+                    ReactionRow(item = item, onPostClick = onPostClick, onUserClick = { onUserClick(item.actorUid) })
                 }
             }
         }
@@ -119,14 +140,14 @@ fun ReceivedReactionsScreen(
 }
 
 @Composable
-private fun ReactionRow(item: NotificationItem, onPostClick: (String) -> Unit, modifier: Modifier = Modifier) {
+private fun ReactionRow(item: NotificationItem, onPostClick: (String) -> Unit, onUserClick: () -> Unit = {}, modifier: Modifier = Modifier) {
     Row(
         modifier = modifier
             .fillMaxWidth()
             .padding(horizontal = 10.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Box(modifier = Modifier.size(42.dp).clip(CircleShape)) {
+        Box(modifier = Modifier.size(42.dp).clip(CircleShape).clickable { onUserClick() }) {
             if (item.actorAvatar.isNotBlank()) {
                 AsyncImage(
                     model = ImageRequest.Builder(LocalContext.current)
@@ -156,7 +177,8 @@ private fun ReactionRow(item: NotificationItem, onPostClick: (String) -> Unit, m
                 fontWeight = FontWeight.Bold,
                 color = MaterialTheme.colorScheme.onSurface,
                 maxLines = 1,
-                overflow = TextOverflow.Ellipsis
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.clickable { onUserClick() }
             )
             Spacer(modifier = Modifier.height(2.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -188,12 +210,22 @@ private fun ReactionRow(item: NotificationItem, onPostClick: (String) -> Unit, m
                     indication = null
                 ) { onPostClick(item.postId) }
         ) {
-            Image(
-                painter = painterResource(id = R.drawable.test),
-                contentDescription = "帖子封面",
-                modifier = Modifier.fillMaxSize(),
-                contentScale = ContentScale.Crop
-            )
+            val cover = item.postImage.removePrefix("video:")
+            if (cover.isNotBlank()) {
+                AsyncImage(
+                    model = ImageRequest.Builder(LocalContext.current).data(cover).crossfade(true).build(),
+                    contentDescription = "帖子封面",
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Crop
+                )
+            } else {
+                Image(
+                    painter = painterResource(id = R.drawable.test),
+                    contentDescription = "帖子封面",
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Crop
+                )
+            }
         }
     }
 }

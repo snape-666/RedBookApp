@@ -48,6 +48,7 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -199,6 +200,13 @@ fun EditProfileScreen(
 
             Column(Modifier
                 .fillMaxWidth()
+                .shadow(
+                    elevation = 4.dp,
+                    shape = RoundedCornerShape(16.dp),
+                    clip = false,
+                    ambientColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f),
+                    spotColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f)
+                )
                 .clip(RoundedCornerShape(16.dp))
                 .background(MaterialTheme.colorScheme.surface)) {
                 Spacer(Modifier.height(5.dp))
@@ -251,6 +259,13 @@ fun EditProfileScreen(
 
             Column(Modifier
                 .fillMaxWidth()
+                .shadow(
+                    elevation = 4.dp,
+                    shape = RoundedCornerShape(16.dp),
+                    clip = false,
+                    ambientColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f),
+                    spotColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f)
+                )
                 .clip(RoundedCornerShape(16.dp))
                 .background(MaterialTheme.colorScheme.surface)) {
                 Spacer(Modifier.height(5.dp))
@@ -285,6 +300,13 @@ fun EditProfileScreen(
             Column(
                 Modifier
                     .fillMaxWidth()
+                    .shadow(
+                        elevation = 8.dp,
+                        shape = RoundedCornerShape(12.dp),
+                        clip = false,
+                        ambientColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.2f),
+                        spotColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.2f)
+                    )
                     .clip(RoundedCornerShape(12.dp))
                     .background(MaterialTheme.colorScheme.surface)
                     .padding(20.dp)
@@ -318,6 +340,13 @@ fun EditProfileScreen(
             Column(
                 Modifier
                     .fillMaxWidth()
+                    .shadow(
+                        elevation = 8.dp,
+                        shape = RoundedCornerShape(12.dp),
+                        clip = false,
+                        ambientColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.2f),
+                        spotColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.2f)
+                    )
                     .clip(RoundedCornerShape(12.dp))
                     .background(MaterialTheme.colorScheme.surface)
                     .padding(20.dp)
@@ -353,6 +382,13 @@ fun EditProfileScreen(
             Column(
                 Modifier
                     .fillMaxWidth()
+                    .shadow(
+                        elevation = 8.dp,
+                        shape = RoundedCornerShape(12.dp),
+                        clip = false,
+                        ambientColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.2f),
+                        spotColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.2f)
+                    )
                     .clip(RoundedCornerShape(12.dp))
                     .background(MaterialTheme.colorScheme.surface)
                     .padding(20.dp)

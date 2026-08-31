@@ -31,6 +31,10 @@ class SupabaseAuthRepository(private val app: Application) {
         /** 当前登录用户昵称（全局共享，用于通知 actor_name，由 AppScreen 登录成功后设置） */
         @Volatile
         var currentUserName: String = ""
+
+        /** 当前登录用户头像（全局共享，用于通知 actor_avatar，由 AppScreen 登录成功后设置） */
+        @Volatile
+        var currentUserAvatar: String = ""
     }
 
     private val requestQueue by lazy { Volley.newRequestQueue(app) }
@@ -215,6 +219,26 @@ class SupabaseAuthRepository(private val app: Application) {
         suspendCancellableCoroutine<String> { cont ->
             val request = object : StringRequest(
                 PATCH, "${SupabaseConfig.url}/rest/v1/users?uid=eq.$uid",
+                { cont.resume(it) },
+                { error -> cont.resumeWithException(Exception(extractVolleyError(error))) }
+            ) {
+                override fun getBody(): ByteArray = bodyString.toByteArray()
+                override fun getBodyContentType(): String = "application/json"
+                override fun getHeaders(): Map<String, String> = mapOf(
+                    "apikey" to SupabaseConfig.anonKey,
+                    "Prefer" to "return=minimal"
+                )
+            }
+            requestQueue.add(request)
+        }
+    }
+
+    /** 通用 PATCH：更新指定表满足 filter 的行 */
+    private suspend fun patchRest(table: String, filter: String, body: JSONObject) {
+        val bodyString = body.toString()
+        suspendCancellableCoroutine<String> { cont ->
+            val request = object : StringRequest(
+                PATCH, "${SupabaseConfig.url}/rest/v1/$table?$filter",
                 { cont.resume(it) },
                 { error -> cont.resumeWithException(Exception(extractVolleyError(error))) }
             ) {
@@ -528,8 +552,14 @@ class SupabaseAuthRepository(private val app: Application) {
         return resp.optJSONArray("users") ?: resp.optJSONArray("video_notes") ?: JSONArray()
     }
 
+    suspend fun getVideo(videoId: String): JSONObject? {
+        val resp = queryRest("video_notes", "select=*&video_id=eq.$videoId&limit=1")
+        val arr = resp.optJSONArray("users") ?: resp.optJSONArray("video_notes") ?: return null
+        return if (arr.length() > 0) arr.getJSONObject(0) else null
+    }
+
     suspend fun publishVideo(videoId: String, title: String, videoUrl: String,
-                             authorUid: String, authorName: String, authorXhsId: String) {
+                             authorUid: String, authorName: String, authorXhsId: String, authorAvatar: String = "") {
         val body = JSONObject().apply {
             put("video_id", videoId)
             put("title", title)
@@ -537,6 +567,7 @@ class SupabaseAuthRepository(private val app: Application) {
             put("author_uid", authorUid)
             put("author_name", authorName)
             put("author_xhs_id", authorXhsId)
+            put("author_avatar", authorAvatar)
             put("created_at", System.currentTimeMillis())
         }
         supabasePostBody("/rest/v1/video_notes", body)
@@ -808,6 +839,120 @@ class SupabaseAuthRepository(private val app: Application) {
         } catch (e: Exception) { false }
     }
 
+    /** 按 uid 查用户基础资料（头像/昵称/背景/性别/生日/xhs_id），找不到返回 null */
+    suspend fun getUserByUid(uid: String): JSONObject? {
+        if (uid.isBlank()) return null
+        return try {
+            val resp = queryRest("users", "select=uid,nickname,avatar_url,background_url,gender,birthday,xhs_id&uid=eq.$uid&limit=1")
+            val arr = resp.optJSONArray("users") ?: JSONArray()
+            if (arr.length() > 0) arr.getJSONObject(0) else null
+        } catch (e: Exception) { null }
+    }
+
+    /** 批量查用户头像（uid -> avatar_url），用于评论头像兜底 */
+    suspend fun getAvatarsByUids(uids: Set<String>): Map<String, String> {
+        if (uids.isEmpty()) return emptyMap()
+        return try {
+            val filters = uids.filter { it.isNotBlank() }.joinToString(",") { "uid.eq.$it" }
+            if (filters.isBlank()) return emptyMap()
+            val resp = queryRest("users", "select=uid,avatar_url&or=($filters)")
+            val arr = resp.optJSONArray("users") ?: JSONArray()
+            (0 until arr.length()).associate {
+                val u = arr.getJSONObject(it)
+                u.optString("uid", "") to u.optString("avatar_url", "")
+            }
+        } catch (e: Exception) { emptyMap() }
+    }
+
+    /** 我对某人的备注名（存 remarks 表，与关注关系无关） */
+    suspend fun getRemark(viewerUid: String, targetUid: String): String {
+        if (viewerUid.isBlank() || targetUid.isBlank()) return ""
+        return try {
+            val resp = queryRest("remarks", "select=remark&viewer_uid=eq.$viewerUid&target_uid=eq.$targetUid&limit=1")
+            val arr = resp.optJSONArray("users") ?: resp.optJSONArray("remarks") ?: JSONArray()
+            if (arr.length() > 0) arr.getJSONObject(0).optString("remark", "") else ""
+        } catch (e: Exception) { "" }
+    }
+
+    /** 设置/清除我对某人的备注名（upsert，空则清空备注） */
+    suspend fun setRemark(viewerUid: String, targetUid: String, remark: String) {
+        if (viewerUid.isBlank() || targetUid.isBlank()) return
+        try {
+            val body = JSONObject().apply {
+                put("viewer_uid", viewerUid)
+                put("target_uid", targetUid)
+                put("remark", remark)
+                put("created_at", System.currentTimeMillis())
+            }
+            // upsert：依赖 remarks 表的 UNIQUE(viewer_uid, target_uid)
+            upsertRest("/rest/v1/remarks?on_conflict=viewer_uid,target_uid", body)
+        } catch (_: Exception) { }
+    }
+
+    /** POST upsert：Prefer resolution=merge-duplicates，插入或更新冲突行 */
+    private suspend fun upsertRest(path: String, body: JSONObject) {
+        val bodyString = body.toString()
+        suspendCancellableCoroutine<String> { cont ->
+            val request = object : StringRequest(
+                POST, "${SupabaseConfig.url}$path",
+                { cont.resume(it) },
+                { error -> cont.resumeWithException(Exception(extractVolleyError(error))) }
+            ) {
+                override fun getBody(): ByteArray = bodyString.toByteArray()
+                override fun getBodyContentType(): String = "application/json"
+                override fun getHeaders(): Map<String, String> = mapOf(
+                    "apikey" to SupabaseConfig.anonKey,
+                    "Prefer" to "resolution=merge-duplicates,return=minimal"
+                )
+            }
+            requestQueue.add(request)
+        }
+    }
+
+    /** 是否互相关注 */
+    suspend fun isMutualFollow(aUid: String, bUid: String): Boolean {
+        if (aUid.isBlank() || bUid.isBlank()) return false
+        return try {
+            val resp = queryRest("follows", "select=follower_uid&follower_uid=eq.$aUid&followed_uid=eq.$bUid&limit=1")
+            (resp.optJSONArray("users") ?: resp.optJSONArray("follows") ?: JSONArray()).length() > 0
+        } catch (e: Exception) { false }
+    }
+
+    /** 关注数：我关注了多少人 */
+    suspend fun getFollowingCount(userUid: String): Int {
+        if (userUid.isBlank()) return 0
+        return try {
+            val resp = queryRest("follows", "select=follower_uid&follower_uid=eq.$userUid")
+            (resp.optJSONArray("users") ?: resp.optJSONArray("follows") ?: JSONArray()).length()
+        } catch (e: Exception) { 0 }
+    }
+
+    /** 粉丝数：多少人关注了我 */
+    suspend fun getFansCount(userUid: String): Int {
+        if (userUid.isBlank()) return 0
+        return try {
+            val resp = queryRest("follows", "select=followed_uid&followed_uid=eq.$userUid")
+            (resp.optJSONArray("users") ?: resp.optJSONArray("follows") ?: JSONArray()).length()
+        } catch (e: Exception) { 0 }
+    }
+
+    /** 获赞数：我发布的所有帖子/视频的 like_count 总和 */
+    suspend fun getLikeCount(userUid: String, userXhsId: String): Int {
+        if (userUid.isBlank()) return 0
+        var total = 0
+        try {
+            val postsResp = queryRest("posts", "select=like_count&author_uid=eq.$userUid")
+            val postsArr = postsResp.optJSONArray("users") ?: postsResp.optJSONArray("posts") ?: JSONArray()
+            for (i in 0 until postsArr.length()) total += postsArr.getJSONObject(i).optInt("like_count", 0)
+        } catch (_: Exception) { }
+        try {
+            val vResp = queryRest("video_notes", "select=like_count&author_uid=eq.$userUid")
+            val vArr = vResp.optJSONArray("users") ?: vResp.optJSONArray("video_notes") ?: JSONArray()
+            for (i in 0 until vArr.length()) total += vArr.getJSONObject(i).optInt("like_count", 0)
+        } catch (_: Exception) { }
+        return total
+    }
+
     // 关注我的用户列表（按关注时间倒序），返回 uid,nickname,avatar_url,created_at
     suspend fun getMyFollowers(userUid: String): JSONArray {
         val resp = queryRest("follows", "select=follower_uid,created_at&followed_uid=eq.$userUid&order=created_at.desc")
@@ -943,12 +1088,14 @@ class SupabaseAuthRepository(private val app: Application) {
             if (ownerUid.isBlank() || ownerUid == actorUid) return
             val postTitle = post.optString("title", "")
             val actorName = currentUserName.ifBlank { "用户" }
+            val actorAvatar = currentUserAvatar
             val notifId = "n_${actorUid}_${System.nanoTime()}"
             realtimeRepository.insertNotification(
                 notifId = notifId,
                 recipientUid = ownerUid,
                 actorUid = actorUid,
                 actorName = actorName,
+                actorAvatar = actorAvatar,
                 type = type,
                 postId = postId,
                 postTitle = postTitle,
@@ -962,12 +1109,14 @@ class SupabaseAuthRepository(private val app: Application) {
     private suspend fun notifyFollow(followerUid: String, followedUid: String) {
         try {
             val actorName = currentUserName.ifBlank { "用户" }
+            val actorAvatar = currentUserAvatar
             val notifId = "n_${followerUid}_${System.nanoTime()}"
             realtimeRepository.insertNotification(
                 notifId = notifId,
                 recipientUid = followedUid,
                 actorUid = followerUid,
                 actorName = actorName,
+                actorAvatar = actorAvatar,
                 type = "follow"
             )
         } catch (_: Exception) { }

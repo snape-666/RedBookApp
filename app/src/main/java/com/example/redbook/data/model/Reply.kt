@@ -13,5 +13,6 @@ data class Reply(
     val ipLocation: String,
     val likeCount: Int,
     val isLiked: Boolean,
-    val isAuthor: Boolean              // 是否为帖子作者本人回复
+    val isAuthor: Boolean,             // 是否为帖子作者本人回复
+    val avatarUrl: String = ""         // 回复者头像 URL（实时展示用）
 )

@@ -31,6 +31,7 @@ import androidx.compose.foundation.lazy.staggeredgrid.StaggeredGridItemSpan
 import androidx.compose.foundation.lazy.staggeredgrid.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -39,6 +40,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -74,6 +76,7 @@ import com.example.redbook.ui.component.PostCard
 import com.example.redbook.ui.theme.getOnSurfaceSecondary
 import com.example.redbook.ui.theme.getOnSurfaceTertiary
 import com.example.redbook.ui.theme.getOutline
+import com.example.redbook.ui.theme.surfaceVariantLight
 import java.text.SimpleDateFormat
 import kotlinx.coroutines.launch
 
@@ -106,11 +109,24 @@ fun ProfileScreen(
     onToggleDarkTheme: () -> Unit = {},
     onLogout: () -> Unit = {},
     onNotification: () -> Unit = {},
-    unreadMessageCount: Int = 0
+    onNavigateToMessages: () -> Unit = {},
+    unreadMessageCount: Int = 0,
+    // 对方主页模式：viewerUid 为当前登录者，isSelf=false 时展示对方主页
+    viewerUid: String = "",
+    onSendMessage: (String, String, String) -> Unit = { _, _, _ -> }
 ) {
     val context = LocalContext.current
-    val viewModel: ProfileViewModel = viewModel(factory = ProfileViewModelFactory(context.applicationContext as android.app.Application, userUid, userXhsId))
+    val isSelf = viewerUid.isBlank() || userUid == viewerUid
+    // 用 key 区分自己主页/对方主页，避免两个页面复用同一个 ProfileViewModel 实例
+    val viewModel: ProfileViewModel = viewModel(
+        key = if (isSelf) "self_profile" else "user_profile_$userUid",
+        factory = ProfileViewModelFactory(
+            context.applicationContext as android.app.Application,
+            userUid, userXhsId, if (isSelf) "" else viewerUid
+        )
+    )
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val userProfile by viewModel.userProfile.collectAsStateWithLifecycle()
     val refreshing by viewModel.refreshing.collectAsStateWithLifecycle()
     val noRipple = remember { MutableInteractionSource() }
     var bottomIndex by remember { mutableIntStateOf(3) }
@@ -118,8 +134,42 @@ fun ProfileScreen(
     var deletingComment by remember { mutableStateOf<String?>(null) }
     var showDrawer by remember { mutableStateOf(false) }
     var changePasswordVisible by remember { mutableStateOf(false) }
+    var showActionSheet by remember { mutableStateOf(false) }
+    var showRemarkDialog by remember { mutableStateOf(false) }
 
-    LaunchedEffect(Unit) { viewModel.refresh() }
+    LaunchedEffect(Unit) {
+        viewModel.refresh()
+        if (!isSelf) viewModel.loadUserProfile(userUid)
+    }
+
+    // 实时刷新：收到关注/点赞/评论通知时刷新粉丝、获赞等统计
+    val realtimeRepo = remember {
+        com.example.redbook.data.repository.RealtimeRepository(context.applicationContext as android.app.Application)
+    }
+    DisposableEffect(userUid) {
+        val listener = object : com.example.redbook.data.repository.RealtimeRepository.RealtimeListener {
+            override fun onNotification(record: org.json.JSONObject) {
+                val type = record.optString("type", "")
+                if (type == "follow" || type == "like" || type == "favorite" || type == "comment" || type == "reply") {
+                    viewModel.refresh()
+                }
+            }
+            override fun onMessage(record: org.json.JSONObject) { }
+            override fun onStatus(connected: Boolean) { }
+        }
+        realtimeRepo.addListener(listener)
+        onDispose { realtimeRepo.removeListener(listener) }
+    }
+
+    // 回到页面时重新刷新统计
+    val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner, userUid) {
+        val obs = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) viewModel.refresh()
+        }
+        lifecycleOwner.lifecycle.addObserver(obs)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(obs) }
+    }
 
     Box(Modifier.fillMaxSize()) {
         PullToRefreshBox(
@@ -128,23 +178,36 @@ fun ProfileScreen(
             modifier = Modifier.fillMaxSize()
         ) {
             Column(Modifier.fillMaxSize()) {
-                ProfileHeader(
-                    userName = userName,
-                    userXhsId = userXhsId,
-                    ipLocation = ipLocation,
-                    followCount = followCount,
-                    fansCount = fansCount,
-                    likeCount = likeCount,
-                    gender = gender,
-                    birthday = birthday,
-                    avatarUrl = avatarUrl,
-                    backgroundUrl = backgroundUrl,
-                    onBack = onBack,
-                    onMenuClick = { showDrawer = true },
-                    onEditProfile = onEditProfile,
-                    onBrowseClick = onBrowseClick,
-                    noRipple = noRipple
-                )
+                if (isSelf) {
+                    ProfileHeader(
+                        userName = userName,
+                        userXhsId = userXhsId,
+                        ipLocation = ipLocation,
+                        followCount = if (state.followCount > 0) state.followCount else followCount,
+                        fansCount = if (state.fansCount > 0) state.fansCount else fansCount,
+                        likeCount = if (state.likeCount > 0) state.likeCount else likeCount,
+                        gender = gender,
+                        birthday = birthday,
+                        avatarUrl = avatarUrl,
+                        backgroundUrl = backgroundUrl,
+                        onBack = onBack,
+                        onMenuClick = { showDrawer = true },
+                        onEditProfile = onEditProfile,
+                        onBrowseClick = onBrowseClick,
+                        noRipple = noRipple
+                    )
+                } else {
+                    OtherUserHeader(
+                        userProfile = userProfile,
+                        onBack = onBack,
+                        onFollowClick = { viewModel.toggleFollowTarget() },
+                        onActionClick = { showActionSheet = true },
+                        onSendMessage = {
+                            onSendMessage(userProfile.uid, userProfile.userName.ifBlank { userProfile.uid }, userProfile.avatarUrl)
+                        },
+                        expanded = showActionSheet
+                    )
+                }
 
             Surface(
                 modifier = Modifier
@@ -261,27 +324,31 @@ fun ProfileScreen(
         }
         }
 
-        Column(Modifier
-            .align(Alignment.BottomCenter)
-            .fillMaxWidth()) {
-            Box(Modifier
-                .fillMaxWidth()
-                .height(1.dp)
-                .background(Color.Gray.copy(alpha = 0.2f)))
-            BottomBar(
-                titles = listOf("首页", "阅读", "消息", "我的"),
-                selectedIndex = bottomIndex,
-                onTitleClick = { idx ->
-                    bottomIndex = idx
-                    if (idx == 0) onBottomTabClick(0)
-                },
-                fabIconRes = R.drawable.social_icons, onFabClick = onPublish,
-                unreadCounts = listOf(0, 0, unreadMessageCount, 0)
-            )
-            Spacer(Modifier
-                .fillMaxWidth()
-                .height(16.dp)
-                .background(MaterialTheme.colorScheme.onPrimary))
+        if (isSelf) {
+            Column(Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth()) {
+                Box(Modifier
+                    .fillMaxWidth()
+                    .height(1.dp)
+                    .background(Color.Gray.copy(alpha = 0.2f)))
+                BottomBar(
+                    titles = listOf("首页", "视频", "消息", "我的"),
+                    selectedIndex = bottomIndex,
+                    onTitleClick = { idx ->
+                        bottomIndex = idx
+                        if (idx == 0) onBottomTabClick(0)
+                        if (idx == 1) onBottomTabClick(1)
+                        if (idx == 2) onNavigateToMessages()
+                    },
+                    fabIconRes = R.drawable.social_icons, onFabClick = onPublish,
+                    unreadCounts = listOf(0, 0, unreadMessageCount, 0)
+                )
+                Spacer(Modifier
+                    .fillMaxWidth()
+                    .height(16.dp)
+                    .background(MaterialTheme.colorScheme.onPrimary))
+            }
         }
 
         deletingComment?.let { commentId ->
@@ -359,6 +426,382 @@ fun ProfileScreen(
                 email = email,
                 onDismiss = { changePasswordVisible = false }
             )
+        }
+
+        // 对方主页：底部操作弹窗（设置备注名 / 取消关注）
+        if (showActionSheet && !isSelf) {
+            ActionSheet(
+                onDismiss = { showActionSheet = false },
+                onRemarkClick = {
+                    showActionSheet = false
+                    showRemarkDialog = true
+                },
+                onUnfollowClick = {
+                    showActionSheet = false
+                    viewModel.unfollowTarget()
+                }
+            )
+        }
+
+        // 对方主页：添加备注弹窗
+        if (showRemarkDialog && !isSelf) {
+            RemarkDialog(
+                initialRemark = userProfile.remark,
+                onDismiss = { showRemarkDialog = false },
+                onConfirm = { remark ->
+                    showRemarkDialog = false
+                    viewModel.setRemark(remark)
+                }
+            )
+        }
+    }
+}
+
+/** 对方主页头部：顶部只留返回按钮，信息区与我的主页一致，操作区为关注row + 发私信 */
+@Composable
+private fun OtherUserHeader(
+    userProfile: ProfileViewModel.UserProfileState,
+    onBack: () -> Unit,
+    onFollowClick: () -> Unit,
+    onActionClick: () -> Unit,
+    onSendMessage: () -> Unit,
+    expanded: Boolean = false
+) {
+    val onPri = Color.White
+    val ageText = remember(userProfile.birthday) { calculateAge(userProfile.birthday) }
+    val followText = when {
+        userProfile.iFollow && userProfile.heFollowsMe -> "互相关注"
+        userProfile.iFollow -> "已关注"
+        else -> "关注"
+    }
+    Box(Modifier.fillMaxWidth()) {
+        // 主页背景图
+        if (userProfile.backgroundUrl.isNotBlank()) {
+            AsyncImage(
+                model = ImageRequest.Builder(LocalContext.current).data(userProfile.backgroundUrl).crossfade(true).build(),
+                contentDescription = null,
+                modifier = Modifier.matchParentSize(),
+                contentScale = ContentScale.Crop,
+                alignment = Alignment.TopCenter)
+        } else {
+            Image(
+                painterResource(R.drawable.test2),
+                null,
+                Modifier.matchParentSize(),
+                contentScale = ContentScale.Crop,
+                alignment = Alignment.TopCenter)
+        }
+        Box(Modifier.matchParentSize().background(onPri.copy(alpha = 0.22f)))
+        Column(Modifier
+            .fillMaxWidth()
+            .padding(top = 36.dp, start = 12.dp, end = 12.dp)) {
+            // 顶部 row：只有返回按钮
+            Row(Modifier
+                .fillMaxWidth()
+                .padding(vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically) {
+                Icon(painterResource(R.drawable.arrow_left), null, Modifier
+                    .size(28.dp)
+                    .clickable { onBack() },
+                    tint = onPri.copy(alpha = 0.8f))
+            }
+
+            Spacer(Modifier.height(12.dp))
+
+            Row(Modifier
+                .fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically) {
+                if (userProfile.avatarUrl.isNotBlank()) {
+                    AsyncImage(
+                        model = ImageRequest.Builder(LocalContext.current).data(userProfile.avatarUrl).crossfade(true).build(),
+                        contentDescription = null,
+                        modifier = Modifier.size(84.dp).clip(CircleShape),
+                        contentScale = ContentScale.Crop)
+                } else {
+                    Image(painterResource(R.drawable.test), null,
+                        Modifier
+                            .size(84.dp)
+                            .clip(CircleShape), contentScale = ContentScale.Crop)
+                }
+                Spacer(Modifier.width(16.dp))
+                Column {
+                    Text(
+                        text = userProfile.remark.ifBlank { userProfile.userName },
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = onPri)
+                    Text("小红书号：${userProfile.xhsId.ifBlank { "00000000000" }}", fontSize = 13.sp, color = onPri.copy(alpha = 0.95f))
+                    Text("IP：${userProfile.ipLocation}", fontSize = 13.sp, color = onPri.copy(alpha = 0.95f))
+                }
+            }
+
+            Spacer(Modifier.height(16.dp))
+
+            // 统计：关注 / 粉丝 / 获赞
+            Row(Modifier
+                .fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                StatItem("${userProfile.followCount}", "关注", onPri)
+                StatItem("${userProfile.fansCount}", "粉丝", onPri)
+                StatItem("${userProfile.likeCount}", "获赞", onPri)
+            }
+
+            Spacer(Modifier.height(12.dp))
+
+            // 性别年龄标签
+            val genderIcon = when (userProfile.gender) {
+                "男" -> R.drawable.male
+                "女" -> R.drawable.female
+                else -> null
+            }
+            if (genderIcon != null || ageText > 0) {
+                Row(
+                    Modifier
+                        .border(1.dp, onPri.copy(alpha = 0.15f), RoundedCornerShape(20.dp))
+                        .background(onPri.copy(alpha = 0.3f), RoundedCornerShape(20.dp))
+                        .padding(horizontal = 12.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically) {
+                    if (genderIcon != null) {
+                        Icon(painterResource(genderIcon), null, Modifier.size(20.dp), tint = Color.Unspecified)
+                        Spacer(Modifier.width(4.dp))
+                    }
+                    if (ageText > 0) {
+                        Text("${ageText}岁", fontSize = 13.sp, color = onPri)
+                    }
+                }
+            }
+
+            Spacer(Modifier.height(8.dp))
+
+            // 大 Row：[关注 + expand 小 row] + [发私信]，两个 row 高度一致
+            Row(Modifier
+                .fillMaxWidth()
+                .padding(vertical = 3.dp),
+                horizontalArrangement = Arrangement.spacedBy(5.dp),
+                verticalAlignment = Alignment.CenterVertically) {
+                // 关注 row：未关注点击直接关注，已关注/互相关注点击弹出底部弹窗；text+icon 居中
+                Row(
+                    modifier = Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(
+                            if (userProfile.iFollow) MaterialTheme.colorScheme.surface.copy(alpha = 0.3f)
+                            else MaterialTheme.colorScheme.primary
+                        )
+                        .clickable {
+                            if (userProfile.iFollow) onActionClick() else onFollowClick()
+                        }
+                        .padding(horizontal = 5.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.Center
+                ) {
+                    Text(
+                        text = followText,
+                        fontSize = 14.sp,
+                        color =MaterialTheme.colorScheme.surface
+                    )
+                    Spacer(Modifier.width(4.dp))
+                    if (userProfile.iFollow ) {
+                        Icon(
+                            painter = painterResource(if (expanded) R.drawable.expand_less else R.drawable.expand_more),
+                            contentDescription = null,
+                            modifier = Modifier.size(20.dp),
+                            tint =  MaterialTheme.colorScheme.surface
+                        )
+                    }
+                }
+                // 发私信
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(MaterialTheme.colorScheme.surface.copy(alpha =0.3f ))
+                        .clickable { onSendMessage() }
+                        .padding(vertical = 8.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = "发私信",
+                        fontSize = 14.sp,
+                        color = MaterialTheme.colorScheme.surface
+                    )
+                }
+            }
+
+            Spacer(Modifier.height(25.dp))
+        }
+    }
+}
+
+/** 底部操作弹窗：覆盖屏幕底部 20% 高度，带遮罩 */
+@Composable
+private fun ActionSheet(
+    onDismiss: () -> Unit,
+    onRemarkClick: () -> Unit,
+    onUnfollowClick: () -> Unit
+) {
+    Box(Modifier.fillMaxSize()) {
+        // 遮罩
+        Box(
+            Modifier
+                .fillMaxSize()
+                .background(Color.Black.copy(alpha = 0.4f))
+                .clickable { onDismiss() }
+        )
+        // 底部弹窗：屏幕高度 20%，占满宽度贴底，不挤压底部内容
+        Column(
+            Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth()
+                .fillMaxHeight(0.2f)
+                .shadow(
+                    elevation = 8.dp,
+                    shape = RoundedCornerShape(topStart = 10.dp, topEnd = 10.dp),
+                    clip = false,
+                    ambientColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.2f),
+                    spotColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.2f)
+                )
+                .clip(RoundedCornerShape(topStart = 10.dp, topEnd = 10.dp))
+                .background(MaterialTheme.colorScheme.background)
+                .padding(horizontal = 10.dp, vertical = 5.dp),
+            verticalArrangement = Arrangement.Center
+
+        ) {
+            // 第一行：设置备注名
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .shadow(
+                        elevation = 4.dp,
+                        shape = RoundedCornerShape(10.dp),
+                        clip = false,
+                        ambientColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f),
+                        spotColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f)
+                    )
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(MaterialTheme.colorScheme.surface)
+                    .clickable { onRemarkClick() }
+                    .padding(horizontal = 15.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "设置备注名",
+                    fontSize = 14.sp,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.weight(1f)
+                )
+                Icon(
+                    painter = painterResource(R.drawable.arrow_right),
+                    contentDescription = null,
+                    modifier = Modifier.size(20.dp),
+                    tint = getOutline()
+                )
+            }
+            Spacer(Modifier.height(15.dp))
+            // 第二行：取消关注
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .shadow(
+                        elevation = 4.dp,
+                        shape = RoundedCornerShape(10.dp),
+                        clip = false,
+                        ambientColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f),
+                        spotColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f)
+                    )
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(MaterialTheme.colorScheme.surface)
+                    .clickable { onUnfollowClick() }
+                    .padding(horizontal =15.dp, vertical = 10.dp),
+                horizontalArrangement = Arrangement.Center,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "取消关注",
+                    fontSize = 14.sp,
+                    color = MaterialTheme.colorScheme.primary
+                )
+            }
+        }
+    }
+}
+
+/** 添加备注弹窗：屏幕中间 */
+@Composable
+private fun RemarkDialog(
+    initialRemark: String,
+    onDismiss: () -> Unit,
+    onConfirm: (String) -> Unit
+) {
+    var remarkInput by remember { mutableStateOf(initialRemark) }
+    Dialog(onDismissRequest = onDismiss) {
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(12.dp))
+                .background(MaterialTheme.colorScheme.surface)
+        ) {
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 24.dp, vertical = 20.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Text("添加备注", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = MaterialTheme.colorScheme.onSurface)
+                Spacer(Modifier.height(8.dp))
+                Text("最多不超过8个字", fontSize = 13.sp, color = getOnSurfaceSecondary())
+                Spacer(Modifier.height(12.dp))
+                // 输入框 row
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(getOutline().copy(alpha = 0.5f))
+                        .padding(horizontal = 10.dp, vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    BasicTextField(
+                        value = remarkInput,
+                        onValueChange = { remarkInput = it.take(8) },
+                        modifier = Modifier.weight(1f),
+                        cursorBrush = androidx.compose.ui.graphics.SolidColor(MaterialTheme.colorScheme.primary),
+                        textStyle = androidx.compose.ui.text.TextStyle(
+                            fontSize = 14.sp,
+                            color = MaterialTheme.colorScheme.onSurface
+                        ),
+                        singleLine = true
+                    )
+                    if (remarkInput.isNotEmpty()) {
+                        Icon(
+                            painter = painterResource(R.drawable.close_ring_fill),
+                            contentDescription = "清空",
+                            modifier = Modifier
+                                .size(18.dp)
+                                .clickable { remarkInput = "" },
+                            tint = getOnSurfaceSecondary()
+                        )
+                    }
+                }
+            }
+            Box(Modifier.fillMaxWidth().height(0.5.dp).background(getOutline()))
+            Row(
+                Modifier.fillMaxWidth().height(48.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Box(
+                    Modifier.weight(1f).fillMaxHeight().clickable { onDismiss() },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text("取消", color = getOnSurfaceSecondary())
+                }
+                Box(Modifier.width(0.5.dp).fillMaxHeight().background(getOutline()))
+                Box(
+                    Modifier.weight(1f).fillMaxHeight().clickable { onConfirm(remarkInput.trim()) },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text("添加", color = MaterialTheme.colorScheme.primary)
+                }
+            }
         }
     }
 }
@@ -495,7 +938,8 @@ private fun ProfileHeader(
                 Column {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(painterResource(R.drawable.clock_white), null, Modifier.size(18.dp), tint = onPri)
-                        Spacer(Modifier.width(6.dp)); Text("浏览记录", fontSize = 14.sp, color = onPri)
+                        Spacer(Modifier.width(6.dp));
+                        Text("浏览记录", fontSize = 14.sp, color = onPri)
                     }
                     Row {
                         Text("看过的笔记", fontSize = 13.sp, color = onPri.copy(alpha = 0.9f))

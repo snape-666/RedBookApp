@@ -44,11 +44,15 @@ CREATE TABLE IF NOT EXISTS messages (
   sender_uid TEXT NOT NULL,
   receiver_uid TEXT NOT NULL,
   content TEXT NOT NULL,
+  media_url TEXT NOT NULL DEFAULT '',
   created_at BIGINT NOT NULL,
   is_read BOOLEAN NOT NULL DEFAULT FALSE
 );
 ALTER TABLE messages DISABLE ROW LEVEL SECURITY;
 GRANT ALL ON messages TO anon, authenticated;
+
+-- 为已存在的表补充 media_url 列（幂等：列已存在时会报错，可忽略）
+ALTER TABLE messages ADD COLUMN IF NOT EXISTS media_url TEXT NOT NULL DEFAULT '';
 
 CREATE INDEX IF NOT EXISTS idx_messages_conversation ON messages (conversation_id, created_at ASC);
 CREATE INDEX IF NOT EXISTS idx_messages_receiver_unread ON messages (receiver_uid, is_read);

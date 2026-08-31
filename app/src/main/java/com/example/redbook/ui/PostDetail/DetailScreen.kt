@@ -4,15 +4,19 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -28,6 +32,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -40,6 +45,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -58,6 +65,7 @@ import com.example.redbook.ui.theme.getOnSurfaceSecondary
 import com.example.redbook.ui.theme.getOutline
 import kotlinx.coroutines.launch
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun DetailScreen(
     postId: String,
@@ -68,10 +76,11 @@ fun DetailScreen(
     scrollToCommentId: String = "",
     onCommentScrolled: () -> Unit = {},
     onBack: () -> Unit = {},
-    onSendMessage: (String, String, String) -> Unit = { _, _, _ -> }
+    onSendMessage: (String, String, String) -> Unit = { _, _, _ -> },
+    onUserClick: (String) -> Unit = {}
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
-    val viewModel: DetailViewModel = viewModel(factory = DetailViewModelFactory(context.applicationContext as android.app.Application, userUid, userXhsId, userName))
+    val viewModel: DetailViewModel = viewModel(factory = DetailViewModelFactory(context.applicationContext as android.app.Application, userUid, userXhsId, userName, userAvatarUrl))
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val isKeyboardVisible by viewModel.isKeyboardVisible.collectAsState()
     val commentText by viewModel.commentText.collectAsState()
@@ -81,8 +90,25 @@ fun DetailScreen(
     val lazyListState = rememberLazyListState()
     val replyTarget by viewModel.replyTarget.collectAsState()
     var deletingComment by remember { mutableStateOf<String?>(null) }
+    val keyboardController = LocalSoftwareKeyboardController.current
+
+    // 监听真实键盘状态：键盘收起时同步收起输入栏
+    val imeVisible = WindowInsets.isImeVisible
+    LaunchedEffect(imeVisible) {
+        if (!imeVisible) viewModel.setKeyboardVisible(false)
+    }
 
     LaunchedEffect(postId) { viewModel.loadPost(postId) }
+
+    // 回到页面时重新同步关注状态
+    val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner, postId) {
+        val obs = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) viewModel.refreshFollowState()
+        }
+        lifecycleOwner.lifecycle.addObserver(obs)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(obs) }
+    }
     LaunchedEffect(uiState, scrollToCommentId) {
         if (scrollToCommentId.isNotBlank() && uiState is DetailUiState.Success) {
             val comments = (uiState as DetailUiState.Success).comments
@@ -112,11 +138,13 @@ fun DetailScreen(
                     avatarRes = post?.authorAvatar ?: R.drawable.test,
                     avatarUrl = post?.authorAvatarUrl ?: "",
                     name = post?.authorName ?: "",
-                    onUserClick = { /* 跳转作者主页 */ },
+                    onUserClick = {
+                        post?.let { onUserClick(it.authorId) }
+                    },
                     isFollowed = post?.isFollowed ?: false,
                     onFollowClick = { viewModel.toggleFollowAuthor() },
                     showFollow = post?.authorId != userUid,
-                    showMessage = post?.authorId != userUid,
+                    showMessage = false,
                     onMessageClick = {
                         post?.let {
                             onSendMessage(it.authorId, it.authorName, it.authorAvatarUrl)
@@ -171,14 +199,23 @@ fun DetailScreen(
                         state = lazyListState,
                         modifier = Modifier
                             .fillMaxSize()
-                            .padding(paddingValues),
+                            .padding(paddingValues)
+                            .pointerInput(Unit) {
+                                detectTapGestures {
+                                    keyboardController?.hide()
+                                    viewModel.setKeyboardVisible(false)
+                                    focusRequester.freeFocus()
+                                }
+                            },
                        // contentPadding = PaddingValues(10.dp)
                     ) {
 
                         item {
                             PostContent(
                                 post = post,
-                                onAvatarClick = {  },
+                                onAvatarClick = {
+                                    onUserClick(post.authorId)
+                                },
                               //  modifier = Modifier.padding(top = 8.dp)
                             )
                         }
@@ -228,8 +265,8 @@ fun DetailScreen(
                             CommentItem(
                                 comment = comment,
 
-                                onAvatarClick = { /* 跳转用户主页 */ },
-                                onUserNameClick = { /* 跳转用户主页 */ },
+                                onAvatarClick = { uid -> onUserClick(uid) },
+                                onUserNameClick = { uid -> onUserClick(uid) },
                                 onReplyClick = {  commentId,userName ->
                                     viewModel.setReplyTarget(
                                         DetailViewModel.ReplyTarget(

@@ -56,10 +56,9 @@ import com.example.redbook.ui.theme.getGreenBackground
 import com.example.redbook.ui.theme.getGreenFill
 import com.example.redbook.ui.theme.getOnSurfaceSecondary
 import com.example.redbook.ui.theme.getOnSurfaceTertiary
+import com.example.redbook.ui.theme.getOutline
 import com.example.redbook.ui.theme.getRedBackground
-import java.text.SimpleDateFormat
-import java.util.Calendar
-import java.util.Locale
+import com.example.redbook.ui.utils.formatRelativeTime
 
 @Composable
 fun MessagesScreen(
@@ -129,7 +128,7 @@ fun MessagesScreen(
         Column(Modifier.fillMaxWidth()) {
             Box(Modifier.fillMaxWidth().height(1.dp).background(Color.Gray.copy(alpha = 0.2f)))
             BottomBar(
-                titles = listOf("首页", "阅读", "消息", "我的"),
+                titles = listOf("首页", "视频", "消息", "我的"),
                 selectedIndex = bottomIndex,
                 onTitleClick = { idx ->
                     bottomIndex = idx
@@ -221,6 +220,7 @@ private fun ReactionGroupRow(
             onClick = onCommentClick
         )
     }
+
 }
 
 @Composable
@@ -262,13 +262,13 @@ private fun GroupItem(
                     tint = Color.Unspecified
                 )
             }
-            // 右上角未读角标
+            // 右上角未读角标:圆形,贴紧图标右上角并略微覆盖
             if (badgeCount > 0) {
                 CountBadge(
                     count = badgeCount,
                     modifier = Modifier
                         .align(Alignment.TopEnd)
-                        .offset(x = 8.dp, y = (-8).dp)
+                        .offset(x = 10.dp, y = (-6).dp)
                 )
             }
         }
@@ -316,15 +316,6 @@ private fun ConversationItem(
                     contentScale = ContentScale.Crop
                 )
             }
-            // 未读角标：圆形，叠在头像右上角，允许覆盖一部分
-            if (conversation.unreadCount > 0) {
-                CountBadge(
-                    count = conversation.unreadCount,
-                    modifier = Modifier
-                        .align(Alignment.TopEnd)
-                        .offset(x = 8.dp, y = (-6).dp)
-                )
-            }
         }
         Spacer(modifier = Modifier.width(10.dp))
         Column(modifier = Modifier.weight(1f)) {
@@ -342,7 +333,7 @@ private fun ConversationItem(
                     modifier = Modifier.weight(1f)
                 )
                 Text(
-                    text = formatConversationDate(conversation.lastTime),
+                    text = formatRelativeTime(conversation.lastTime),
                     fontSize = 12.sp,
                     color = getOnSurfaceSecondary()
                 )
@@ -353,21 +344,24 @@ private fun ConversationItem(
             } else {
                 conversation.lastMessage
             }
-            Text(
-                text = lastMessage,
-                fontSize = 13.sp,
-                color = getOnSurfaceSecondary(),
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = lastMessage,
+                    fontSize = 13.sp,
+                    color = getOnSurfaceSecondary(),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f)
+                )
+                // 未读角标:位于第二行的 end 位置,类似微信
+                if (conversation.unreadCount > 0) {
+                    Spacer(modifier = Modifier.width(6.dp))
+                    CountBadge(count = conversation.unreadCount)
+                }
+            }
         }
     }
-}
-
-private fun formatConversationDate(timestamp: Long): String {
-    if (timestamp <= 0) return ""
-    val cal = Calendar.getInstance().apply { timeInMillis = timestamp }
-    val now = Calendar.getInstance()
-    val pattern = if (cal.get(Calendar.YEAR) == now.get(Calendar.YEAR)) "MM-dd" else "yyyy-MM-dd"
-    return SimpleDateFormat(pattern, Locale.getDefault()).format(cal.time)
 }

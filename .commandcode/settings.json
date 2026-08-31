@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Shell(gradlew.bat:*)"
+    ],
+    "deny": [],
+    "defaultMode": "default"
+  }
+}

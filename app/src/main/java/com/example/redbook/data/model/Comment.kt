@@ -14,6 +14,7 @@ data class Comment(
     val likeCount: Int,
     val isLiked: Boolean,
     val isAuthor: Boolean,             // 是否为帖子作者本人评论
+    val avatarUrl: String = "",        // 评论者头像 URL（实时展示用）
     val replies: List<Reply> = emptyList() // 二级回复列表
 
 )

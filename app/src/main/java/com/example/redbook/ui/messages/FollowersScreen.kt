@@ -49,7 +49,8 @@ import com.example.redbook.ui.theme.getOutline
 fun FollowersScreen(
     userUid: String,
     onBack: () -> Unit = {},
-    onSendMessage: (String, String, String) -> Unit = { _, _, _ -> }
+    onSendMessage: (String, String, String) -> Unit = { _, _, _ -> },
+    onUserClick: (String) -> Unit = {}
 ) {
     val context = LocalContext.current
     val viewModel: FollowersViewModel = viewModel(factory = FollowersViewModelFactory(context.applicationContext as android.app.Application, userUid))
@@ -107,8 +108,9 @@ fun FollowersScreen(
                 items(followers, key = { it.uid }) { item ->
                     FollowerRow(
                         item = item,
-                        onFollowClick = { viewModel.toggleFollow(item.uid, true) },
-                        onSendMessage = { onSendMessage(item.uid, item.userName, item.avatarUrl) }
+                        onFollowClick = { viewModel.toggleFollow(item.uid, !item.followed) },
+                        onSendMessage = { onSendMessage(item.uid, item.userName, item.avatarUrl) },
+                        onUserClick = { onUserClick(item.uid) }
                     )
                 }
             }
@@ -121,6 +123,7 @@ private fun FollowerRow(
     item: FollowerItem,
     onFollowClick: () -> Unit,
     onSendMessage: () -> Unit,
+    onUserClick: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     Row(
@@ -129,7 +132,7 @@ private fun FollowerRow(
             .padding(horizontal = 10.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Box(modifier = Modifier.size(42.dp).clip(CircleShape)) {
+        Box(modifier = Modifier.size(42.dp).clip(CircleShape).clickable { onUserClick() }) {
             if (item.avatarUrl.isNotBlank()) {
                 AsyncImage(
                     model = ImageRequest.Builder(LocalContext.current)
@@ -159,7 +162,8 @@ private fun FollowerRow(
                 fontWeight = FontWeight.Bold,
                 color = MaterialTheme.colorScheme.onSurface,
                 maxLines = 1,
-                overflow = TextOverflow.Ellipsis
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.clickable { onUserClick() }
             )
             Spacer(modifier = Modifier.height(2.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -179,7 +183,7 @@ private fun FollowerRow(
 
         Spacer(modifier = Modifier.width(10.dp))
 
-        // 固定宽度按钮：内部 padding 不变，只改文字不改变宽度
+        // 固定宽度按钮：已关注显示发私信，未关注显示关注
         if (item.followed) {
             Box(
                 modifier = Modifier

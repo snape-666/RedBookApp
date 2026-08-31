@@ -9,16 +9,21 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -46,6 +51,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
@@ -71,6 +77,7 @@ import kotlinx.coroutines.launch
 private val videoComments = mutableMapOf<String, MutableList<Comment>>()
 
 @SuppressLint("DefaultLocale")
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun VideoDetailScreen(
     videoUrl: String, title: String, authorName: String, authorAvatar: Int,
@@ -78,9 +85,12 @@ fun VideoDetailScreen(
     videoId: String = "",
     userUid: String = "",
     userXhsId: String = "",
+    userAvatarUrl: String = "",
     authorAvatarUrl: String = "",
     onBack: () -> Unit, onFollowClick: (Boolean) -> Unit,
-    onLikeClick: (Int) -> Unit, onFavoriteClick: (Int) -> Unit
+    onLikeClick: (Int) -> Unit, onFavoriteClick: (Int) -> Unit,
+    onSendMessage: (String, String, String) -> Unit = { _, _, _ -> },
+    onUserClick: (String) -> Unit = {}
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -88,8 +98,11 @@ fun VideoDetailScreen(
     var curMs by remember { mutableIntStateOf(0) }
     var durMs by remember { mutableIntStateOf(0) }
     var vv by remember { mutableStateOf<VideoView?>(null) }
+    var paused by remember { mutableStateOf(false) }
     var followed by remember { mutableStateOf(isFollowed) }
     var authorUid by remember { mutableStateOf("") }
+    var realAuthorName by remember { mutableStateOf(authorName) }
+    var realAuthorAvatar by remember { mutableStateOf(authorAvatarUrl) }
     var liked by remember { mutableStateOf(false) }
     var faved by remember { mutableStateOf(false) }
     var likeCnt by remember { mutableIntStateOf(likeCount) }
@@ -106,17 +119,26 @@ fun VideoDetailScreen(
         u.forEach { if (it !in selUris) selUris.add(it) }
     }
 
+    // 监听真实键盘状态：键盘收起时同步收起评论输入栏
+    val imeVisible = WindowInsets.isImeVisible
+    LaunchedEffect(imeVisible) {
+        if (!imeVisible) kbVisible = false
+    }
+
     LaunchedEffect(vv) { while (true) { delay(50); vv?.let { curMs = it.currentPosition } } }
     LaunchedEffect(videoId, userUid) {
         if (videoId.isNotBlank() && userUid.isNotBlank()) {
             try {
                 liked = repository.hasLiked(userUid, videoId)
                 faved = repository.hasFavorited(userUid, videoId)
+                // 视频统一存 posts 表（image_url 带 video: 前缀）
                 val p = repository.getPost(videoId)
                 if (p != null) {
                     likeCnt = p.optInt("like_count", 0)
                     favCnt = p.optInt("favorite_count", 0)
                     authorUid = p.optString("author_uid", "")
+                    realAuthorName = p.optString("author_name", "").ifBlank { realAuthorName }
+                    realAuthorAvatar = p.optString("author_avatar", "").ifBlank { realAuthorAvatar }
                     if (authorUid.isNotBlank()) {
                         followed = repository.isFollowing(userUid, authorUid)
                     }
@@ -125,8 +147,24 @@ fun VideoDetailScreen(
         }
     }
     val lifecycleOwner = LocalLifecycleOwner.current
-    DisposableEffect(lifecycleOwner) {
-        val obs = LifecycleEventObserver { _, e -> if (e == Lifecycle.Event.ON_RESUME) vv?.start() }
+    DisposableEffect(lifecycleOwner, videoId, userUid) {
+        val obs = LifecycleEventObserver { _, e ->
+            if (e == Lifecycle.Event.ON_RESUME) {
+                vv?.start()
+                // 回到页面时重新同步关注状态（可能在其他页面已关注/取关）
+                if (videoId.isNotBlank() && userUid.isNotBlank()) {
+                    scope.launch {
+                        try {
+                            val uid = repository.getPost(videoId)?.optString("author_uid", "") ?: ""
+                            if (uid.isNotBlank()) {
+                                authorUid = uid
+                                followed = repository.isFollowing(userUid, uid)
+                            }
+                        } catch (_: Exception) { }
+                    }
+                }
+            }
+        }
         lifecycleOwner.lifecycle.addObserver(obs)
         onDispose { lifecycleOwner.lifecycle.removeObserver(obs) }
     }
@@ -144,7 +182,16 @@ fun VideoDetailScreen(
                 Icon(painterResource(R.drawable.arrow_left), null, Modifier.size(28.dp).clickable { onBack() }, tint = getOnSurfaceSecondary())
             }
             // 视频
-            Box(Modifier.fillMaxWidth().weight(1f), Alignment.Center) {
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .weight(1f)
+                    .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {
+                        paused = !paused
+                        if (paused) vv?.pause() else vv?.start()
+                    },
+                Alignment.Center
+            ) {
                 AndroidView(factory = { ctx -> VideoView(ctx).also { vv = it }.apply {
                     try { if (videoUrl.startsWith("/")) setVideoPath(videoUrl) else setVideoURI(Uri.parse(videoUrl)) }
                     catch (_: Exception) { setVideoURI(Uri.parse(videoUrl)) }
@@ -152,24 +199,41 @@ fun VideoDetailScreen(
                     setOnCompletionListener { android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({ start() }, 1000) }
                     setOnErrorListener { _, _, _ -> false }; start()
                 }}, Modifier.fillMaxWidth())
-                if (durMs == 0) {
+                if (durMs == 0 && !paused) {
                     CircularProgressIndicator(color = Color.White)
+                }
+                // 暂停图标
+                if (paused) {
+                    Box(
+                        Modifier
+                            .size(64.dp)
+                            .clip(CircleShape)
+                            .background(Color.Black.copy(alpha = 0.5f)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            painter = painterResource(R.drawable.video_fill),
+                            contentDescription = "暂停",
+                            modifier = Modifier.size(40.dp),
+                            tint = Color.White
+                        )
+                    }
                 }
             }
             // 作者
             Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                if (authorAvatarUrl.isNotBlank()) {
+                if (realAuthorAvatar.isNotBlank()) {
                     AsyncImage(
-                        model = ImageRequest.Builder(LocalContext.current).data(authorAvatarUrl).crossfade(true).build(),
+                        model = ImageRequest.Builder(LocalContext.current).data(realAuthorAvatar).crossfade(true).build(),
                         contentDescription = null,
-                        modifier = Modifier.size(32.dp).clip(CircleShape),
+                        modifier = Modifier.size(32.dp).clip(CircleShape).clickable { if (authorUid.isNotBlank()) onUserClick(authorUid) },
                         contentScale = ContentScale.Crop
                     )
                 } else {
-                    Image(painterResource(authorAvatar), null, Modifier.size(32.dp).clip(CircleShape), contentScale = ContentScale.Crop)
+                    Image(painterResource(authorAvatar), null, Modifier.size(32.dp).clip(CircleShape).clickable { if (authorUid.isNotBlank()) onUserClick(authorUid) }, contentScale = ContentScale.Crop)
                 }
                 Spacer(Modifier.width(5.dp))
-                Text(authorName, color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                Text(realAuthorName, color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Medium, modifier = Modifier.clickable { if (authorUid.isNotBlank()) onUserClick(authorUid) })
                 Spacer(Modifier.width(5.dp))
                 if (authorUid != userUid) {
                     if (followed) {
@@ -252,17 +316,33 @@ fun VideoDetailScreen(
                             Spacer(Modifier.weight(1f))
                             Text("×", fontSize = 18.sp, color = Color.Gray, modifier = Modifier.clickable { showCmt = false }.padding(4.dp))
                         }
-                        LazyColumn(Modifier.weight(1f)) {
+                        LazyColumn(Modifier.weight(1f).pointerInput(Unit) {
+                            detectTapGestures {
+                                kbVisible = false
+                                cmtText = ""
+                                replyTgt = null
+                            }
+                        }) {
                             if (cmts.isEmpty()) { item { Text("暂无评论", Modifier.padding(16.dp), color = Color.Gray, fontSize = 14.sp) } }
                             items(cmts.toList(), key = { it.id }) { c ->
                                 CommentItem(comment = c,
                                     onReplyClick = { cid, name -> replyTgt = cid to name; cmtText = "回复 @$name："; kbVisible = true },
                                     onLikeClick = { cid -> toggleLike(cid, cmts) },
-                                    onAvatarClick = {}, onUserNameClick = {})
+                                    onAvatarClick = { uid -> if (uid.isNotBlank() && uid != "me") onUserClick(uid) },
+                                    onUserNameClick = { uid -> if (uid.isNotBlank() && uid != "me") onUserClick(uid) })
                             }
                         }
                         Row(Modifier.fillMaxWidth().padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Image(painterResource(R.drawable.test), null, Modifier.size(32.dp).clip(CircleShape), contentScale = ContentScale.Crop)
+                            if (userAvatarUrl.isNotBlank()) {
+                                AsyncImage(
+                                    model = ImageRequest.Builder(LocalContext.current).data(userAvatarUrl).crossfade(true).build(),
+                                    contentDescription = null,
+                                    modifier = Modifier.size(32.dp).clip(CircleShape),
+                                    contentScale = ContentScale.Crop
+                                )
+                            } else {
+                                Image(painterResource(R.drawable.test), null, Modifier.size(32.dp).clip(CircleShape), contentScale = ContentScale.Crop)
+                            }
                             Spacer(Modifier.width(8.dp))
                             Box(Modifier.weight(1f).height(40.dp).clip(RoundedCornerShape(20.dp)).background(MaterialTheme.colorScheme.surfaceVariant).clickable { kbVisible = true }.padding(horizontal = 16.dp), Alignment.CenterStart) {
                                 Text("说点什么...", fontSize = 14.sp, color = Color.Gray)
@@ -280,17 +360,18 @@ fun VideoDetailScreen(
                 text = cmtText, onTextChange = { cmtText = it },
                 selectedImages = selUris.toList(), onAddImageClick = { picker.launch("image/*") },
                 onRemoveImage = { selUris.remove(it) },
-                onSend = { t, _ ->
-                    if (t.isNotBlank()) {
+                onSend = { t, imgs ->
+                    val hasContent = t.isNotBlank() || imgs.isNotEmpty()
+                    if (hasContent) {
                         val ct = t.replace(Regex("^回复 @\\S+："), "").trim()
-                        if (ct.isNotBlank()) {
+                        if (ct.isNotBlank() || imgs.isNotEmpty()) {
                             val rt = replyTgt
                             if (rt != null) {
                                 val i = cmts.indexOfFirst { it.id == rt.first }
-                                if (i >= 0) cmts[i] = cmts[i].copy(replies = cmts[i].replies + Reply("r${System.currentTimeMillis()}", "me", "我", R.drawable.test, selUris.toList(), ct, System.currentTimeMillis(), "未知", 0, false, false))
+                                if (i >= 0) cmts[i] = cmts[i].copy(replies = cmts[i].replies + Reply("r${System.currentTimeMillis()}", "me", "我", R.drawable.test, imgs, ct, System.currentTimeMillis(), "未知", 0, false, false, userAvatarUrl))
                                 replyTgt = null
                             } else {
-                                cmts.add(Comment("c${System.currentTimeMillis()}", "me", "我", R.drawable.test, selUris.toList(), ct, System.currentTimeMillis(), "未知", 0, false, false))
+                                cmts.add(Comment("c${System.currentTimeMillis()}", "me", "我", R.drawable.test, imgs, ct, System.currentTimeMillis(), "未知", 0, false, false, userAvatarUrl))
                             }
                             cmtText = ""; selUris.clear()
                         }

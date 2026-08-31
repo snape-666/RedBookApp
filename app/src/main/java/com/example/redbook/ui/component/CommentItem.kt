@@ -47,8 +47,8 @@ import coil.request.ImageRequest
 @Composable
 fun CommentItem(
     comment: Comment,
-    onAvatarClick: () -> Unit,
-    onUserNameClick: () -> Unit,
+    onAvatarClick: (String) -> Unit,
+    onUserNameClick: (String) -> Unit,
     onReplyClick: (String,String) -> Unit,
     onLikeClick: (String) -> Unit,
     onLongClick: (String) -> Unit = {},
@@ -63,15 +63,27 @@ fun CommentItem(
         )) {
         // 一级评论
         Row {
-            Image(
-                painter = painterResource(id = comment.avatarRes),
-                contentDescription = null,
-                modifier = Modifier
-                    .size(32.dp)
-                    .clip(CircleShape)
-                    .clickable { onAvatarClick() },
-                contentScale = ContentScale.Crop
-            )
+            if (comment.avatarUrl.isNotBlank()) {
+                AsyncImage(
+                    model = ImageRequest.Builder(LocalContext.current).data(comment.avatarUrl).crossfade(true).build(),
+                    contentDescription = null,
+                    modifier = Modifier
+                        .size(32.dp)
+                        .clip(CircleShape)
+                        .clickable { onAvatarClick(comment.userId) },
+                    contentScale = ContentScale.Crop
+                )
+            } else {
+                Image(
+                    painter = painterResource(id = comment.avatarRes),
+                    contentDescription = null,
+                    modifier = Modifier
+                        .size(32.dp)
+                        .clip(CircleShape)
+                        .clickable { onAvatarClick(comment.userId) },
+                    contentScale = ContentScale.Crop
+                )
+            }
             Column(modifier = Modifier.weight(1f).padding(start = 8.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
@@ -79,7 +91,7 @@ fun CommentItem(
                         fontSize = 14.sp,
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.onSurface,
-                        modifier = Modifier.clickable { onUserNameClick() }
+                        modifier = Modifier.clickable { onUserNameClick(comment.userId) }
                     )
                     if (comment.isAuthor) {
                         Spacer(modifier = Modifier.width(5.dp))

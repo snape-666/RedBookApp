@@ -8,12 +8,13 @@ class DetailViewModelFactory(
     private val application: Application,
     private val userUid: String,
     private val userXhsId: String,
-    private val userName: String
+    private val userName: String,
+    private val userAvatarUrl: String
 ) : ViewModelProvider.Factory {
     @Suppress("UNCHECKED_CAST")
     override fun <T : ViewModel> create(modelClass: Class<T>): T {
         if (modelClass.isAssignableFrom(DetailViewModel::class.java)) {
-            return DetailViewModel(application, userUid, userXhsId, userName) as T
+            return DetailViewModel(application, userUid, userXhsId, userName, userAvatarUrl) as T
         }
         throw IllegalArgumentException("Unknown ViewModel class")
     }

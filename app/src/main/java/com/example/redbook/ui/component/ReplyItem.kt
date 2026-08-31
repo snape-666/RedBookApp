@@ -42,8 +42,8 @@ import coil.request.ImageRequest
 @Composable
 fun ReplyItem(
     reply: Reply,
-    onAvatarClick: () -> Unit,
-    onUserNameClick: () -> Unit,
+    onAvatarClick: (String) -> Unit,
+    onUserNameClick: (String) -> Unit,
     onReplyClick: () -> Unit,
     onLikeClick: () -> Unit,
     onLongClick: () -> Unit = {},
@@ -54,15 +54,27 @@ fun ReplyItem(
             onClick = {},
             onLongClick = { onLongClick() }
         )) {
-        Image(
-            painter = painterResource(id = reply.avatarRes),
-            contentDescription = null,
-            modifier = Modifier
-                .size(24.dp)
-                .clip(CircleShape)
-                .clickable { onAvatarClick() },
-            contentScale = ContentScale.Crop
-        )
+        if (reply.avatarUrl.isNotBlank()) {
+            AsyncImage(
+                model = ImageRequest.Builder(LocalContext.current).data(reply.avatarUrl).crossfade(true).build(),
+                contentDescription = null,
+                modifier = Modifier
+                    .size(24.dp)
+                    .clip(CircleShape)
+                    .clickable { onAvatarClick(reply.userId) },
+                contentScale = ContentScale.Crop
+            )
+        } else {
+            Image(
+                painter = painterResource(id = reply.avatarRes),
+                contentDescription = null,
+                modifier = Modifier
+                    .size(24.dp)
+                    .clip(CircleShape)
+                    .clickable { onAvatarClick(reply.userId) },
+                contentScale = ContentScale.Crop
+            )
+        }
         Column(modifier = Modifier.weight(1f).padding(start = 6.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
@@ -70,7 +82,7 @@ fun ReplyItem(
                     fontSize = 13.sp,
                     fontWeight = FontWeight.Medium,
                     color = MaterialTheme.colorScheme.onSurface,
-                    modifier = Modifier.clickable { onUserNameClick() }
+                    modifier = Modifier.clickable { onUserNameClick(reply.userId) }
                 )
                 if (reply.isAuthor) {
                     Spacer(modifier = Modifier.width(4.dp))

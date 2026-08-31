@@ -15,8 +15,9 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -52,13 +53,15 @@ import com.example.redbook.data.repository.RealtimeRepository
 import com.example.redbook.ui.theme.getBlueFill
 import com.example.redbook.ui.theme.getOnSurfaceTertiary
 import com.example.redbook.ui.theme.getOutline
+import com.example.redbook.ui.utils.formatChatTime
 import kotlinx.coroutines.launch
 import org.json.JSONObject
 
 private data class ChatMessage(
     val content: String,
     val time: Long,
-    val isMine: Boolean
+    val isMine: Boolean,
+    val mediaUrl: String = ""
 )
 
 @Composable
@@ -70,16 +73,25 @@ fun ChatScreen(
     conversationId: String = "",
     repository: RealtimeRepository? = null,
     myAvatarUrl: String = "",
-    onBack: () -> Unit = {}
+    onBack: () -> Unit = {},
+    onUserClick: (String) -> Unit = {}
 ) {
     val context = LocalContext.current
     val realtimeRepo = repository ?: remember { RealtimeRepository(context.applicationContext as android.app.Application) }
     val messages = remember { mutableStateListOf<ChatMessage>() }
     var inputText by remember { mutableStateOf("") }
     var loading by remember { mutableStateOf(true) }
+    var pendingMedia by remember { mutableStateOf<List<android.net.Uri>>(emptyList()) }
+    var sending by remember { mutableStateOf(false) }
     val focusManager = LocalFocusManager.current
     val listState = rememberLazyListState()
     val coroutineScope = rememberCoroutineScope()
+
+    val mediaPicker = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.GetMultipleContents()
+    ) { uris ->
+        pendingMedia = (pendingMedia + uris).distinct()
+    }
 
     // 初始加载历史消息；conversationId 为空时先尝试创建
     LaunchedEffect(conversationId, currentUserUid, peerUid) {
@@ -99,7 +111,8 @@ fun ChatScreen(
                     ChatMessage(
                         content = m.optString("content", ""),
                         time = m.optLong("created_at", 0L),
-                        isMine = m.optString("sender_uid") == currentUserUid
+                        isMine = m.optString("sender_uid") == currentUserUid,
+                        mediaUrl = m.optString("media_url", "")
                     )
                 )
             }
@@ -119,8 +132,9 @@ fun ChatScreen(
                         // 去重（避免与初始加载重复）
                         val content = record.optString("content", "")
                         val time = record.optLong("created_at", 0L)
+                        val mediaUrl = record.optString("media_url", "")
                         if (messages.none { it.content == content && it.time == time && !it.isMine }) {
-                            messages.add(ChatMessage(content, time, false))
+                            messages.add(ChatMessage(content, time, false, mediaUrl))
                         }
                     }
                 }
@@ -163,7 +177,10 @@ fun ChatScreen(
                 tint = MaterialTheme.colorScheme.onSurface
             )
             Spacer(modifier = Modifier.width(5.dp))
-            Box(modifier = Modifier.size(40.dp).clip(CircleShape)) {
+            Box(modifier = Modifier.size(40.dp).clip(CircleShape).clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null
+            ) { if (peerUid.isNotBlank()) onUserClick(peerUid) }) {
                 if (avatarUrl.isNotBlank()) {
                     AsyncImage(
                         model = ImageRequest.Builder(LocalContext.current)
@@ -189,7 +206,12 @@ fun ChatScreen(
                 fontSize = 16.sp,
                 fontWeight = FontWeight.Bold,
                 color = MaterialTheme.colorScheme.onSurface,
-                modifier = Modifier.weight(1f),
+                modifier = Modifier
+                    .weight(1f)
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null
+                    ) { if (peerUid.isNotBlank()) onUserClick(peerUid) },
                 maxLines = 1
             )
             Icon(
@@ -210,7 +232,12 @@ fun ChatScreen(
                     detectTapGestures { focusManager.clearFocus() }
                 }
         ) {
-            items(messages, key = { "${it.time}_${it.content}_${it.isMine}" }) { msg ->
+            itemsIndexed(messages) { index, msg ->
+                val showTime = index == 0 ||
+                    msg.time - messages[index - 1].time > 5 * 60 * 1000L
+                if (showTime) {
+                    ChatTimeDivider(time = msg.time)
+                }
                 ChatBubble(
                     message = msg,
                     avatarUrl = if (msg.isMine) myAvatarUrl else avatarUrl,
@@ -227,6 +254,18 @@ fun ChatScreen(
                 .padding(bottom = 16.dp, top = 8.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
+            Icon(
+                painter = painterResource(id = R.drawable.image),
+                contentDescription = "选择图片或视频",
+                modifier = Modifier
+                    .size(24.dp)
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null
+                    ) { mediaPicker.launch("image/*") },
+                tint = getOnSurfaceTertiary()
+            )
+            Spacer(modifier = Modifier.width(6.dp))
             Box(
                 modifier = Modifier
                     .weight(1f)
@@ -237,6 +276,7 @@ fun ChatScreen(
                     value = inputText,
                     onValueChange = { inputText = it },
                     modifier = Modifier.fillMaxWidth(),
+                    cursorBrush = androidx.compose.ui.graphics.SolidColor(MaterialTheme.colorScheme.primary),
                     textStyle = androidx.compose.ui.text.TextStyle(
                         fontSize = 14.sp,
                         color = MaterialTheme.colorScheme.onSurface
@@ -248,7 +288,7 @@ fun ChatScreen(
                                 .fillMaxWidth()
                                 .padding(horizontal = 10.dp, vertical = 5.dp)
                         ) {
-                            if (inputText.isEmpty()) {
+                            if (inputText.isEmpty() && pendingMedia.isEmpty()) {
                                 Text(
                                     text = "发消息...",
                                     fontSize = 14.sp,
@@ -264,39 +304,146 @@ fun ChatScreen(
             Box(
                 modifier = Modifier
                     .clip(RoundedCornerShape(16.dp))
-                    .background(MaterialTheme.colorScheme.primary)
+                    .background(
+                        if (sending) MaterialTheme.colorScheme.surfaceVariant
+                        else MaterialTheme.colorScheme.primary
+                    )
                     .clickable(
                         interactionSource = remember { MutableInteractionSource() },
                         indication = null
                     ) {
-                        val text = inputText.trim()
-                        if (text.isNotBlank() && currentUserUid.isNotBlank() && peerUid.isNotBlank()) {
+                        if (!sending) {
                             val time = System.currentTimeMillis()
-                            messages.add(ChatMessage(text, time, true))
+                            val text = inputText.trim()
+                            val media = pendingMedia
+                            // 立即用本地 URI 显示图片消息（上传完成后替换为远程 URL）
+                            messages.add(
+                                ChatMessage(
+                                    content = text,
+                                    time = time,
+                                    isMine = true,
+                                    mediaUrl = media.joinToString(",") { it.toString() }
+                                )
+                            )
                             inputText = ""
-                            val messageId = "m_${currentUserUid}_${System.nanoTime()}"
-                            coroutineScope.launch {
-                                try {
-                                    var convId = conversationId
-                                    if (convId.isBlank()) {
-                                        convId = realtimeRepo.getOrCreateConversation(currentUserUid, peerUid)
+                            pendingMedia = emptyList()
+                            sendChatMessage(
+                                context = context,
+                                realtimeRepo = realtimeRepo,
+                                coroutineScope = coroutineScope,
+                                currentUserUid = currentUserUid,
+                                peerUid = peerUid,
+                                conversationId = conversationId,
+                                text = text,
+                                mediaUris = media,
+                                onStart = { sending = true },
+                                onDone = { mediaUrl, sent ->
+                                    // 更新为远程 URL（若上传/发送成功）
+                                    val idx = messages.indexOfFirst { it.time == time && it.isMine }
+                                    if (idx >= 0) {
+                                        messages[idx] = messages[idx].copy(mediaUrl = mediaUrl.ifBlank { media.joinToString(",") { it.toString() } })
                                     }
-                                    if (convId.isNotBlank()) {
-                                        realtimeRepo.sendMessage(messageId, convId, currentUserUid, peerUid, text)
-                                    }
-                                } catch (_: Exception) { }
-                            }
+                                    sending = false
+                                }
+                            )
                         }
                     }
                     .padding(horizontal = 16.dp, vertical = 5.dp),
                 contentAlignment = Alignment.Center
             ) {
                 Text(
-                    text = "发送",
+                    text = if (sending) "发送中" else "发送",
                     fontSize = 14.sp,
-                    color = MaterialTheme.colorScheme.surface
+                    color = if (sending) getOnSurfaceTertiary() else MaterialTheme.colorScheme.surface
                 )
             }
+        }
+
+        // 待发送媒体预览
+        if (pendingMedia.isNotEmpty()) {
+            androidx.compose.foundation.lazy.LazyRow(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(MaterialTheme.colorScheme.surface)
+                    .padding(horizontal = 10.dp),
+                horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp)
+            ) {
+                itemsIndexed(pendingMedia) { index, uri ->
+                    Box(
+                        modifier = Modifier
+                            .size(64.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(MaterialTheme.colorScheme.surfaceVariant)
+                    ) {
+                        AsyncImage(
+                            model = ImageRequest.Builder(LocalContext.current).data(uri).crossfade(true).build(),
+                            contentDescription = null,
+                            modifier = Modifier.fillMaxSize(),
+                            contentScale = ContentScale.Crop
+                        )
+                        Icon(
+                            painter = painterResource(id = R.drawable.close_ring_fill),
+                            contentDescription = "移除",
+                            modifier = Modifier
+                                .size(18.dp)
+                                .align(Alignment.TopEnd)
+                                .clickable(
+                                    interactionSource = remember { MutableInteractionSource() },
+                                    indication = null
+                                ) {
+                                    pendingMedia = pendingMedia.filterIndexed { i, _ -> i != index }
+                                },
+                            tint = Color.White
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+private fun sendChatMessage(
+    context: android.content.Context,
+    realtimeRepo: RealtimeRepository,
+    coroutineScope: kotlinx.coroutines.CoroutineScope,
+    currentUserUid: String,
+    peerUid: String,
+    conversationId: String,
+    text: String,
+    mediaUris: List<android.net.Uri>,
+    onStart: () -> Unit,
+    onDone: (String, Boolean) -> Unit
+) {
+    val trimmed = text.trim()
+    if (trimmed.isBlank() && mediaUris.isEmpty()) return
+    if (currentUserUid.isBlank() || peerUid.isBlank()) return
+    onStart()
+    coroutineScope.launch {
+        var sent = false
+        try {
+            val authRepo = com.example.redbook.data.repository.SupabaseAuthRepository(context.applicationContext as android.app.Application)
+            // 上传媒体,多个以逗号拼接
+            var mediaUrl = ""
+            for (uri in mediaUris) {
+                val url = authRepo.uploadImage(uri, context.applicationContext)
+                if (url != null) {
+                    mediaUrl = if (mediaUrl.isEmpty()) url else "$mediaUrl,$url"
+                }
+            }
+            var convId = conversationId
+            if (convId.isBlank()) {
+                convId = realtimeRepo.getOrCreateConversation(currentUserUid, peerUid)
+            }
+            if (convId.isNotBlank()) {
+                realtimeRepo.sendMessage(
+                    "m_${currentUserUid}_${System.nanoTime()}",
+                    convId, currentUserUid, peerUid, trimmed, mediaUrl
+                )
+                sent = true
+            }
+            onDone(mediaUrl, sent)
+        } catch (_: Exception) {
+            onDone("", sent)
         }
     }
 }
@@ -305,33 +452,39 @@ fun ChatScreen(
 private fun ChatBubble(message: ChatMessage, avatarUrl: String, modifier: Modifier = Modifier) {
     Row(
         modifier = modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically
+        verticalAlignment = Alignment.Top
     ) {
         if (message.isMine) {
             Spacer(modifier = Modifier.weight(1f))
-            Box(
-                modifier = Modifier.fillMaxWidth(0.85f),
-                contentAlignment = Alignment.CenterEnd
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    MessageBubble(message = message)
-                    Spacer(modifier = Modifier.width(8.dp))
-                    ChatAvatar(avatarUrl = avatarUrl, size = 32.dp)
-                }
+            Row(verticalAlignment = Alignment.Top) {
+                MessageBubble(message = message)
+                Spacer(modifier = Modifier.width(8.dp))
+                ChatAvatar(avatarUrl = avatarUrl, size = 32.dp)
             }
         } else {
-            Box(
-                modifier = Modifier.fillMaxWidth(0.85f),
-                contentAlignment = Alignment.CenterStart
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    ChatAvatar(avatarUrl = avatarUrl, size = 32.dp)
-                    Spacer(modifier = Modifier.width(8.dp))
-                    MessageBubble(message = message)
-                }
+            Row(verticalAlignment = Alignment.Top) {
+                ChatAvatar(avatarUrl = avatarUrl, size = 32.dp)
+                Spacer(modifier = Modifier.width(8.dp))
+                MessageBubble(message = message)
             }
             Spacer(modifier = Modifier.weight(1f))
         }
+    }
+}
+
+@Composable
+private fun ChatTimeDivider(time: Long) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 8.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            text = formatChatTime(time),
+            fontSize = 11.sp,
+            color = getOnSurfaceTertiary()
+        )
     }
 }
 
@@ -361,8 +514,52 @@ private fun ChatAvatar(avatarUrl: String, size: androidx.compose.ui.unit.Dp) {
 
 @Composable
 private fun MessageBubble(message: ChatMessage, modifier: Modifier = Modifier) {
-    Box(
+    val context = LocalContext.current
+    val mediaList = message.mediaUrl.split(",").filter { it.isNotBlank() }
+    val hasText = message.content.isNotBlank()
+    // 只有媒体无文字时：直接以图片/视频形式展示，不加气泡背景
+    if (mediaList.isNotEmpty() && !hasText) {
+        Column(modifier = modifier.widthIn(max = 240.dp)) {
+            mediaList.forEach { media ->
+                val isVideo = media.startsWith("video:") ||
+                    (media.startsWith("content:") && (context.contentResolver.getType(android.net.Uri.parse(media)) ?: "").contains("video"))
+                val realUrl = media.removePrefix("video:")
+                if (isVideo) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(Color.Black.copy(alpha = 0.15f))
+                            .padding(vertical = 24.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            painter = painterResource(id = R.drawable.video_fill),
+                            contentDescription = "视频",
+                            modifier = Modifier.size(44.dp),
+                            tint = MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+                } else {
+                    AsyncImage(
+                        model = ImageRequest.Builder(LocalContext.current)
+                            .data(realUrl)
+                            .crossfade(true)
+                            .build(),
+                        contentDescription = null,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(12.dp)),
+                        contentScale = ContentScale.FillWidth
+                    )
+                }
+            }
+        }
+        return
+    }
+    Column(
         modifier = modifier
+            .widthIn(max = 260.dp)
             .clip(RoundedCornerShape(16.dp))
             .background(
                 if (message.isMine) getBlueFill()
@@ -370,11 +567,51 @@ private fun MessageBubble(message: ChatMessage, modifier: Modifier = Modifier) {
             )
             .padding(horizontal = 12.dp, vertical = 8.dp)
     ) {
-        Text(
-            text = message.content,
-            fontSize = 14.sp,
-            color = if (message.isMine) MaterialTheme.colorScheme.onPrimary
-            else MaterialTheme.colorScheme.onSurface
-        )
+        // 媒体(图片/视频)消息
+        mediaList.forEach { media ->
+            val isVideo = media.startsWith("video:") ||
+                (media.startsWith("content:") && (context.contentResolver.getType(android.net.Uri.parse(media)) ?: "").contains("video"))
+            val realUrl = media.removePrefix("video:")
+            if (isVideo) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .widthIn(max = 240.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(Color.Black.copy(alpha = 0.2f))
+                        .padding(vertical = 20.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        painter = painterResource(id = R.drawable.video_fill),
+                        contentDescription = "视频",
+                        modifier = Modifier.size(40.dp),
+                        tint = MaterialTheme.colorScheme.surface
+                    )
+                }
+            } else {
+                AsyncImage(
+                    model = ImageRequest.Builder(LocalContext.current)
+                        .data(realUrl)
+                        .crossfade(true)
+                        .build(),
+                    contentDescription = null,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .widthIn(max = 240.dp)
+                        .clip(RoundedCornerShape(8.dp)),
+                    contentScale = ContentScale.FillWidth
+                )
+            }
+        }
+        if (hasText) {
+            Text(
+                text = message.content,
+                fontSize = 14.sp,
+                color = if (message.isMine) MaterialTheme.colorScheme.onPrimary
+                else MaterialTheme.colorScheme.onSurface,
+                modifier = Modifier.padding(top = if (mediaList.isNotEmpty()) 4.dp else 0.dp)
+            )
+        }
     }
 }

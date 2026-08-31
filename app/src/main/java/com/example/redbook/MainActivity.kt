@@ -26,6 +26,7 @@ import com.example.redbook.ui.home.HomeScreen
 import com.example.redbook.ui.search.SearchScreen
 import com.example.redbook.ui.publish.PublishScreen
 import com.example.redbook.ui.video.VideoDetailScreen
+import com.example.redbook.ui.video.VideoFeedScreen
 import com.example.redbook.ui.profile.ProfileScreen
 import com.example.redbook.ui.draft.DraftScreen
 import com.example.redbook.ui.browse.BrowseScreen
@@ -79,6 +80,7 @@ fun AppScreen(
     var chatUserAvatarUrl by remember { mutableStateOf("") }
     var chatPeerUid by remember { mutableStateOf("") }
     var chatConversationId by remember { mutableStateOf("") }
+    var viewProfileUid by remember { mutableStateOf("") }
     var scrollToCommentId by remember { mutableStateOf("") }
     var screenStack by remember { mutableStateOf(listOf<Screen>(Screen.Login)) }
     var userUid by remember { mutableStateOf("") }
@@ -103,6 +105,7 @@ fun AppScreen(
     LaunchedEffect(userUid) {
         if (userUid.isBlank()) return@LaunchedEffect
         SupabaseAuthRepository.currentUserName = userName
+        SupabaseAuthRepository.currentUserAvatar = userAvatarUrl
         // 初始拉取（兜底，断线恢复也能对齐）
         scope.launch {
             try {
@@ -166,6 +169,13 @@ fun AppScreen(
         }
     }
 
+    // 进入对方主页
+    fun openUserProfile(targetUid: String) {
+        if (targetUid.isBlank() || targetUid == userUid) return
+        viewProfileUid = targetUid
+        navigateTo(Screen.UserProfile)
+    }
+
     when (currentScreen) {
         Screen.Login -> {
             LoginScreen(
@@ -181,6 +191,7 @@ fun AppScreen(
                     userAvatarUrl = userData.avatarUrl
                     userBackgroundUrl = userData.backgroundUrl
                     SupabaseAuthRepository.currentUserName = userName
+                    SupabaseAuthRepository.currentUserAvatar = userData.avatarUrl
                     screenStack = listOf(Screen.Home)
                     currentScreen = Screen.Home
                 },
@@ -213,6 +224,9 @@ fun AppScreen(
                     scope.launch { try { realtimeRepo.markNotificationsRead(userUid) } catch (_: Exception) { } }
                     navigateTo(Screen.Messages)
                 },
+                onNavigateToVideoFeed = {
+                    navigateTo(Screen.VideoFeed)
+                },
                 onNavigateToVideo = { videoId, videoUrl ->
                     selectedVideoId = videoId
                     selectedVideoUrl = videoUrl
@@ -233,7 +247,8 @@ fun AppScreen(
                 onBack = { goBack() },
                 onSendMessage = { peerUid, peerName, peerAvatar ->
                     openChatWith(peerUid, peerName, peerAvatar)
-                }
+                },
+                onUserClick = { targetUid -> openUserProfile(targetUid) }
             )
         }
         Screen.Publish -> {
@@ -245,6 +260,35 @@ fun AppScreen(
                 editDraft = editingDraft,
                 onBack = { editingDraft = null; goBack() },
                 onPublished = { editingDraft = null; goBack() }
+            )
+        }
+        Screen.UserProfile -> {
+            ProfileScreen(
+                userUid = viewProfileUid,
+                userName = "",
+                userXhsId = "",
+                ipLocation = "未知",
+                followCount = 0, fansCount = 0, likeCount = 0,
+                onBack = { goBack() },
+                onEditProfile = {},
+                onBottomTabClick = {},
+                onPostClick = { postId -> selectedPostId = postId; recordBrowse(postId); navigateTo(Screen.Detail) },
+                onVideoClick = { videoId, videoUrl ->
+                    selectedVideoId = videoId
+                    selectedVideoUrl = videoUrl
+                    recordBrowse(videoId)
+                    navigateTo(Screen.Video)
+                },
+                onCommentClick = { postId, commentId ->
+                    selectedPostId = postId
+                    scrollToCommentId = commentId
+                    recordBrowse(postId)
+                    navigateTo(Screen.Detail)
+                },
+                viewerUid = userUid,
+                onSendMessage = { peerUid, peerName, peerAvatar ->
+                    openChatWith(peerUid, peerName, peerAvatar)
+                }
             )
         }
         Screen.Profile -> {
@@ -260,7 +304,12 @@ fun AppScreen(
                 backgroundUrl = userBackgroundUrl,
                 onBack = { goBack() },
                 onEditProfile = { navigateTo(Screen.EditProfile) },
-                onBottomTabClick = { idx -> if (idx == 0) { screenStack = listOf(Screen.Home); currentScreen = Screen.Home } },
+                onBottomTabClick = { idx ->
+                    when (idx) {
+                        0 -> { screenStack = listOf(Screen.Home); currentScreen = Screen.Home }
+                        1 -> navigateTo(Screen.VideoFeed)
+                    }
+                },
                 onPostClick = { postId -> selectedPostId = postId; recordBrowse(postId); navigateTo(Screen.Detail) },
                 onVideoClick = { videoId, videoUrl ->
                     selectedVideoId = videoId
@@ -282,6 +331,13 @@ fun AppScreen(
                 isDarkTheme = isDarkTheme,
                 onToggleDarkTheme = onToggleDarkTheme,
                 onNotification = { navigateTo(Screen.NotificationSetting) },
+                onNavigateToMessages = {
+                    unreadLikesFavs = 0
+                    unreadFollows = 0
+                    unreadComments = 0
+                    scope.launch { try { realtimeRepo.markNotificationsRead(userUid) } catch (_: Exception) { } }
+                    navigateTo(Screen.Messages)
+                },
                 unreadMessageCount = unreadMessages,
                 onLogout = {
                     realtimeRepo.disconnect()
@@ -290,6 +346,7 @@ fun AppScreen(
                     unreadComments = 0
                     unreadMessages = 0
                     SupabaseAuthRepository.currentUserName = ""
+                    SupabaseAuthRepository.currentUserAvatar = ""
                     userUid = ""
                     userXhsId = ""
                     userName = ""
@@ -303,6 +360,7 @@ fun AppScreen(
                     chatUserAvatarUrl = ""
                     chatPeerUid = ""
                     chatConversationId = ""
+                    viewProfileUid = ""
                     loginResetKey++
                     screenStack = listOf(Screen.Login)
                     currentScreen = Screen.Login
@@ -336,6 +394,7 @@ fun AppScreen(
                 onBottomTabClick = { idx ->
                     when (idx) {
                         0 -> { screenStack = listOf(Screen.Home); currentScreen = Screen.Home }
+                        1 -> navigateTo(Screen.VideoFeed)
                         3 -> navigateTo(Screen.Profile)
                     }
                 },
@@ -377,7 +436,8 @@ fun AppScreen(
                     selectedPostId = postId
                     recordBrowse(postId)
                     navigateTo(Screen.Detail)
-                }
+                },
+                onUserClick = { targetUid -> openUserProfile(targetUid) }
             )
         }
         Screen.ReceivedComments -> {
@@ -388,7 +448,8 @@ fun AppScreen(
                     selectedPostId = postId
                     recordBrowse(postId)
                     navigateTo(Screen.Detail)
-                }
+                },
+                onUserClick = { targetUid -> openUserProfile(targetUid) }
             )
         }
         Screen.Chat -> {
@@ -407,7 +468,8 @@ fun AppScreen(
                 conversationId = chatConversationId,
                 repository = realtimeRepo,
                 myAvatarUrl = userAvatarUrl,
-                onBack = { goBack() }
+                onBack = { goBack() },
+                onUserClick = { targetUid -> openUserProfile(targetUid) }
             )
         }
         Screen.Followers -> {
@@ -416,7 +478,8 @@ fun AppScreen(
                 onBack = { goBack() },
                 onSendMessage = { peerUid, peerName, peerAvatar ->
                     openChatWith(peerUid, peerName, peerAvatar)
-                }
+                },
+                onUserClick = { targetUid -> openUserProfile(targetUid) }
             )
         }
         Screen.EditProfile -> {
@@ -435,6 +498,7 @@ fun AppScreen(
                     userBirthday = birthday
                     userAvatarUrl = avatarUrl
                     userBackgroundUrl = backgroundUrl
+                    SupabaseAuthRepository.currentUserAvatar = avatarUrl
                 }
             )
         }
@@ -449,6 +513,19 @@ fun AppScreen(
                 }
             )
         }
+        Screen.VideoFeed -> {
+            VideoFeedScreen(
+                userUid = userUid,
+                onBack = { goBack() },
+                onUserClick = { targetUid -> openUserProfile(targetUid) },
+                onVideoClick = { videoId, videoUrl ->
+                    selectedVideoId = videoId
+                    selectedVideoUrl = videoUrl
+                    recordBrowse(videoId)
+                    navigateTo(Screen.Video)
+                }
+            )
+        }
         Screen.Video -> {
             VideoDetailScreen(
                 videoUrl = selectedVideoUrl.ifBlank { "test" },
@@ -460,11 +537,16 @@ fun AppScreen(
                 videoId = selectedVideoId,
                 userUid = userUid,
                 userXhsId = userXhsId,
+                userAvatarUrl = userAvatarUrl,
                 authorAvatarUrl = userAvatarUrl,
                 onBack = { goBack() },
                 onFollowClick = {},
                 onLikeClick = {},
-                onFavoriteClick = {}
+                onFavoriteClick = {},
+                onSendMessage = { peerUid, peerName, peerAvatar ->
+                    openChatWith(peerUid, peerName, peerAvatar)
+                },
+                onUserClick = { targetUid -> openUserProfile(targetUid) }
             )
         }
         Screen.Search -> {
@@ -494,7 +576,9 @@ sealed class Screen {
     object Search : Screen()
     object Publish : Screen()
     object Video : Screen()
+    object VideoFeed : Screen()
     object Profile : Screen()
+    object UserProfile : Screen()
     object Draft : Screen()
     object Browse : Screen()
     object Messages : Screen()

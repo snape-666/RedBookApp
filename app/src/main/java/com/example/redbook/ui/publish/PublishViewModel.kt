@@ -120,6 +120,7 @@ class PublishViewModel(
                     val uri = state.images.first()
                     val url = repository.uploadImage(uri, getApplication())
                     if (url == null) { _uiState.value = state.copy(isSaving = false, error = "上传失败"); return@launch }
+                    // 视频存 posts 表，image_url 带 video: 前缀
                     repository.publishPost("vid_${System.currentTimeMillis()}", state.title, "",
                         authorUid, authorName, authorXhsId, url, authorAvatar)
                 } else {

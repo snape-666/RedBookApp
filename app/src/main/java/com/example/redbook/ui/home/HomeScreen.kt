@@ -44,7 +44,8 @@ fun HomeScreen(
     onNavigateToPublish: () -> Unit = {},
     onNavigateToVideo: (String, String) -> Unit = { _, _ -> },
     onNavigateToProfile: () -> Unit = {},
-    onNavigateToMessages: () -> Unit = {}
+    onNavigateToMessages: () -> Unit = {},
+    onNavigateToVideoFeed: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val viewModel: HomeViewModel = viewModel(factory = HomeViewModelFactory(context.applicationContext as android.app.Application, userUid))
@@ -140,10 +141,11 @@ fun HomeScreen(
         BottomBar(
             modifier = Modifier
                 .fillMaxWidth(),
-            titles = listOf("首页","阅读","消息","我的"),
+            titles = listOf("首页","视频","消息","我的"),
             selectedIndex = selectedBottomIndex,
             onTitleClick = {index->
                 selectedBottomIndex=index
+                if (index == 1) onNavigateToVideoFeed()
                 if (index == 2) onNavigateToMessages()
                 if (index == 3) onNavigateToProfile()
             },

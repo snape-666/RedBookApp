@@ -149,13 +149,14 @@ class RealtimeRepository(private val app: Application) {
         }
     }
 
-    suspend fun sendMessage(messageId: String, conversationId: String, senderUid: String, receiverUid: String, content: String) {
+    suspend fun sendMessage(messageId: String, conversationId: String, senderUid: String, receiverUid: String, content: String, mediaUrl: String = "") {
         val body = JSONObject().apply {
             put("message_id", messageId)
             put("conversation_id", conversationId)
             put("sender_uid", senderUid)
             put("receiver_uid", receiverUid)
             put("content", content)
+            put("media_url", mediaUrl)
             put("created_at", System.currentTimeMillis())
             put("is_read", false)
         }
@@ -165,7 +166,8 @@ class RealtimeRepository(private val app: Application) {
             val resp = queryRest("conversations", "select=last_message&conversation_id=eq.$conversationId&limit=1")
             val arr = resp.optJSONArray("users") ?: resp.optJSONArray("conversations") ?: JSONArray()
             val lastMsg = if (arr.length() > 0) arr.getJSONObject(0).optString("last_message", "") else ""
-            val updated = if (lastMsg == content) lastMsg else content
+            val display = if (content.isNotBlank()) content else if (mediaUrl.isNotBlank()) "[图片]" else ""
+            val updated = if (lastMsg == display) lastMsg else display
             patchRest("conversations", "conversation_id=eq.$conversationId", JSONObject().apply {
                 put("last_message", updated)
                 put("last_time", System.currentTimeMillis())
