@@ -750,6 +750,18 @@ class SupabaseAuthRepository(private val app: Application) {
         return resp.optJSONArray("users") ?: resp.optJSONArray("comments") ?: JSONArray()
     }
 
+    /** 批量判断哪些 comment_id 还存在（用于通知列表标记已删除评论） */
+    suspend fun getExistingCommentIds(commentIds: Set<String>): Set<String> {
+        if (commentIds.isEmpty()) return emptySet()
+        return try {
+            val filters = commentIds.filter { it.isNotBlank() }.joinToString(",") { "comment_id.eq.$it" }
+            if (filters.isBlank()) return emptySet()
+            val resp = queryRest("comments", "select=comment_id&or=($filters)")
+            val arr = resp.optJSONArray("users") ?: resp.optJSONArray("comments") ?: JSONArray()
+            (0 until arr.length()).map { arr.getJSONObject(it).optString("comment_id", "") }.toSet()
+        } catch (e: Exception) { emptySet() }
+    }
+
     suspend fun insertComment(commentId: String, postId: String, content: String,
                               authorUid: String, authorName: String, authorAvatar: String,
                               authorXhsId: String, postTitle: String, imageUrl: String = "") {

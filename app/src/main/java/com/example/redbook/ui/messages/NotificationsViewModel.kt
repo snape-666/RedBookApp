@@ -22,7 +22,8 @@ data class NotificationItem(
     val commentContent: String,
     val time: Long,
     val postImage: String = "",
-    val commentId: String = ""
+    val commentId: String = "",
+    val deleted: Boolean = false
 )
 
 /** 通知列表类型：LIKE_FAV（赞和收藏）、COMMENT（评论/回复） */
@@ -52,7 +53,7 @@ class NotificationsViewModel(
                     NotificationKind.LIKE_FAV -> setOf("like", "favorite")
                     NotificationKind.COMMENT -> setOf("comment", "reply")
                 }
-                _items.value = (0 until arr.length()).mapNotNull { i ->
+                val rawItems = (0 until arr.length()).mapNotNull { i ->
                     val n = arr.getJSONObject(i)
                     val type = n.optString("type", "")
                     if (type !in allowedTypes) return@mapNotNull null
@@ -89,6 +90,18 @@ class NotificationsViewModel(
                         postImage = postImage,
                         commentId = n.optString("comment_id", "")
                     )
+                }
+                // 评论类型：批量查 comment_id 是否仍存在，标记已删除
+                if (kind == NotificationKind.COMMENT) {
+                    val commentIds = rawItems.map { it.commentId }.filter { it.isNotBlank() }.toSet()
+                    val existing = authRepository.getExistingCommentIds(commentIds)
+                    _items.value = rawItems.map { item ->
+                        if (item.commentId.isNotBlank() && item.commentId !in existing) {
+                            item.copy(deleted = true)
+                        } else item
+                    }
+                } else {
+                    _items.value = rawItems
                 }
             } catch (e: Exception) {
                 _items.value = emptyList()

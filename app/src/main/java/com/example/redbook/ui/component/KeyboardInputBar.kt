@@ -36,7 +36,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
@@ -62,6 +64,20 @@ fun KeyboardInputBar(
         focusRequester.requestFocus()
     }
 
+    // 回复前缀：形如 “回复 xxx：” 或 “回复 @xxx：”
+    val replyPrefixRegex = Regex("^回复\\s*(@\\S+|[^\\s：]+)\\s*[：:]")
+    val prefixEnd = replyPrefixRegex.find(text)?.range?.last?.plus(1) ?: -1
+
+    // 用 TextFieldValue 控制光标：回复模式下光标固定在前缀末尾，前缀内点击无效
+    var textFieldValue by remember(text) {
+        mutableStateOf(TextFieldValue(text, TextRange(if (prefixEnd >= 0) prefixEnd else text.length)))
+    }
+    LaunchedEffect(text) {
+        val newPrefixEnd = replyPrefixRegex.find(text)?.range?.last?.plus(1) ?: -1
+        val cursor = if (newPrefixEnd >= 0) newPrefixEnd else text.length
+        textFieldValue = TextFieldValue(text, TextRange(cursor))
+    }
+
     Column(
         modifier = modifier
             .fillMaxWidth()
@@ -78,10 +94,26 @@ fun KeyboardInputBar(
         ) {
 
             TextField(
-                value = text,
-                onValueChange = {
-                    onTextChange(it)
-
+                value = textFieldValue,
+                onValueChange = { newValue ->
+                    val newText = newValue.text
+                    val newPrefixEnd = replyPrefixRegex.find(newText)?.range?.last?.plus(1) ?: -1
+                    // 回复模式下：禁止删除前缀，且光标不允许落在前缀范围内
+                    if (newPrefixEnd >= 0 && prefixEnd >= 0) {
+                        if (!newText.startsWith(text.take(prefixEnd))) {
+                            // 前缀被破坏，忽略输入
+                            return@TextField
+                        }
+                        val safeCursor = newValue.selection.start.coerceAtLeast(newPrefixEnd)
+                        val safeEnd = newValue.selection.end.coerceAtLeast(newPrefixEnd)
+                        textFieldValue = newValue.copy(
+                            text = newText,
+                            selection = TextRange(safeCursor, safeEnd)
+                        )
+                    } else {
+                        textFieldValue = newValue
+                    }
+                    onTextChange(newValue.text)
                 },
                 modifier = Modifier
                     .fillMaxWidth()

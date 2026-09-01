@@ -159,6 +159,13 @@ private fun CommentRow(
     Row(
         modifier = modifier
             .fillMaxWidth()
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null
+            ) {
+                if (isVideo) onVideoClick(item.postId, cover)
+                else onPostClick(item.postId, if (item.deleted) "" else item.commentId)
+            }
             .padding(horizontal = 10.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -212,15 +219,14 @@ private fun CommentRow(
                     color = getOnSurfaceTertiary()
                 )
             }
-            if (item.commentContent.isNotBlank()) {
+            if (item.commentContent.isNotBlank() || item.deleted) {
                 Spacer(modifier = Modifier.height(2.dp))
                 Text(
-                    text = "\"${item.commentContent}\"",
+                    text = if (item.deleted) "该评论已删除" else "\"${item.commentContent}\"",
                     fontSize = 13.sp,
-                    color = getOnSurfaceTertiary(),
+                    color = if (item.deleted) getOnSurfaceTertiary().copy(alpha = 0.6f) else getOnSurfaceTertiary(),
                     maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.clickable { onPostClick(item.postId, item.commentId) }
+                    overflow = TextOverflow.Ellipsis
                 )
             }
         }
@@ -231,13 +237,6 @@ private fun CommentRow(
             modifier = Modifier
                 .size(48.dp)
                 .clip(RoundedCornerShape(5.dp))
-                .clickable(
-                    interactionSource = remember { MutableInteractionSource() },
-                    indication = null
-                ) {
-                    if (isVideo) onVideoClick(item.postId, cover)
-                    else onPostClick(item.postId, item.commentId)
-                }
         ) {
             if (isVideo) {
                 VideoThumb(

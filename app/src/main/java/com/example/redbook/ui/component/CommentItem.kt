@@ -2,6 +2,7 @@ package com.example.redbook.ui.component
 
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -52,11 +53,17 @@ fun CommentItem(
     onReplyClick: (String,String) -> Unit,
     onLikeClick: (String) -> Unit,
     onLongClick: (String) -> Unit = {},
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    highlight: Boolean = false
 ) {
     var isExpanded by remember { mutableStateOf(false) }
 
-    Column(modifier = modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)
+    Column(modifier = modifier.fillMaxWidth()
+        .background(
+            if (highlight) MaterialTheme.colorScheme.primary.copy(alpha = 0.08f)
+            else androidx.compose.ui.graphics.Color.Transparent
+        )
+        .padding(horizontal = 16.dp, vertical = 8.dp)
         .combinedClickable(
             onClick = {},
             onLongClick = { onLongClick(comment.id) }

@@ -159,6 +159,13 @@ private fun ReactionRow(
     Row(
         modifier = modifier
             .fillMaxWidth()
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null
+            ) {
+                if (isVideo) onVideoClick(item.postId, cover)
+                else onPostClick(item.postId)
+            }
             .padding(horizontal = 10.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -220,13 +227,6 @@ private fun ReactionRow(
             modifier = Modifier
                 .size(48.dp)
                 .clip(RoundedCornerShape(5.dp))
-                .clickable(
-                    interactionSource = remember { MutableInteractionSource() },
-                    indication = null
-                ) {
-                    if (isVideo) onVideoClick(item.postId, cover)
-                    else onPostClick(item.postId)
-                }
         ) {
             if (isVideo) {
                 VideoThumb(

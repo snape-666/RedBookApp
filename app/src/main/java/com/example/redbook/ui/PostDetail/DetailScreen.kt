@@ -89,6 +89,7 @@ fun DetailScreen(
     val lazyListState = rememberLazyListState()
     val replyTarget by viewModel.replyTarget.collectAsState()
     var deletingComment by remember { mutableStateOf<String?>(null) }
+    var highlightCommentId by remember { mutableStateOf("") }
     val keyboardController = LocalSoftwareKeyboardController.current
 
     // 监听真实键盘状态：键盘收起时同步收起输入栏
@@ -113,7 +114,11 @@ fun DetailScreen(
             val comments = (uiState as DetailUiState.Success).comments
             val idx = comments.indexOfFirst { it.id == scrollToCommentId }
             if (idx >= 0) {
+                highlightCommentId = scrollToCommentId
                 lazyListState.animateScrollToItem(3 + idx)
+                // 高亮 1.5s 后清除
+                kotlinx.coroutines.delay(1500)
+                highlightCommentId = ""
             }
             onCommentScrolled()
         }
@@ -282,7 +287,8 @@ fun DetailScreen(
                                 },
                                 onLongClick = { commentId ->
                                     deletingComment = commentId
-                                }
+                                },
+                                highlight = comment.id == highlightCommentId
                             )
                         }
                     }
