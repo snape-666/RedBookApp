@@ -48,9 +48,13 @@ fun HomeScreen(
     onNavigateToVideoFeed: () -> Unit = {}
 ) {
     val context = LocalContext.current
-    val viewModel: HomeViewModel = viewModel(factory = HomeViewModelFactory(context.applicationContext as android.app.Application, userUid))
+    // 按 userUid 绑定 ViewModel，切换账号后重新创建实例，避免沿用旧账号的 userUid
+    val viewModel: HomeViewModel = viewModel(
+        key = userUid,
+        factory = HomeViewModelFactory(context.applicationContext as android.app.Application, userUid)
+    )
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
-    LaunchedEffect(Unit) { viewModel.fetchNotes() }
+    LaunchedEffect(userUid) { viewModel.fetchNotes() }
     var selectedTabIndex by remember { mutableIntStateOf(1) }
     var selectedBottomIndex by remember {  mutableIntStateOf(0) }
     Column(

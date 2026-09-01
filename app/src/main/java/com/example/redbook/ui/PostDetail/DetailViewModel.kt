@@ -81,12 +81,15 @@ class DetailViewModel(
                     val raw = (0 until cloudComments.length()).map { i ->
                         val c = cloudComments.getJSONObject(i)
                         val parentId = c.optString("parent_id", "")
+                        val imageUrls = c.optString("image_url", "")
+                            .split(",").filter { it.isNotBlank() }.map { Uri.parse(it) }
                         parentId to Comment(
                             id = c.optString("comment_id", ""),
                             userId = c.optString("author_uid", ""),
                             userName = c.optString("author_name", ""),
                             avatarRes = R.drawable.test,
                             avatarUrl = c.optString("author_avatar", ""),
+                            images = imageUrls,
                             content = c.optString("content", ""),
                             timestamp = c.optLong("created_at", 0),
                             ipLocation = c.optString("ip_location", "未知"),
@@ -116,6 +119,7 @@ class DetailViewModel(
                                     userName = r.userName,
                                     avatarRes = r.avatarRes,
                                     avatarUrl = replyAvatar,
+                                    images = r.images,
                                     content = r.content,
                                     timestamp = r.timestamp,
                                     ipLocation = r.ipLocation,
@@ -129,34 +133,12 @@ class DetailViewModel(
                     val isLiked = repository.hasLiked(userUid, post.postId)
                     val isFavorited = repository.hasFavorited(userUid, post.postId)
                     val isFollowed = repository.isFollowing(userUid, post.authorId)
-                    android.util.Log.d("RedBook", "isFollowing uid=$userUid author=${post.authorId} = $isFollowed")
-                    var cleanLiked = isLiked
-                    var cleanFavorited = isFavorited
-                    var likeCount = post.likeCount
-                    var favoriteCount = post.favoriteCount
-                    if (post.authorId == userUid) {
-                        // 作者不能赞/收藏自己的笔记：若历史误操作留下了自己的记录，打开时自动清理
-                        try {
-                            if (isLiked) {
-                                repository.recordLike(userUid, post.postId, false)
-                                repository.updatePostLike(post.postId, -1)
-                                cleanLiked = false
-                                likeCount = (likeCount - 1).coerceAtLeast(0)
-                            }
-                            if (isFavorited) {
-                                repository.recordFavorite(userUid, post.postId, false)
-                                repository.updatePostFav(post.postId, -1)
-                                cleanFavorited = false
-                                favoriteCount = (favoriteCount - 1).coerceAtLeast(0)
-                            }
-                        } catch (_: Exception) { }
-                    }
                     val finalPost = post.copy(
-                        isLiked = cleanLiked,
-                        isFavorited = cleanFavorited,
+                        isLiked = isLiked,
+                        isFavorited = isFavorited,
                         isFollowed = isFollowed,
-                        likeCount = likeCount,
-                        favoriteCount = favoriteCount
+                        likeCount = post.likeCount,
+                        favoriteCount = post.favoriteCount
                     )
                     _uiState.value = DetailUiState.Success(finalPost, comments)
                     repository.incrementViewCount(postId)
@@ -244,7 +226,6 @@ class DetailViewModel(
         val currentState = _uiState.value
         if (currentState is DetailUiState.Success) {
             val post = currentState.post
-            if (post.authorId == userUid) return
             val newLiked = !post.isLiked
             val newCount = (if (newLiked) post.likeCount + 1 else post.likeCount - 1).coerceAtLeast(0)
             _uiState.value = currentState.copy(post = post.copy(isLiked = newLiked, likeCount = newCount))
@@ -252,7 +233,7 @@ class DetailViewModel(
                 try {
                     repository.recordLike(userUid, post.postId, newLiked)
                     repository.updatePostLike(post.postId, if (newLiked) 1 else -1)
-                } catch (_: Exception) { }
+                } catch (e: Exception) { android.util.Log.e("RedBook", "recordLike err: ${e.message}") }
             }
         }
     }
@@ -261,7 +242,6 @@ class DetailViewModel(
         val currentState = _uiState.value
         if (currentState is DetailUiState.Success) {
             val post = currentState.post
-            if (post.authorId == userUid) return
             val newFavorited = !post.isFavorited
             val newCount = (if (newFavorited) post.favoriteCount + 1 else post.favoriteCount - 1).coerceAtLeast(0)
             _uiState.value = currentState.copy(post = post.copy(isFavorited = newFavorited, favoriteCount = newCount))
@@ -269,7 +249,7 @@ class DetailViewModel(
                 try {
                     repository.recordFavorite(userUid, post.postId, newFavorited)
                     repository.updatePostFav(post.postId, if (newFavorited) 1 else -1)
-                } catch (_: Exception) { }
+                } catch (e: Exception) { android.util.Log.e("RedBook", "recordFavorite err: ${e.message}") }
             }
         }
     }
@@ -374,7 +354,13 @@ class DetailViewModel(
                 val updatedPost = currentState.post.copy(commentCount = updatedComments.size)
                 _uiState.value = currentState.copy(comments = updatedComments, post = updatedPost)
 
-                repository.insertComment(newComment.id, post.postId, content, userUid, name, userAvatarUrl, userXhsId, post.title)
+                // 上传评论图片，把 URL 存云端
+                var imageUrl = ""
+                for (uri in images) {
+                    val url = repository.uploadImage(uri, getApplication())
+                    if (url != null) imageUrl = if (imageUrl.isEmpty()) url else "$imageUrl,$url"
+                }
+                repository.insertComment(newComment.id, post.postId, content, userUid, name, userAvatarUrl, userXhsId, post.title, imageUrl)
 
                 _commentText.value = ""
                 clearSelectedImages()
@@ -411,7 +397,13 @@ class DetailViewModel(
                 }
                 _uiState.value = currentState.copy(comments = updatedComments)
 
-                repository.insertReply(newReply.id, post.postId, parentCommentId, content, userUid, name, userAvatarUrl, userXhsId, post.title)
+                // 上传回复图片，把 URL 存云端
+                var imageUrl = ""
+                for (uri in images) {
+                    val url = repository.uploadImage(uri, getApplication())
+                    if (url != null) imageUrl = if (imageUrl.isEmpty()) url else "$imageUrl,$url"
+                }
+                repository.insertReply(newReply.id, post.postId, parentCommentId, content, userUid, name, userAvatarUrl, userXhsId, post.title, imageUrl)
             }
         }
     }

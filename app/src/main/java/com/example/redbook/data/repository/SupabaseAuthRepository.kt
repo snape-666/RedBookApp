@@ -585,6 +585,7 @@ class SupabaseAuthRepository(private val app: Application) {
             val body = JSONObject().apply {
                 put("like_id", "l_${userUid}_$postId")
                 put("user_uid", userUid)
+                put("user_xhs_id", "")
                 put("post_id", postId)
                 put("created_at", System.currentTimeMillis())
             }
@@ -601,6 +602,7 @@ class SupabaseAuthRepository(private val app: Application) {
             val body = JSONObject().apply {
                 put("fav_id", "f_${userUid}_$postId")
                 put("user_uid", userUid)
+                put("user_xhs_id", "")
                 put("post_id", postId)
                 put("created_at", System.currentTimeMillis())
             }
@@ -706,6 +708,7 @@ class SupabaseAuthRepository(private val app: Application) {
             obj.put("like_count", c.optInt("like_count"))
             obj.put("post_title", c.optString("post_title", ""))
             obj.put("ip_location", c.optString("ip_location", ""))
+            obj.put("image_url", c.optString("image_url", ""))
             val parentId = c.optString("parent_id")
             if (parentId.isNotEmpty()) {
                 val cached = map[parentId]
@@ -749,7 +752,7 @@ class SupabaseAuthRepository(private val app: Application) {
 
     suspend fun insertComment(commentId: String, postId: String, content: String,
                               authorUid: String, authorName: String, authorAvatar: String,
-                              authorXhsId: String, postTitle: String) {
+                              authorXhsId: String, postTitle: String, imageUrl: String = "") {
         val body = JSONObject().apply {
             put("comment_id", commentId)
             put("post_id", postId)
@@ -759,6 +762,7 @@ class SupabaseAuthRepository(private val app: Application) {
             put("author_avatar", authorAvatar)
             put("author_xhs_id", authorXhsId)
             put("post_title", postTitle)
+            put("image_url", imageUrl)
             put("created_at", System.currentTimeMillis())
         }
         supabasePostBody("/rest/v1/comments", body)
@@ -766,7 +770,7 @@ class SupabaseAuthRepository(private val app: Application) {
     }
 
     suspend fun insertReply(replyId: String, postId: String, parentId: String, content: String,
-                            authorUid: String, authorName: String, authorAvatar: String, authorXhsId: String, postTitle: String) {
+                            authorUid: String, authorName: String, authorAvatar: String, authorXhsId: String, postTitle: String, imageUrl: String = "") {
         val body = JSONObject().apply {
             put("comment_id", replyId)
             put("post_id", postId)
@@ -777,6 +781,7 @@ class SupabaseAuthRepository(private val app: Application) {
             put("author_avatar", authorAvatar)
             put("author_xhs_id", authorXhsId)
             put("post_title", postTitle)
+            put("image_url", imageUrl)
             put("created_at", System.currentTimeMillis())
         }
         supabasePostBody("/rest/v1/comments", body)

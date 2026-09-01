@@ -156,7 +156,8 @@ class RealtimeRepository(private val app: Application) {
             put("sender_uid", senderUid)
             put("receiver_uid", receiverUid)
             put("content", content)
-            put("media_url", mediaUrl)
+            // media_url 仅在有媒体时写入，避免旧表没有该字段导致纯文本消息发送失败
+            if (mediaUrl.isNotBlank()) put("media_url", mediaUrl)
             put("created_at", System.currentTimeMillis())
             put("is_read", false)
         }

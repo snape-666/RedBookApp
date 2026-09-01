@@ -217,11 +217,7 @@ fun AppScreen(
                 onNavigateToPublish = { navigateTo(Screen.Publish) },
                 onNavigateToProfile = { navigateTo(Screen.Profile) },
                 onNavigateToMessages = {
-                    // 点进消息页：通知已读清零
-                    unreadLikesFavs = 0
-                    unreadFollows = 0
-                    unreadComments = 0
-                    scope.launch { try { realtimeRepo.markNotificationsRead(userUid) } catch (_: Exception) { } }
+                    // 只导航到消息页，不清零未读；点击具体分组时再清零对应未读
                     navigateTo(Screen.Messages)
                 },
                 onNavigateToVideoFeed = {
@@ -332,10 +328,7 @@ fun AppScreen(
                 onToggleDarkTheme = onToggleDarkTheme,
                 onNotification = { navigateTo(Screen.NotificationSetting) },
                 onNavigateToMessages = {
-                    unreadLikesFavs = 0
-                    unreadFollows = 0
-                    unreadComments = 0
-                    scope.launch { try { realtimeRepo.markNotificationsRead(userUid) } catch (_: Exception) { } }
+                    // 只导航到消息页，不清零未读；点击具体分组时再清零对应未读
                     navigateTo(Screen.Messages)
                 },
                 unreadMessageCount = unreadMessages,
@@ -437,6 +430,12 @@ fun AppScreen(
                     recordBrowse(postId)
                     navigateTo(Screen.Detail)
                 },
+                onVideoClick = { videoId, videoUrl ->
+                    selectedVideoId = videoId
+                    selectedVideoUrl = videoUrl
+                    recordBrowse(videoId)
+                    navigateTo(Screen.Video)
+                },
                 onUserClick = { targetUid -> openUserProfile(targetUid) }
             )
         }
@@ -444,10 +443,17 @@ fun AppScreen(
             ReceivedCommentsScreen(
                 userUid = userUid,
                 onBack = { goBack() },
-                onPostClick = { postId ->
+                onPostClick = { postId, commentId ->
                     selectedPostId = postId
+                    scrollToCommentId = commentId
                     recordBrowse(postId)
                     navigateTo(Screen.Detail)
+                },
+                onVideoClick = { videoId, videoUrl ->
+                    selectedVideoId = videoId
+                    selectedVideoUrl = videoUrl
+                    recordBrowse(videoId)
+                    navigateTo(Screen.Video)
                 },
                 onUserClick = { targetUid -> openUserProfile(targetUid) }
             )

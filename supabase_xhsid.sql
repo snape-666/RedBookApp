@@ -7,11 +7,18 @@ ALTER TABLE likes ADD COLUMN IF NOT EXISTS user_xhs_id TEXT;
 -- 收藏表加 xhs_id
 ALTER TABLE favorites ADD COLUMN IF NOT EXISTS user_xhs_id TEXT;
 
+-- 点赞/收藏表补 user_uid 字段（旧表只有 user_xhs_id）
+ALTER TABLE likes ADD COLUMN IF NOT EXISTS user_uid TEXT DEFAULT '';
+ALTER TABLE favorites ADD COLUMN IF NOT EXISTS user_uid TEXT DEFAULT '';
+
 -- 评论表加 xhs_id
 ALTER TABLE comments ADD COLUMN IF NOT EXISTS author_xhs_id TEXT;
 
 -- 评论表加所评论帖子的标题
 ALTER TABLE comments ADD COLUMN IF NOT EXISTS post_title TEXT DEFAULT '';
+
+-- 评论表加图片字段（评论/回复附图）
+ALTER TABLE comments ADD COLUMN IF NOT EXISTS image_url TEXT DEFAULT '';
 
 -- 帖子表确认有 author_xhs_id
 ALTER TABLE posts ADD COLUMN IF NOT EXISTS author_xhs_id TEXT DEFAULT '';

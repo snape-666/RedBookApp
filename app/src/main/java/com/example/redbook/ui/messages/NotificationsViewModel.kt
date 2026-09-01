@@ -21,7 +21,8 @@ data class NotificationItem(
     val postTitle: String,
     val commentContent: String,
     val time: Long,
-    val postImage: String = ""
+    val postImage: String = "",
+    val commentId: String = ""
 )
 
 /** 通知列表类型：LIKE_FAV（赞和收藏）、COMMENT（评论/回复） */
@@ -85,7 +86,8 @@ class NotificationsViewModel(
                         postTitle = n.optString("post_title", "").ifBlank { "你的笔记" },
                         commentContent = n.optString("comment_content", ""),
                         time = n.optLong("created_at", 0L),
-                        postImage = postImage
+                        postImage = postImage,
+                        commentId = n.optString("comment_id", "")
                     )
                 }
             } catch (e: Exception) {

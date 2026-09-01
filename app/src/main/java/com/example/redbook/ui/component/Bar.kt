@@ -75,7 +75,7 @@ fun CountBadge(
     ) {
         Text(
             text = text,
-            fontSize = 9.sp,
+            fontSize = 10.sp,
             fontWeight = FontWeight.Bold,
             color = textColor,
             maxLines = 1

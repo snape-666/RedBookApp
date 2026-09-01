@@ -12,5 +12,6 @@ data class UserComment(
     val likeCount: Int,
     val timestamp: Long,
     val ipLocation: String = "未知",
-    val isLiked: Boolean = false
+    val isLiked: Boolean = false,
+    val imageUrl: String = ""
 )

@@ -42,6 +42,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import com.example.redbook.R
+import com.example.redbook.ui.component.VideoThumb
 import com.example.redbook.ui.theme.getOnSurfaceSecondary
 import com.example.redbook.ui.theme.getOnSurfaceTertiary
 import com.example.redbook.ui.theme.getOutline
@@ -51,6 +52,7 @@ fun ReceivedReactionsScreen(
     userUid: String = "",
     onBack: () -> Unit = {},
     onPostClick: (String) -> Unit = {},
+    onVideoClick: (String, String) -> Unit = { _, _ -> },
     onUserClick: (String) -> Unit = {}
 ) {
     val context = LocalContext.current
@@ -132,7 +134,12 @@ fun ReceivedReactionsScreen(
             }
             else -> LazyColumn(modifier = Modifier.weight(1f)) {
                 items(items, key = { it.actorName + it.time }) { item ->
-                    ReactionRow(item = item, onPostClick = onPostClick, onUserClick = { onUserClick(item.actorUid) })
+                    ReactionRow(
+                        item = item,
+                        onPostClick = { onPostClick(it) },
+                        onVideoClick = onVideoClick,
+                        onUserClick = { onUserClick(item.actorUid) }
+                    )
                 }
             }
         }
@@ -140,7 +147,15 @@ fun ReceivedReactionsScreen(
 }
 
 @Composable
-private fun ReactionRow(item: NotificationItem, onPostClick: (String) -> Unit, onUserClick: () -> Unit = {}, modifier: Modifier = Modifier) {
+private fun ReactionRow(
+    item: NotificationItem,
+    onPostClick: (String) -> Unit,
+    onVideoClick: (String, String) -> Unit,
+    onUserClick: () -> Unit = {},
+    modifier: Modifier = Modifier
+) {
+    val isVideo = item.postImage.startsWith("video:")
+    val cover = item.postImage.removePrefix("video:")
     Row(
         modifier = modifier
             .fillMaxWidth()
@@ -208,10 +223,18 @@ private fun ReactionRow(item: NotificationItem, onPostClick: (String) -> Unit, o
                 .clickable(
                     interactionSource = remember { MutableInteractionSource() },
                     indication = null
-                ) { onPostClick(item.postId) }
+                ) {
+                    if (isVideo) onVideoClick(item.postId, cover)
+                    else onPostClick(item.postId)
+                }
         ) {
-            val cover = item.postImage.removePrefix("video:")
-            if (cover.isNotBlank()) {
+            if (isVideo) {
+                VideoThumb(
+                    videoUrl = cover,
+                    modifier = Modifier.fillMaxSize(),
+                    placeholder = R.drawable.test
+                )
+            } else if (cover.isNotBlank()) {
                 AsyncImage(
                     model = ImageRequest.Builder(LocalContext.current).data(cover).crossfade(true).build(),
                     contentDescription = "帖子封面",

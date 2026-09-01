@@ -42,6 +42,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import com.example.redbook.R
+import com.example.redbook.ui.component.VideoThumb
 import com.example.redbook.ui.theme.getOnSurfaceSecondary
 import com.example.redbook.ui.theme.getOnSurfaceTertiary
 import com.example.redbook.ui.theme.getOutline
@@ -50,7 +51,8 @@ import com.example.redbook.ui.theme.getOutline
 fun ReceivedCommentsScreen(
     userUid: String = "",
     onBack: () -> Unit = {},
-    onPostClick: (String) -> Unit = {},
+    onPostClick: (String, String) -> Unit = { _, _ -> },
+    onVideoClick: (String, String) -> Unit = { _, _ -> },
     onUserClick: (String) -> Unit = {}
 ) {
     val context = LocalContext.current
@@ -132,7 +134,12 @@ fun ReceivedCommentsScreen(
             }
             else -> LazyColumn(modifier = Modifier.weight(1f)) {
                 items(items, key = { it.actorName + it.time }) { item ->
-                    CommentRow(item = item, onPostClick = onPostClick, onUserClick = { onUserClick(item.actorUid) })
+                    CommentRow(
+                        item = item,
+                        onPostClick = { postId, commentId -> onPostClick(postId, commentId) },
+                        onVideoClick = onVideoClick,
+                        onUserClick = { onUserClick(item.actorUid) }
+                    )
                 }
             }
         }
@@ -140,7 +147,15 @@ fun ReceivedCommentsScreen(
 }
 
 @Composable
-private fun CommentRow(item: NotificationItem, onPostClick: (String) -> Unit, onUserClick: () -> Unit = {}, modifier: Modifier = Modifier) {
+private fun CommentRow(
+    item: NotificationItem,
+    onPostClick: (String, String) -> Unit,
+    onVideoClick: (String, String) -> Unit,
+    onUserClick: () -> Unit = {},
+    modifier: Modifier = Modifier
+) {
+    val isVideo = item.postImage.startsWith("video:")
+    val cover = item.postImage.removePrefix("video:")
     Row(
         modifier = modifier
             .fillMaxWidth()
@@ -204,7 +219,8 @@ private fun CommentRow(item: NotificationItem, onPostClick: (String) -> Unit, on
                     fontSize = 13.sp,
                     color = getOnSurfaceTertiary(),
                     maxLines = 2,
-                    overflow = TextOverflow.Ellipsis
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.clickable { onPostClick(item.postId, item.commentId) }
                 )
             }
         }
@@ -218,10 +234,18 @@ private fun CommentRow(item: NotificationItem, onPostClick: (String) -> Unit, on
                 .clickable(
                     interactionSource = remember { MutableInteractionSource() },
                     indication = null
-                ) { onPostClick(item.postId) }
+                ) {
+                    if (isVideo) onVideoClick(item.postId, cover)
+                    else onPostClick(item.postId, item.commentId)
+                }
         ) {
-            val cover = item.postImage.removePrefix("video:")
-            if (cover.isNotBlank()) {
+            if (isVideo) {
+                VideoThumb(
+                    videoUrl = cover,
+                    modifier = Modifier.fillMaxSize(),
+                    placeholder = R.drawable.test
+                )
+            } else if (cover.isNotBlank()) {
                 AsyncImage(
                     model = ImageRequest.Builder(LocalContext.current).data(cover).crossfade(true).build(),
                     contentDescription = "帖子封面",

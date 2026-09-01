@@ -25,6 +25,7 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.staggeredgrid.LazyVerticalStaggeredGrid
 import androidx.compose.foundation.lazy.staggeredgrid.StaggeredGridCells
 import androidx.compose.foundation.lazy.staggeredgrid.StaggeredGridItemSpan
@@ -1101,6 +1102,23 @@ private fun ProfileCommentItem(comment: UserComment, onCommentClick: (String, St
             .padding(start = 8.dp)) {
             Text(comment.authorName, fontSize = 14.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
             Text(displayContent, fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.padding(vertical = 2.dp))
+            // 评论图片
+            val imageUrls = comment.imageUrl.split(",").filter { it.isNotBlank() }
+            if (imageUrls.isNotEmpty()) {
+                androidx.compose.foundation.lazy.LazyRow(
+                    modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    items(imageUrls) { url ->
+                        AsyncImage(
+                            model = ImageRequest.Builder(LocalContext.current).data(url).crossfade(true).build(),
+                            contentDescription = null,
+                            modifier = Modifier.size(80.dp).clip(RoundedCornerShape(4.dp)),
+                            contentScale = ContentScale.Crop
+                        )
+                    }
+                }
+            }
             if (comment.isReply && comment.parentUser.isNotBlank()) {
                 Row(
                     Modifier

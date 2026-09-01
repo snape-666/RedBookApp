@@ -164,8 +164,8 @@ fun DetailScreen(
                         initialFavoriteCount = post?.favoriteCount ?: 0,
                         initialIsFavorited = post?.isFavorited ?: false,
                         initialCommentCount = comments?.size ?: 0,
-                        likeEnabled = post?.authorId != userUid,
-                        favoriteEnabled = post?.authorId != userUid,
+                        likeEnabled = true,
+                        favoriteEnabled = true,
                         onCommentInputClick = {
                             viewModel.setKeyboardVisible(true)
                             focusRequester.requestFocus()

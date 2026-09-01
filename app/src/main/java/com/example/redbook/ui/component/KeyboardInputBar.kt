@@ -22,6 +22,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -55,6 +56,11 @@ fun KeyboardInputBar(
     focusRequester: FocusRequester
 ) {
     var isExpanded by remember { mutableStateOf(false) }
+
+    // 输入栏出现时自动聚焦弹出键盘，避免“先弹区域再弹键盘”
+    LaunchedEffect(Unit) {
+        focusRequester.requestFocus()
+    }
 
     Column(
         modifier = modifier

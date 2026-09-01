@@ -156,6 +156,8 @@ fun VideoDetailScreen(
                         followed = repository.isFollowing(userUid, authorUid)
                     }
                 }
+                // 加载云端评论（评论存 comments 表，post_id = videoId）
+                loadVideoComments(repository, videoId, authorUid, cmts)
             } catch (_: Exception) { }
         }
     }
@@ -417,8 +419,14 @@ fun VideoDetailScreen(
                                     val i = cmts.indexOfFirst { it.id == rt.first }
                                     if (i >= 0) cmts[i] = cmts[i].copy(replies = cmts[i].replies + Reply("r${System.currentTimeMillis()}", "me", "我", R.drawable.test, imgs, ct, System.currentTimeMillis(), "未知", 0, false, false, userAvatarUrl))
                                     replyTgt = null
+                                    scope.launch {
+                                        try { repository.insertReply("r${System.currentTimeMillis()}", videoId, rt.first, ct, userUid, "我", userAvatarUrl, userXhsId, title) } catch (_: Exception) { }
+                                    }
                                 } else {
                                     cmts.add(Comment("c${System.currentTimeMillis()}", "me", "我", R.drawable.test, imgs, ct, System.currentTimeMillis(), "未知", 0, false, false, userAvatarUrl))
+                                    scope.launch {
+                                        try { repository.insertComment("c${System.currentTimeMillis()}", videoId, ct, userUid, "我", userAvatarUrl, userXhsId, title) } catch (_: Exception) { }
+                                    }
                                 }
                                 cmtText = ""; selUris.clear()
                             }
@@ -446,6 +454,59 @@ private fun toggleLike(cid: String, cmts: MutableList<Comment>) {
             }
         }
     }
+}
+
+/** 加载云端评论到本地列表 */
+private suspend fun loadVideoComments(
+    repository: SupabaseAuthRepository,
+    postId: String,
+    postAuthorUid: String,
+    cmts: MutableList<Comment>
+) {
+    if (postId.isBlank()) return
+    try {
+        val arr = repository.getComments(postId)
+        val raw = (0 until arr.length()).map { i ->
+            val c = arr.getJSONObject(i)
+            val parentId = c.optString("parent_id", "")
+            parentId to Comment(
+                id = c.optString("comment_id", ""),
+                userId = c.optString("author_uid", ""),
+                userName = c.optString("author_name", ""),
+                avatarRes = R.drawable.test,
+                avatarUrl = c.optString("author_avatar", ""),
+                content = c.optString("content", ""),
+                timestamp = c.optLong("created_at", 0),
+                ipLocation = c.optString("ip_location", "未知"),
+                likeCount = c.optInt("like_count", 0),
+                isLiked = false,
+                isAuthor = c.optString("author_uid") == postAuthorUid,
+                replies = emptyList()
+            )
+        }
+        val replies = raw.filter { it.first.isNotEmpty() }
+        val comments = raw.filter { it.first.isEmpty() }.map { (_, comment) ->
+            comment.copy(
+                replies = replies.filter { it.first == comment.id }.map { (_, r) ->
+                    Reply(
+                        id = r.id,
+                        userId = r.userId,
+                        userName = r.userName,
+                        avatarRes = r.avatarRes,
+                        avatarUrl = r.avatarUrl,
+                        content = r.content,
+                        timestamp = r.timestamp,
+                        ipLocation = r.ipLocation,
+                        likeCount = r.likeCount,
+                        isLiked = r.isLiked,
+                        isAuthor = r.isAuthor
+                    )
+                }
+            )
+        }
+        cmts.clear()
+        cmts.addAll(comments)
+    } catch (_: Exception) { }
 }
 
 @Composable
