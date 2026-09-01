@@ -449,9 +449,10 @@ fun AppScreen(
                     recordBrowse(postId)
                     navigateTo(Screen.Detail)
                 },
-                onVideoClick = { videoId, videoUrl ->
+                onVideoClick = { videoId, videoUrl, commentId ->
                     selectedVideoId = videoId
                     selectedVideoUrl = videoUrl
+                    scrollToCommentId = commentId
                     recordBrowse(videoId)
                     navigateTo(Screen.Video)
                 },
@@ -547,7 +548,8 @@ fun AppScreen(
                 onSendMessage = { peerUid, peerName, peerAvatar ->
                     openChatWith(peerUid, peerName, peerAvatar)
                 },
-                onUserClick = { targetUid -> openUserProfile(targetUid) }
+                onUserClick = { targetUid -> openUserProfile(targetUid) },
+                scrollToCommentId = scrollToCommentId
             )
         }
         Screen.Search -> {

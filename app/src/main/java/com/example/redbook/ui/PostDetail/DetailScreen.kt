@@ -79,7 +79,11 @@ fun DetailScreen(
     onUserClick: (String) -> Unit = {}
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
-    val viewModel: DetailViewModel = viewModel(factory = DetailViewModelFactory(context.applicationContext as android.app.Application, userUid, userXhsId, userName, userAvatarUrl))
+    // 按 userUid 绑定 ViewModel，避免切换账号后复用旧实例
+    val viewModel: DetailViewModel = viewModel(
+        key = "detail_$userUid",
+        factory = DetailViewModelFactory(context.applicationContext as android.app.Application, userUid, userXhsId, userName, userAvatarUrl)
+    )
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val isKeyboardVisible by viewModel.isKeyboardVisible.collectAsState()
     val commentText by viewModel.commentText.collectAsState()
@@ -112,12 +116,18 @@ fun DetailScreen(
     LaunchedEffect(uiState, scrollToCommentId) {
         if (scrollToCommentId.isNotBlank() && uiState is DetailUiState.Success) {
             val comments = (uiState as DetailUiState.Success).comments
-            val idx = comments.indexOfFirst { it.id == scrollToCommentId }
-            if (idx >= 0) {
-                highlightCommentId = scrollToCommentId
-                lazyListState.animateScrollToItem(3 + idx)
-                // 高亮 1.5s 后清除
-                kotlinx.coroutines.delay(1500)
+            // 一级评论直接匹配；二级回复匹配其所属一级评论
+            var targetIdx = comments.indexOfFirst { it.id == scrollToCommentId }
+            if (targetIdx < 0) {
+                targetIdx = comments.indexOfFirst { parent ->
+                    parent.replies.any { it.id == scrollToCommentId }
+                }
+            }
+            if (targetIdx >= 0) {
+                val parentId = comments[targetIdx].id
+                highlightCommentId = parentId
+                lazyListState.animateScrollToItem(3 + targetIdx)
+                kotlinx.coroutines.delay(500)
                 highlightCommentId = ""
             }
             onCommentScrolled()

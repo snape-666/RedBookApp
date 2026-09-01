@@ -118,9 +118,9 @@ fun ProfileScreen(
 ) {
     val context = LocalContext.current
     val isSelf = viewerUid.isBlank() || userUid == viewerUid
-    // 用 key 区分自己主页/对方主页，避免两个页面复用同一个 ProfileViewModel 实例
+    // 用 key 区分自己主页/对方主页，且跟随 userUid，避免切换账号后复用旧实例
     val viewModel: ProfileViewModel = viewModel(
-        key = if (isSelf) "self_profile" else "user_profile_$userUid",
+        key = if (isSelf) "self_profile_$userUid" else "user_profile_$userUid",
         factory = ProfileViewModelFactory(
             context.applicationContext as android.app.Application,
             userUid, userXhsId, if (isSelf) "" else viewerUid
@@ -138,7 +138,7 @@ fun ProfileScreen(
     var showActionSheet by remember { mutableStateOf(false) }
     var showRemarkDialog by remember { mutableStateOf(false) }
 
-    LaunchedEffect(Unit) {
+    LaunchedEffect(userUid) {
         viewModel.refresh()
         if (!isSelf) viewModel.loadUserProfile(userUid)
     }

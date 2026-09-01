@@ -95,7 +95,8 @@ fun VideoDetailScreen(
     onBack: () -> Unit, onFollowClick: (Boolean) -> Unit,
     onLikeClick: (Int) -> Unit, onFavoriteClick: (Int) -> Unit,
     onSendMessage: (String, String, String) -> Unit = { _, _, _ -> },
-    onUserClick: (String) -> Unit = {}
+    onUserClick: (String) -> Unit = {},
+    scrollToCommentId: String = ""
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -123,6 +124,8 @@ fun VideoDetailScreen(
     val focusReq = remember { FocusRequester() }
     val cmts = remember { videoComments.getOrPut(videoUrl) { mutableStateListOf() } }
     var replyTgt by remember { mutableStateOf<Pair<String, String>?>(null) }
+    val cmtListState = androidx.compose.foundation.lazy.rememberLazyListState()
+    var highlightCommentId by remember { mutableStateOf("") }
 
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.GetMultipleContents()) { u ->
         u.forEach { if (it !in selUris) selUris.add(it) }
@@ -158,6 +161,19 @@ fun VideoDetailScreen(
                 }
                 // 加载云端评论（评论存 comments 表，post_id = videoId）
                 loadVideoComments(repository, videoId, authorUid, cmts)
+                // 从通知跳转时定位评论，高亮 0.5s
+                if (scrollToCommentId.isNotBlank()) {
+                    val idx = cmts.indexOfFirst { it.id == scrollToCommentId }
+                        .takeIf { it >= 0 }
+                        ?: cmts.indexOfFirst { parent -> parent.replies.any { it.id == scrollToCommentId } }
+                    if (idx >= 0) {
+                        showCmt = true
+                        highlightCommentId = cmts[idx].id
+                        cmtListState.scrollToItem(idx)
+                        kotlinx.coroutines.delay(500)
+                        highlightCommentId = ""
+                    }
+                }
             } catch (_: Exception) { }
         }
     }
@@ -353,7 +369,7 @@ fun VideoDetailScreen(
                             Spacer(Modifier.weight(1f))
                             Text("×", fontSize = 18.sp, color = Color.Gray, modifier = Modifier.clickable { showCmt = false }.padding(4.dp))
                         }
-                        LazyColumn(Modifier.weight(1f).pointerInput(Unit) {
+                        LazyColumn(state = cmtListState, modifier = Modifier.weight(1f).pointerInput(Unit) {
                             detectTapGestures {
                                 kbVisible = false
                                 cmtText = ""
@@ -366,7 +382,8 @@ fun VideoDetailScreen(
                                     onReplyClick = { cid, name -> replyTgt = cid to name; cmtText = "回复 @$name："; kbVisible = true },
                                     onLikeClick = { cid -> toggleLike(cid, cmts) },
                                     onAvatarClick = { uid -> if (uid.isNotBlank() && uid != "me") onUserClick(uid) },
-                                    onUserNameClick = { uid -> if (uid.isNotBlank() && uid != "me") onUserClick(uid) })
+                                    onUserNameClick = { uid -> if (uid.isNotBlank() && uid != "me") onUserClick(uid) },
+                                    highlight = c.id == highlightCommentId)
                             }
                         }
                         Row(Modifier.fillMaxWidth().padding(8.dp), verticalAlignment = Alignment.CenterVertically) {

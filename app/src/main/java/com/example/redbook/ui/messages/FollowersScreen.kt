@@ -53,7 +53,10 @@ fun FollowersScreen(
     onUserClick: (String) -> Unit = {}
 ) {
     val context = LocalContext.current
-    val viewModel: FollowersViewModel = viewModel(factory = FollowersViewModelFactory(context.applicationContext as android.app.Application, userUid))
+    val viewModel: FollowersViewModel = viewModel(
+        key = "followers_$userUid",
+        factory = FollowersViewModelFactory(context.applicationContext as android.app.Application, userUid)
+    )
     val followers by viewModel.followers.collectAsStateWithLifecycle()
     val loading by viewModel.loading.collectAsStateWithLifecycle()
 

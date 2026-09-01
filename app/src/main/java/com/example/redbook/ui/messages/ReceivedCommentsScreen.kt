@@ -52,7 +52,7 @@ fun ReceivedCommentsScreen(
     userUid: String = "",
     onBack: () -> Unit = {},
     onPostClick: (String, String) -> Unit = { _, _ -> },
-    onVideoClick: (String, String) -> Unit = { _, _ -> },
+    onVideoClick: (String, String, String) -> Unit = { _, _, _ -> },
     onUserClick: (String) -> Unit = {}
 ) {
     val context = LocalContext.current
@@ -150,7 +150,7 @@ fun ReceivedCommentsScreen(
 private fun CommentRow(
     item: NotificationItem,
     onPostClick: (String, String) -> Unit,
-    onVideoClick: (String, String) -> Unit,
+    onVideoClick: (String, String, String) -> Unit,
     onUserClick: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
@@ -159,11 +159,8 @@ private fun CommentRow(
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .clickable(
-                interactionSource = remember { MutableInteractionSource() },
-                indication = null
-            ) {
-                if (isVideo) onVideoClick(item.postId, cover)
+            .clickable {
+                if (isVideo) onVideoClick(item.postId, cover, if (item.deleted) "" else item.commentId)
                 else onPostClick(item.postId, if (item.deleted) "" else item.commentId)
             }
             .padding(horizontal = 10.dp, vertical = 8.dp),

@@ -60,7 +60,7 @@ fun CommentItem(
 
     Column(modifier = modifier.fillMaxWidth()
         .background(
-            if (highlight) MaterialTheme.colorScheme.primary.copy(alpha = 0.08f)
+            if (highlight) MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f)
             else androidx.compose.ui.graphics.Color.Transparent
         )
         .padding(horizontal = 16.dp, vertical = 8.dp)

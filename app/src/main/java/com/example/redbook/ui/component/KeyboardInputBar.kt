@@ -68,14 +68,12 @@ fun KeyboardInputBar(
     val replyPrefixRegex = Regex("^回复\\s*(@\\S+|[^\\s：]+)\\s*[：:]")
     val prefixEnd = replyPrefixRegex.find(text)?.range?.last?.plus(1) ?: -1
 
-    // 用 TextFieldValue 控制光标：回复模式下光标固定在前缀末尾，前缀内点击无效
+    // 用 TextFieldValue 控制光标：回复模式下光标始终在文本末尾，且前缀内点击无效
     var textFieldValue by remember(text) {
-        mutableStateOf(TextFieldValue(text, TextRange(if (prefixEnd >= 0) prefixEnd else text.length)))
+        mutableStateOf(TextFieldValue(text, TextRange(text.length)))
     }
     LaunchedEffect(text) {
-        val newPrefixEnd = replyPrefixRegex.find(text)?.range?.last?.plus(1) ?: -1
-        val cursor = if (newPrefixEnd >= 0) newPrefixEnd else text.length
-        textFieldValue = TextFieldValue(text, TextRange(cursor))
+        textFieldValue = TextFieldValue(text, TextRange(text.length))
     }
 
     Column(
@@ -97,21 +95,21 @@ fun KeyboardInputBar(
                 value = textFieldValue,
                 onValueChange = { newValue ->
                     val newText = newValue.text
-                    val newPrefixEnd = replyPrefixRegex.find(newText)?.range?.last?.plus(1) ?: -1
-                    // 回复模式下：禁止删除前缀，且光标不允许落在前缀范围内
-                    if (newPrefixEnd >= 0 && prefixEnd >= 0) {
+                    // 回复模式下：禁止删除前缀，且光标始终保持在文本末尾
+                    if (prefixEnd >= 0) {
                         if (!newText.startsWith(text.take(prefixEnd))) {
                             // 前缀被破坏，忽略输入
                             return@TextField
                         }
-                        val safeCursor = newValue.selection.start.coerceAtLeast(newPrefixEnd)
-                        val safeEnd = newValue.selection.end.coerceAtLeast(newPrefixEnd)
                         textFieldValue = newValue.copy(
                             text = newText,
-                            selection = TextRange(safeCursor, safeEnd)
+                            selection = TextRange(newText.length)
                         )
                     } else {
-                        textFieldValue = newValue
+                        textFieldValue = newValue.copy(
+                            text = newText,
+                            selection = TextRange(newText.length)
+                        )
                     }
                     onTextChange(newValue.text)
                 },

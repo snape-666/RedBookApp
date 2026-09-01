@@ -159,10 +159,7 @@ private fun ReactionRow(
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .clickable(
-                interactionSource = remember { MutableInteractionSource() },
-                indication = null
-            ) {
+            .clickable {
                 if (isVideo) onVideoClick(item.postId, cover)
                 else onPostClick(item.postId)
             }
