@@ -213,20 +213,12 @@ fun VideoDetailScreen(
                 }
                 // 暂停图标
                 if (paused) {
-                    Box(
-                        Modifier
-                            .size(64.dp)
-                            .clip(CircleShape)
-                            .background(Color.Black.copy(alpha = 0.5f)),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            painter = painterResource(R.drawable.video_fill),
-                            contentDescription = "暂停",
-                            modifier = Modifier.size(40.dp),
-                            tint = Color.White
-                        )
-                    }
+                    Icon(
+                        painter = painterResource(R.drawable.video_fill),
+                        contentDescription = "暂停",
+                        modifier = Modifier.size(64.dp),
+                        tint = Color.White
+                    )
                 }
                 // 底部信息（叠在视频上，背景透明，不影响视频展示）
                 Column(
@@ -272,20 +264,6 @@ fun VideoDetailScreen(
                     }
                     // 标题
                     Text(title, color = Color.White, fontSize = 14.sp, modifier = Modifier.padding(vertical = 6.dp))
-                    // 正文
-                    if (content.isNotBlank()) {
-                        Text(content, color = Color.White.copy(alpha = 0.85f), fontSize = 13.sp, modifier = Modifier.padding(bottom = 4.dp))
-                    }
-                    // 时间·IP·浏览量
-                    Row(Modifier.fillMaxWidth()) {
-                        if (publishTime > 0) {
-                            Text(text = SimpleDateFormat("yyyy-MM-dd HH:mm", LocalLocale.current.platformLocale).format(publishTime),
-                                fontSize = 11.sp, color = Color.White.copy(alpha = 0.6f))
-                        }
-                        Text(text = " · ${ipLocation}", fontSize = 11.sp, color = Color.White.copy(alpha = 0.6f))
-                        Spacer(Modifier.weight(1f))
-                        Text(text = "${viewCount}次浏览", fontSize = 11.sp, color = Color.White.copy(alpha = 0.6f))
-                    }
                 }
             }
 
@@ -299,21 +277,21 @@ fun VideoDetailScreen(
                     Spacer(Modifier.height(8.dp))
                 }
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    // 左边：评论区输入框（getOutline，16dp 圆角）
+                    // 左边：评论区输入框（适配黑底的深色半透明，小红书风格）
                     Box(
                         Modifier
                             .weight(1f)
-                            .height(40.dp)
+                            .height(36.dp)
                             .clip(RoundedCornerShape(16.dp))
-                            .background(getOutline())
+                            .background(Color.White.copy(alpha = 0.12f))
                             .clickable { kbVisible = true }
                             .padding(horizontal = 12.dp),
                         contentAlignment = Alignment.CenterStart
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(painterResource(R.drawable.edit_grey), null, Modifier.size(20.dp), tint = Color.White.copy(alpha = 0.7f))
+                            Icon(painterResource(R.drawable.edit_grey), null, Modifier.size(20.dp), tint = Color(0xFF9A9A9A))
                             Spacer(Modifier.width(5.dp))
-                            Text("说点什么...", fontSize = 14.sp, color = Color.White.copy(alpha = 0.7f))
+                            Text("说点什么...", fontSize = 14.sp, color = Color(0xFF9A9A9A))
                         }
                     }
                     Spacer(Modifier.width(12.dp))

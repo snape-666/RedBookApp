@@ -516,14 +516,9 @@ fun AppScreen(
         Screen.VideoFeed -> {
             VideoFeedScreen(
                 userUid = userUid,
+                userAvatarUrl = userAvatarUrl,
                 onBack = { goBack() },
-                onUserClick = { targetUid -> openUserProfile(targetUid) },
-                onVideoClick = { videoId, videoUrl ->
-                    selectedVideoId = videoId
-                    selectedVideoUrl = videoUrl
-                    recordBrowse(videoId)
-                    navigateTo(Screen.Video)
-                }
+                onUserClick = { targetUid -> openUserProfile(targetUid) }
             )
         }
         Screen.Video -> {

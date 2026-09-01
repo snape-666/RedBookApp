@@ -31,6 +31,19 @@ class HomeViewModel(application: Application, private val userUid: String = "") 
         }
     }
 
+    /** 关注页：只加载我关注的人发布的帖子 */
+    fun fetchFollowingNotes() {
+        viewModelScope.launch {
+            _uiState.value = HomeUiState.Loading
+            try {
+                val notes = repository.getFollowingNotes(userUid)
+                _uiState.value = HomeUiState.Success(notes)
+            } catch (e: Exception) {
+                _uiState.value = HomeUiState.Error(e.message ?: "加载失败")
+            }
+        }
+    }
+
     fun toggleLike(noteId: String) {
         val currentState = _uiState.value
         if (currentState is HomeUiState.Success) {

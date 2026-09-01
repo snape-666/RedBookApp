@@ -71,7 +71,8 @@ fun HomeScreen(
             selectedIndex = selectedTabIndex,
             onTabClick = { index ->
                 selectedTabIndex = index
-
+                if (index == 0) viewModel.fetchFollowingNotes()
+                else viewModel.fetchNotes()
             },
             onActionClick = onNavigateToSearch,
             actionIconRes = R.drawable.search

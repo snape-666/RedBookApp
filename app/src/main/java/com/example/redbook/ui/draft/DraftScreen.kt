@@ -80,7 +80,7 @@ fun DraftScreen(
         Column(Modifier.fillMaxSize()) {
             Box(Modifier
                 .fillMaxWidth()
-                .background(MaterialTheme.colorScheme.onPrimary)
+                .background(MaterialTheme.colorScheme.surface)
                 .padding(top = 36.dp, bottom = 8.dp)) {
                 Icon(
                     painter = painterResource(R.drawable.arrow_left),

@@ -9,5 +9,6 @@ data class Note(
     val avatarUrl: String = "",
     val userName: String = "",
     val likeCount: Int = 0,
-    val isLiked: Boolean = false
+    val isLiked: Boolean = false,
+    val authorUid: String = ""
 )

@@ -20,6 +20,19 @@ class HomeRepository(val supabase: SupabaseAuthRepository) {
         }
     }
 
+    /** 只返回我关注的人发布的帖子 */
+    suspend fun getFollowingNotes(userUid: String): List<Note> {
+        if (userUid.isBlank()) return emptyList()
+        return try {
+            val followingUids = supabase.getFollowingUids(userUid)
+            val posts = supabase.getPosts()
+            val likedIds = try { supabase.getLikedPostIds(userUid) } catch (e: Exception) { emptySet() }
+            parsePosts(posts, likedIds).filter { it.authorUid in followingUids }
+        } catch (e: Exception) {
+            emptyList()
+        }
+    }
+
     private fun parsePosts(posts: JSONArray, likedIds: Set<String> = emptySet()): List<Note> {
         return (0 until posts.length()).map { i ->
             val p = posts.getJSONObject(i)
@@ -33,7 +46,8 @@ class HomeRepository(val supabase: SupabaseAuthRepository) {
                 avatarUrl = p.optString("author_avatar", ""),
                 userName = p.optString("author_name", ""),
                 likeCount = p.optInt("like_count", 0),
-                isLiked = likedIds.contains(postId)
+                isLiked = likedIds.contains(postId),
+                authorUid = p.optString("author_uid", "")
             )
         }
     }
