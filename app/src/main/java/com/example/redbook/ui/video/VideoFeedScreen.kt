@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.pager.VerticalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
@@ -55,6 +56,7 @@ import com.example.redbook.R
 import com.example.redbook.data.model.Comment
 import com.example.redbook.data.repository.SupabaseAuthRepository
 import com.example.redbook.ui.theme.getOnSurfaceSecondary
+import com.example.redbook.ui.theme.getOutline
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -109,24 +111,6 @@ fun VideoFeedScreen(
     }
 
     Box(Modifier.fillMaxSize().background(Color.Black)) {
-        // 顶部返回 bar
-        Row(
-            Modifier
-                .align(Alignment.TopStart)
-                .fillMaxWidth()
-                .background(Color.Black.copy(alpha = 0.3f))
-                .padding(top = 24.dp, start = 12.dp, bottom = 8.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Icon(
-                painter = painterResource(R.drawable.arrow_left),
-                contentDescription = "返回",
-                modifier = Modifier.size(28.dp).clickable { onBack() },
-                tint = Color.White
-            )
-            Spacer(Modifier.width(8.dp))
-            Text("视频", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
-        }
         if (loading) {
             CircularProgressIndicator(color = Color.White, modifier = Modifier.align(Alignment.Center))
         } else if (videos.isEmpty()) {
@@ -153,6 +137,21 @@ fun VideoFeedScreen(
                     onVideoClick = { onVideoClick(video.videoId, video.videoUrl) }
                 )
             }
+        }
+        // 顶部返回 bar（最顶层，每个视频页都显示，透明背景，不被视频覆盖）
+        Row(
+            Modifier
+                .align(Alignment.TopStart)
+                .fillMaxWidth()
+                .padding(top = 24.dp, start = 12.dp, bottom = 8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                painter = painterResource(R.drawable.arrow_left),
+                contentDescription = "返回",
+                modifier = Modifier.size(28.dp).clickable { onBack() },
+                tint = Color.White
+            )
         }
     }
 }
@@ -249,7 +248,7 @@ private fun FeedVideoPage(
                 setOnCompletionListener { android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({ start() }, 1000) }
                 setOnErrorListener { _, _, _ -> false }
                 if (isActive) start()
-            }}, Modifier.fillMaxWidth().fillMaxSize())
+            }}, Modifier.fillMaxWidth().wrapContentHeight())
             if (durMs == 0 && !paused) {
                 CircularProgressIndicator(color = Color.White)
             }

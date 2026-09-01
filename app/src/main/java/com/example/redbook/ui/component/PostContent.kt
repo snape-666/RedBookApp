@@ -1,4 +1,4 @@
-package com.example.redbook.ui.detail.components
+package com.example.redbook.ui.component
 
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -8,13 +8,13 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -38,6 +38,7 @@ import coil.request.ImageRequest
 import com.example.redbook.data.model.PostDetail
 import java.text.SimpleDateFormat
 import androidx.compose.ui.platform.LocalLocale
+import com.example.redbook.R
 
 @Composable
 fun PostContent(
@@ -58,8 +59,8 @@ fun PostContent(
                     .background(MaterialTheme.colorScheme.surfaceVariant),
                 contentAlignment = Alignment.Center
             ) {
-                androidx.compose.material3.Icon(
-                    painter = androidx.compose.ui.res.painterResource(com.example.redbook.R.drawable.video_fill),
+                Icon(
+                    painter = painterResource(R.drawable.video_fill),
                     contentDescription = "视频",
                     modifier = Modifier.size(48.dp),
                     tint = MaterialTheme.colorScheme.primary
@@ -133,7 +134,7 @@ private fun AdaptiveImage(
     var failed by remember(url) { mutableStateOf(false) }
     if (failed || url.isBlank() || url.startsWith("video:")) {
         Image(
-            painter = painterResource(com.example.redbook.R.drawable.test),
+            painter = painterResource(R.drawable.test),
             contentDescription = null,
             modifier = Modifier.fillMaxWidth().aspectRatio(ratio),
             contentScale = ContentScale.Crop

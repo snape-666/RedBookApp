@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -28,6 +29,7 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
@@ -55,6 +57,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.compose.ui.platform.LocalLocale
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -71,8 +74,10 @@ import com.example.redbook.data.repository.SupabaseAuthRepository
 import com.example.redbook.ui.component.CommentItem
 import com.example.redbook.ui.component.KeyboardInputBar
 import com.example.redbook.ui.theme.getOnSurfaceSecondary
+import com.example.redbook.ui.theme.getOutline
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import java.text.SimpleDateFormat
 
 private val videoComments = mutableMapOf<String, MutableList<Comment>>()
 
@@ -107,6 +112,10 @@ fun VideoDetailScreen(
     var faved by remember { mutableStateOf(false) }
     var likeCnt by remember { mutableIntStateOf(likeCount) }
     var favCnt by remember { mutableIntStateOf(favoriteCount) }
+    var content by remember { mutableStateOf("") }
+    var publishTime by remember { mutableStateOf(0L) }
+    var ipLocation by remember { mutableStateOf("未知") }
+    var viewCount by remember { mutableIntStateOf(0) }
     var showCmt by remember { mutableStateOf(false) }
     var cmtText by remember { mutableStateOf("") }
     var kbVisible by remember { mutableStateOf(false) }
@@ -139,6 +148,10 @@ fun VideoDetailScreen(
                     authorUid = p.optString("author_uid", "")
                     realAuthorName = p.optString("author_name", "").ifBlank { realAuthorName }
                     realAuthorAvatar = p.optString("author_avatar", "").ifBlank { realAuthorAvatar }
+                    content = p.optString("content", "")
+                    publishTime = p.optLong("created_at", 0)
+                    ipLocation = p.optString("ip_location", "未知")
+                    viewCount = p.optInt("view_count", 0)
                     if (authorUid.isNotBlank()) {
                         followed = repository.isFollowing(userUid, authorUid)
                     }
@@ -172,16 +185,12 @@ fun VideoDetailScreen(
     val prog = if (durMs > 0) curMs.coerceAtMost(durMs).toFloat() / durMs else 0f
     val left = ((durMs - curMs.coerceAtMost(durMs)) / 1000).coerceAtLeast(0)
 
-    // 主容器
-    Box(Modifier.fillMaxSize().background(Color.Black)) {
+    // 主容器：父容器全屏背景 onSurface
+    Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.onSurface)) {
 
-        // 视频+信息+底部栏
-        Column(Modifier.fillMaxSize().padding(top = 36.dp)) {
-            // 返回按钮
-            Row(Modifier.fillMaxWidth().padding(start = 12.dp, bottom = 8.dp)) {
-                Icon(painterResource(R.drawable.arrow_left), null, Modifier.size(28.dp).clickable { onBack() }, tint = getOnSurfaceSecondary())
-            }
-            // 视频
+        // 视频区域（进度条上方）+ 底部 bar
+        Column(Modifier.fillMaxSize()) {
+            // 视频区域：视频在最底层，撑满；横屏宽撑满高自适应居中，竖屏填满
             Box(
                 Modifier
                     .fillMaxWidth()
@@ -198,7 +207,7 @@ fun VideoDetailScreen(
                     setOnPreparedListener { mp -> durMs = mp.duration; mp.isLooping = false }
                     setOnCompletionListener { android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({ start() }, 1000) }
                     setOnErrorListener { _, _, _ -> false }; start()
-                }}, Modifier.fillMaxWidth())
+                }}, Modifier.fillMaxWidth().wrapContentHeight())
                 if (durMs == 0 && !paused) {
                     CircularProgressIndicator(color = Color.White)
                 }
@@ -219,90 +228,138 @@ fun VideoDetailScreen(
                         )
                     }
                 }
-            }
-            // 作者
-            Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                if (realAuthorAvatar.isNotBlank()) {
-                    AsyncImage(
-                        model = ImageRequest.Builder(LocalContext.current).data(realAuthorAvatar).crossfade(true).build(),
-                        contentDescription = null,
-                        modifier = Modifier.size(32.dp).clip(CircleShape).clickable { if (authorUid.isNotBlank()) onUserClick(authorUid) },
-                        contentScale = ContentScale.Crop
-                    )
-                } else {
-                    Image(painterResource(authorAvatar), null, Modifier.size(32.dp).clip(CircleShape).clickable { if (authorUid.isNotBlank()) onUserClick(authorUid) }, contentScale = ContentScale.Crop)
-                }
-                Spacer(Modifier.width(5.dp))
-                Text(realAuthorName, color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Medium, modifier = Modifier.clickable { if (authorUid.isNotBlank()) onUserClick(authorUid) })
-                Spacer(Modifier.width(5.dp))
-                if (authorUid != userUid) {
-                    if (followed) {
-                        Box(Modifier.border(1.dp, MaterialTheme.colorScheme.onPrimary, RoundedCornerShape(12.dp)).padding(horizontal = 10.dp, vertical = 2.dp).clickable {
-                            followed = false
-                            onFollowClick(false)
-                            if (authorUid.isNotBlank()) scope.launch { try { repository.follow(userUid, authorUid, false) } catch (_: Exception) { } }
-                        }) {
-                            Text("已关注", fontSize = 12.sp, color = MaterialTheme.colorScheme.onPrimary) }
-                    } else {
-                        Box(Modifier.clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.primary).clickable {
-                            followed = true
-                            onFollowClick(true)
-                            if (authorUid.isNotBlank()) scope.launch { try { repository.follow(userUid, authorUid, true) } catch (_: Exception) { } }
-                        }.padding(horizontal = 10.dp, vertical = 2.dp)) {
-                            Text("关注", fontSize = 12.sp, color = MaterialTheme.colorScheme.onPrimary) }
-                    }
-                }
-                Spacer(Modifier.weight(1f))
-                if (durMs > 0) Text("${left / 60}:${String.format("%02d", left % 60)}", color = Color.White.copy(alpha = 0.7f), fontSize = 12.sp)
-            }
-            // 标题
-            Text(title, color = Color.White, fontSize = 14.sp, modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp), maxLines = 1)
-            // 进度条
-            if (durMs > 0) {
-                Box(Modifier.fillMaxWidth().height(2.dp).background(Color.White.copy(alpha = 0.3f))) {
-                    Box(Modifier.fillMaxWidth(prog).height(2.dp).background(Color.White))
-                }
-            }
-            // 底部互动栏
-            Row(Modifier.fillMaxWidth().background(Color.Black).padding(horizontal = 12.dp, vertical = 8.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                Box(Modifier.weight(1f).height(36.dp).clip(RoundedCornerShape(18.dp)).background(Color.White.copy(alpha = 0.1f)).clickable { showCmt = true }.padding(horizontal = 15.dp), Alignment.CenterStart) {
+                // 底部信息（叠在视频上，背景透明，不影响视频展示）
+                Column(
+                    Modifier
+                        .align(Alignment.BottomStart)
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 8.dp)
+                ) {
+                    // 作者
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(painterResource(R.drawable.edit_grey), null, Modifier.size(20.dp), tint = Color.White.copy(alpha = 0.5f))
-                        Spacer(Modifier.width(6.dp)); Text("说点什么...", fontSize = 14.sp, color = Color.White.copy(alpha = 0.5f))
-                    }
-                }
-                Spacer(Modifier.width(36.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    ActIcon(if (liked) R.drawable.favorite_fill else R.drawable.favorite_light, likeCnt, if (liked) Color.Unspecified else Color.White) {
-                        liked = !liked
-                        likeCnt = (likeCnt + if (liked) 1 else -1).coerceAtLeast(0)
-                        onLikeClick(likeCnt)
-                        if (videoId.isNotBlank()) {
-                            scope.launch {
-                                try {
-                                    repository.recordLike(userUid, videoId, liked)
-                                    repository.updatePostLike(videoId, if (liked) 1 else -1)
-                                } catch (_: Exception) { }
+                        if (realAuthorAvatar.isNotBlank()) {
+                            AsyncImage(
+                                model = ImageRequest.Builder(LocalContext.current).data(realAuthorAvatar).crossfade(true).build(),
+                                contentDescription = null,
+                                modifier = Modifier.size(32.dp).clip(CircleShape).clickable { if (authorUid.isNotBlank()) onUserClick(authorUid) },
+                                contentScale = ContentScale.Crop
+                            )
+                        } else {
+                            Image(painterResource(authorAvatar), null, Modifier.size(32.dp).clip(CircleShape).clickable { if (authorUid.isNotBlank()) onUserClick(authorUid) }, contentScale = ContentScale.Crop)
+                        }
+                        Spacer(Modifier.width(5.dp))
+                        Text(realAuthorName, color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Medium, modifier = Modifier.clickable { if (authorUid.isNotBlank()) onUserClick(authorUid) })
+                        Spacer(Modifier.width(5.dp))
+                        if (authorUid != userUid) {
+                            if (followed) {
+                                Box(Modifier.border(1.dp, MaterialTheme.colorScheme.onPrimary, RoundedCornerShape(12.dp)).padding(horizontal = 10.dp, vertical = 2.dp).clickable {
+                                    followed = false
+                                    onFollowClick(false)
+                                    if (authorUid.isNotBlank()) scope.launch { try { repository.follow(userUid, authorUid, false) } catch (_: Exception) { } }
+                                }) {
+                                    Text("已关注", fontSize = 12.sp, color = MaterialTheme.colorScheme.onPrimary) }
+                            } else {
+                                Box(Modifier.clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.primary).clickable {
+                                    followed = true
+                                    onFollowClick(true)
+                                    if (authorUid.isNotBlank()) scope.launch { try { repository.follow(userUid, authorUid, true) } catch (_: Exception) { } }
+                                }.padding(horizontal = 10.dp, vertical = 2.dp)) {
+                                    Text("关注", fontSize = 12.sp, color = MaterialTheme.colorScheme.onPrimary) }
                             }
                         }
+                        Spacer(Modifier.weight(1f))
+                        if (durMs > 0) Text("${left / 60}:${String.format("%02d", left % 60)}", color = Color.White.copy(alpha = 0.7f), fontSize = 12.sp)
                     }
-                    ActIcon(if (faved) R.drawable.star_fill else R.drawable.star, favCnt, if (faved) Color.Unspecified else Color.White) {
-                        faved = !faved
-                        favCnt = (favCnt + if (faved) 1 else -1).coerceAtLeast(0)
-                        onFavoriteClick(favCnt)
-                        if (videoId.isNotBlank()) {
-                            scope.launch {
-                                try {
-                                    repository.recordFavorite(userUid, videoId, faved)
-                                    repository.updatePostFav(videoId, if (faved) 1 else -1)
-                                } catch (_: Exception) { }
-                            }
+                    // 标题
+                    Text(title, color = Color.White, fontSize = 14.sp, modifier = Modifier.padding(vertical = 6.dp))
+                    // 正文
+                    if (content.isNotBlank()) {
+                        Text(content, color = Color.White.copy(alpha = 0.85f), fontSize = 13.sp, modifier = Modifier.padding(bottom = 4.dp))
+                    }
+                    // 时间·IP·浏览量
+                    Row(Modifier.fillMaxWidth()) {
+                        if (publishTime > 0) {
+                            Text(text = SimpleDateFormat("yyyy-MM-dd HH:mm", LocalLocale.current.platformLocale).format(publishTime),
+                                fontSize = 11.sp, color = Color.White.copy(alpha = 0.6f))
                         }
+                        Text(text = " · ${ipLocation}", fontSize = 11.sp, color = Color.White.copy(alpha = 0.6f))
+                        Spacer(Modifier.weight(1f))
+                        Text(text = "${viewCount}次浏览", fontSize = 11.sp, color = Color.White.copy(alpha = 0.6f))
                     }
-                    ActIcon(R.drawable.chat, cmts.size) { showCmt = true }
                 }
             }
-            Spacer(Modifier.height(16.dp))
+
+            // 底部 bar（单独区域，背景透明，距底 16dp）：进度条 + 输入框 + 点赞收藏评论
+            Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp).padding(bottom = 16.dp)) {
+                // 进度条
+                if (durMs > 0) {
+                    Box(Modifier.fillMaxWidth().height(2.dp).background(Color.White.copy(alpha = 0.3f))) {
+                        Box(Modifier.fillMaxWidth(prog).height(2.dp).background(Color.White))
+                    }
+                    Spacer(Modifier.height(8.dp))
+                }
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    // 左边：评论区输入框（getOutline，16dp 圆角）
+                    Box(
+                        Modifier
+                            .weight(1f)
+                            .height(40.dp)
+                            .clip(RoundedCornerShape(16.dp))
+                            .background(getOutline())
+                            .clickable { kbVisible = true }
+                            .padding(horizontal = 12.dp),
+                        contentAlignment = Alignment.CenterStart
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(painterResource(R.drawable.edit_grey), null, Modifier.size(20.dp), tint = Color.White.copy(alpha = 0.7f))
+                            Spacer(Modifier.width(5.dp))
+                            Text("说点什么...", fontSize = 14.sp, color = Color.White.copy(alpha = 0.7f))
+                        }
+                    }
+                    Spacer(Modifier.width(12.dp))
+                    // 右边：点赞收藏评论，均匀分布
+                    Row(Modifier.weight(1f), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.CenterVertically) {
+                        ActIcon(if (liked) R.drawable.favorite_fill else R.drawable.favorite_light, likeCnt, if (liked) Color.Unspecified else Color.White) {
+                            liked = !liked
+                            likeCnt = (likeCnt + if (liked) 1 else -1).coerceAtLeast(0)
+                            onLikeClick(likeCnt)
+                            if (videoId.isNotBlank()) {
+                                scope.launch {
+                                    try {
+                                        repository.recordLike(userUid, videoId, liked)
+                                        repository.updatePostLike(videoId, if (liked) 1 else -1)
+                                    } catch (_: Exception) { }
+                                }
+                            }
+                        }
+                        ActIcon(if (faved) R.drawable.star_fill else R.drawable.star, favCnt, if (faved) Color.Unspecified else Color.White) {
+                            faved = !faved
+                            favCnt = (favCnt + if (faved) 1 else -1).coerceAtLeast(0)
+                            onFavoriteClick(favCnt)
+                            if (videoId.isNotBlank()) {
+                                scope.launch {
+                                    try {
+                                        repository.recordFavorite(userUid, videoId, faved)
+                                        repository.updatePostFav(videoId, if (faved) 1 else -1)
+                                    } catch (_: Exception) { }
+                                }
+                            }
+                        }
+                        ActIcon(R.drawable.chat, cmts.size) { showCmt = true }
+                    }
+                }
+            }
+        }
+
+        // 顶部返回栏（最顶层，透明背景，始终可见，不被视频覆盖）
+        Row(
+            Modifier
+                .align(Alignment.TopStart)
+                .fillMaxWidth()
+                .padding(top = 36.dp, start = 12.dp, bottom = 8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(painterResource(R.drawable.arrow_left), null, Modifier.size(28.dp).clickable { onBack() }, tint = Color.White)
         }
 
         // 评论区浮层
@@ -353,35 +410,47 @@ fun VideoDetailScreen(
             }
         }
 
-        // 键盘输入
+        // 键盘输入（遮罩 + KeyboardInputBar 同时弹出）
         if (kbVisible) {
-            Box(Modifier.fillMaxSize(), Alignment.BottomCenter) {
-            KeyboardInputBar(
-                text = cmtText, onTextChange = { cmtText = it },
-                selectedImages = selUris.toList(), onAddImageClick = { picker.launch("image/*") },
-                onRemoveImage = { selUris.remove(it) },
-                onSend = { t, imgs ->
-                    val hasContent = t.isNotBlank() || imgs.isNotEmpty()
-                    if (hasContent) {
-                        val ct = t.replace(Regex("^回复 @\\S+："), "").trim()
-                        if (ct.isNotBlank() || imgs.isNotEmpty()) {
-                            val rt = replyTgt
-                            if (rt != null) {
-                                val i = cmts.indexOfFirst { it.id == rt.first }
-                                if (i >= 0) cmts[i] = cmts[i].copy(replies = cmts[i].replies + Reply("r${System.currentTimeMillis()}", "me", "我", R.drawable.test, imgs, ct, System.currentTimeMillis(), "未知", 0, false, false, userAvatarUrl))
-                                replyTgt = null
-                            } else {
-                                cmts.add(Comment("c${System.currentTimeMillis()}", "me", "我", R.drawable.test, imgs, ct, System.currentTimeMillis(), "未知", 0, false, false, userAvatarUrl))
-                            }
-                            cmtText = ""; selUris.clear()
-                        }
+            // 遮罩层：点击空白收起键盘
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .background(Color.Black.copy(alpha = 0.4f))
+                    .clickable {
+                        kbVisible = false
+                        cmtText = ""
+                        selUris.clear()
+                        replyTgt = null
                     }
-                    kbVisible = false
-                },
-                onClose = { kbVisible = false; cmtText = ""; selUris.clear(); replyTgt = null },
-                focusRequester = focusReq,
-                modifier = Modifier.fillMaxWidth().imePadding().navigationBarsPadding()
             )
+            Box(Modifier.fillMaxSize(), Alignment.BottomCenter) {
+                KeyboardInputBar(
+                    text = cmtText, onTextChange = { cmtText = it },
+                    selectedImages = selUris.toList(), onAddImageClick = { picker.launch("image/*") },
+                    onRemoveImage = { selUris.remove(it) },
+                    onSend = { t, imgs ->
+                        val hasContent = t.isNotBlank() || imgs.isNotEmpty()
+                        if (hasContent) {
+                            val ct = t.replace(Regex("^回复 @\\S+："), "").trim()
+                            if (ct.isNotBlank() || imgs.isNotEmpty()) {
+                                val rt = replyTgt
+                                if (rt != null) {
+                                    val i = cmts.indexOfFirst { it.id == rt.first }
+                                    if (i >= 0) cmts[i] = cmts[i].copy(replies = cmts[i].replies + Reply("r${System.currentTimeMillis()}", "me", "我", R.drawable.test, imgs, ct, System.currentTimeMillis(), "未知", 0, false, false, userAvatarUrl))
+                                    replyTgt = null
+                                } else {
+                                    cmts.add(Comment("c${System.currentTimeMillis()}", "me", "我", R.drawable.test, imgs, ct, System.currentTimeMillis(), "未知", 0, false, false, userAvatarUrl))
+                                }
+                                cmtText = ""; selUris.clear()
+                            }
+                        }
+                        kbVisible = false
+                    },
+                    onClose = { kbVisible = false; cmtText = ""; selUris.clear(); replyTgt = null },
+                    focusRequester = focusReq,
+                    modifier = Modifier.fillMaxWidth().imePadding().navigationBarsPadding()
+                )
             }
         }
     }

@@ -44,7 +44,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.painterResource
@@ -60,7 +59,7 @@ import com.example.redbook.ui.component.NoteCardBar
 import com.example.redbook.ui.component.NoteCardBottomBar
 import com.example.redbook.ui.component.CommentInputArea
 import com.example.redbook.ui.component.CommentItem
-import com.example.redbook.ui.detail.components.PostContent
+import com.example.redbook.ui.component.PostContent
 import com.example.redbook.ui.theme.getOnSurfaceSecondary
 import com.example.redbook.ui.theme.getOutline
 import kotlinx.coroutines.launch
