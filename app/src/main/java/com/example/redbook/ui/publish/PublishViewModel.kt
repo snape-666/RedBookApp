@@ -57,12 +57,33 @@ class PublishViewModel(
         val current = _uiState.value.images
         val available = 11 - current.size
         if (available > 0) {
-            _uiState.value = _uiState.value.copy(images = current + uris.take(available))
+            // 去重：同一 uri 只保留一张（避免重复选择与 LazyRow key 冲突）
+            val newUris = uris.filter { it !in current }.take(available)
+            _uiState.value = _uiState.value.copy(images = current + newUris)
         }
     }
 
     fun removeImage(uri: Uri) {
         _uiState.value = _uiState.value.copy(images = _uiState.value.images.filter { it != uri })
+    }
+
+    /** 按索引删除图片 */
+    fun removeImageAt(index: Int) {
+        val list = _uiState.value.images
+        if (index in list.indices) {
+            _uiState.value = _uiState.value.copy(images = list.filterIndexed { i, _ -> i != index })
+        }
+    }
+
+    /** 拖拽排序：把 from 位置移动到 to 位置 */
+    fun moveImage(from: Int, to: Int) {
+        val list = _uiState.value.images
+        if (from == to) return
+        if (from !in list.indices || to !in list.indices) return
+        val mutable = list.toMutableList()
+        val item = mutable.removeAt(from)
+        mutable.add(to, item)
+        _uiState.value = _uiState.value.copy(images = mutable)
     }
 
     fun saveDraft() {

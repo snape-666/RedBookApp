@@ -9,7 +9,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -22,7 +22,10 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Icon
@@ -31,12 +34,16 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -77,8 +84,6 @@ fun PublishScreen(
         if (state.saved) onPublished()
     }
 
-    val borderColor = getOnSurfaceTertiary().copy(alpha = 0.1f)
-    val fillColor = getOnSurfaceTertiary().copy(alpha = 0.05f)
     Column(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface).padding(top = 36.dp, bottom = 16.dp)) {
         // 顶部栏
         Row(
@@ -103,31 +108,13 @@ fun PublishScreen(
                 VideoPreview(state.images.first())
                 Spacer(Modifier.height(16.dp))
             } else {
-            // 图片区
-            Row(
-                modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                state.images.forEach { uri ->
-                    Box(modifier = Modifier.size(100.dp).clip(RoundedCornerShape(10.dp))) {
-                        AsyncImage(
-                            model = ImageRequest.Builder(LocalContext.current).data(uri).crossfade(true).build(),
-                            contentDescription = null, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop
-                        )
-                    }
-                }
-                if (state.images.size < 11) {
-                    Box(
-                        modifier = Modifier.size(100.dp).clip(RoundedCornerShape(10.dp))
-                            .border(1.dp, borderColor, RoundedCornerShape(10.dp))
-                            .background(fillColor)
-                            .clickable { imagePicker.launch("*/*") },
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(painterResource(R.drawable.add_square), "添加", Modifier.size(32.dp), tint = getOutline())
-                    }
-                }
-            }
+            // 图片区：多图支持长按拖拽排序 + 右上角删除
+            DraggableImageRow(
+                images = state.images,
+                onMove = { from, to -> viewModel.moveImage(from, to) },
+                onRemove = { index -> viewModel.removeImageAt(index) },
+                onAddClick = { imagePicker.launch("*/*") }
+            )
             }
 
             Spacer(Modifier.height(16.dp))
@@ -206,6 +193,117 @@ object PublishViewModelBuilder {
         app: android.app.Application, uid: String, xhsId: String, name: String, avatar: String = "",
         editDraft: com.example.redbook.data.model.Draft? = null
     ): PublishViewModel = PublishViewModel(app, uid, xhsId, name, avatar, editDraft)
+}
+
+/** 单张图片项宽 */
+private val ImageSlot = 100.dp
+/** 间距 */
+private val ImageGap = 8.dp
+
+/**
+ * 横向图片选择区：
+ *  - 已选图片右上角显示删除按钮(close_ring_fill)，点击移除
+ *  - 长按图片横向拖动：越过半格即与相邻项实时交换（小红书式让位），带平滑动画
+ *  addImages 已按 uri 去重，uri 可作为稳定 key，不会重复冲突
+ */
+@Composable
+private fun DraggableImageRow(
+    images: List<Uri>,
+    onMove: (Int, Int) -> Unit,
+    onRemove: (Int) -> Unit,
+    onAddClick: () -> Unit
+) {
+    val borderColor = getOnSurfaceTertiary().copy(alpha = 0.1f)
+    val fillColor = getOnSurfaceTertiary().copy(alpha = 0.05f)
+    val density = LocalDensity.current
+    // 正在被拖拽的项（用 uri 标识，重排后身份不丢）
+    var draggingUri by remember { mutableStateOf<String?>(null) }
+    // 拖拽累计位移（px）
+    var dragOffset by remember { mutableStateOf(0f) }
+    val stepPx = with(density) { (ImageSlot + ImageGap).toPx() }
+    val lastIndex = images.lastIndex
+
+    LazyRow(
+        horizontalArrangement = Arrangement.spacedBy(ImageGap)
+    ) {
+        itemsIndexed(images, key = { _, uri -> uri.toString() }) { index, uri ->
+            val thisIndex by rememberUpdatedState(index)
+
+            Box(
+                modifier = Modifier
+                    .animateItem()
+                    .size(ImageSlot)
+                    .clip(RoundedCornerShape(10.dp))
+                    .pointerInput(uri.toString()) {
+                        detectDragGesturesAfterLongPress(
+                            onDragStart = {
+                                draggingUri = uri.toString()
+                                dragOffset = 0f
+                            },
+                            onDragEnd = {
+                                draggingUri = null
+                                dragOffset = 0f
+                            },
+                            onDragCancel = {
+                                draggingUri = null
+                                dragOffset = 0f
+                            },
+                            onDrag = { change, dragAmount ->
+                                change.consume()
+                                if (draggingUri == uri.toString()) {
+                                    dragOffset += dragAmount.x
+                                    // 越过半格即与相邻项交换 → 其余项实时让位
+                                    while (dragOffset > stepPx / 2 && thisIndex < lastIndex) {
+                                        onMove(thisIndex, thisIndex + 1)
+                                        dragOffset -= stepPx
+                                    }
+                                    while (dragOffset < -stepPx / 2 && thisIndex > 0) {
+                                        onMove(thisIndex, thisIndex - 1)
+                                        dragOffset += stepPx
+                                    }
+                                }
+                            }
+                        )
+                    }
+            ) {
+                AsyncImage(
+                    model = ImageRequest.Builder(LocalContext.current).data(uri).crossfade(true).build(),
+                    contentDescription = null,
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Crop
+                )
+                // 右上角删除按钮
+                Icon(
+                    painter = painterResource(R.drawable.close_ring_fill),
+                    contentDescription = "删除",
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .size(24.dp)
+                        .padding(3.dp)
+                        .clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null
+                        ) { onRemove(thisIndex) },
+                    tint = Color.White
+                )
+            }
+        }
+        if (images.size < 11) {
+            item(key = "add") {
+                Box(
+                    modifier = Modifier
+                        .size(ImageSlot)
+                        .clip(RoundedCornerShape(10.dp))
+                        .border(1.dp, borderColor, RoundedCornerShape(10.dp))
+                        .background(fillColor)
+                        .clickable { onAddClick() },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(painterResource(R.drawable.add_square), "添加", Modifier.size(32.dp), tint = getOutline())
+                }
+            }
+        }
+    }
 }
 
 @Composable
