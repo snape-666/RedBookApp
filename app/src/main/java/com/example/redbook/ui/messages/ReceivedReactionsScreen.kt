@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.CircularProgressIndicator
@@ -26,7 +27,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -50,6 +53,8 @@ import com.example.redbook.ui.theme.getOutline
 @Composable
 fun ReceivedReactionsScreen(
     userUid: String = "",
+    highlightActorUid: String = "",
+    onHighlightConsumed: () -> Unit = {},
     onBack: () -> Unit = {},
     onPostClick: (String) -> Unit = {},
     onVideoClick: (String, String) -> Unit = { _, _ -> },
@@ -66,6 +71,22 @@ fun ReceivedReactionsScreen(
     val loading by viewModel.loading.collectAsStateWithLifecycle()
 
     LaunchedEffect(userUid) { viewModel.load(userUid) }
+
+    // ---- 通知点击定位:加载完成后滚动到对应行并 0.5s 高亮 ----
+    val listState = rememberLazyListState()
+    var highlightUid by remember { mutableStateOf("") }
+    LaunchedEffect(items, highlightActorUid) {
+        if (highlightActorUid.isNotBlank()) {
+            val idx = items.indexOfFirst { it.actorUid == highlightActorUid }
+            if (idx >= 0) {
+                highlightUid = highlightActorUid
+                listState.animateScrollToItem(idx)
+                kotlinx.coroutines.delay(500)
+                highlightUid = ""
+            }
+            onHighlightConsumed()
+        }
+    }
 
     // 实时同步：收到新的赞/收藏/评论通知时刷新列表
     val realtimeRepo = remember {
@@ -132,10 +153,11 @@ fun ReceivedReactionsScreen(
             items.isEmpty() -> Box(modifier = Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
                 Text(text = "暂无赞和收藏", fontSize = 14.sp, color = getOnSurfaceSecondary())
             }
-            else -> LazyColumn(modifier = Modifier.weight(1f)) {
-                items(items, key = { it.actorName + it.time }) { item ->
+            else -> LazyColumn(state = listState, modifier = Modifier.weight(1f)) {
+                items(items, key = { it.actorUid + it.time }) { item ->
                     ReactionRow(
                         item = item,
+                        highlight = item.actorUid == highlightUid,
                         onPostClick = { onPostClick(it) },
                         onVideoClick = onVideoClick,
                         onUserClick = { onUserClick(item.actorUid) }
@@ -152,6 +174,7 @@ private fun ReactionRow(
     onPostClick: (String) -> Unit,
     onVideoClick: (String, String) -> Unit,
     onUserClick: () -> Unit = {},
+    highlight: Boolean = false,
     modifier: Modifier = Modifier
 ) {
     val isVideo = item.postImage.startsWith("video:")
@@ -159,6 +182,10 @@ private fun ReactionRow(
     Row(
         modifier = modifier
             .fillMaxWidth()
+            .background(
+                if (highlight) MaterialTheme.colorScheme.onSurface.copy(alpha = 0.10f)
+                else androidx.compose.ui.graphics.Color.Transparent
+            )
             .clickable {
                 if (isVideo) onVideoClick(item.postId, cover)
                 else onPostClick(item.postId)

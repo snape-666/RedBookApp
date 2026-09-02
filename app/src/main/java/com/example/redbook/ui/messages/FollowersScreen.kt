@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.CircularProgressIndicator
@@ -24,8 +25,11 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -48,6 +52,8 @@ import com.example.redbook.ui.theme.getOutline
 @Composable
 fun FollowersScreen(
     userUid: String,
+    highlightActorUid: String = "",
+    onHighlightConsumed: () -> Unit = {},
     onBack: () -> Unit = {},
     onSendMessage: (String, String, String) -> Unit = { _, _, _ -> },
     onUserClick: (String) -> Unit = {}
@@ -59,6 +65,22 @@ fun FollowersScreen(
     )
     val followers by viewModel.followers.collectAsStateWithLifecycle()
     val loading by viewModel.loading.collectAsStateWithLifecycle()
+
+    // ---- 通知点击定位:加载完成后滚动到对应行并 0.5s 高亮 ----
+    val listState = rememberLazyListState()
+    var highlightUid by remember { mutableStateOf("") }
+    LaunchedEffect(followers, highlightActorUid) {
+        if (highlightActorUid.isNotBlank()) {
+            val idx = followers.indexOfFirst { it.uid == highlightActorUid }
+            if (idx >= 0) {
+                highlightUid = highlightActorUid
+                listState.animateScrollToItem(idx)
+                kotlinx.coroutines.delay(500)
+                highlightUid = ""
+            }
+            onHighlightConsumed()
+        }
+    }
 
     Column(
         modifier = Modifier
@@ -107,10 +129,11 @@ fun FollowersScreen(
             followers.isEmpty() -> Box(modifier = Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
                 Text(text = "暂无新增关注", fontSize = 14.sp, color = getOnSurfaceSecondary())
             }
-            else -> LazyColumn(modifier = Modifier.weight(1f)) {
+            else -> LazyColumn(state = listState, modifier = Modifier.weight(1f)) {
                 items(followers, key = { it.uid }) { item ->
                     FollowerRow(
                         item = item,
+                        highlight = item.uid == highlightUid,
                         onFollowClick = { viewModel.toggleFollow(item.uid, !item.followed) },
                         onSendMessage = { onSendMessage(item.uid, item.userName, item.avatarUrl) },
                         onUserClick = { onUserClick(item.uid) }
@@ -127,11 +150,16 @@ private fun FollowerRow(
     onFollowClick: () -> Unit,
     onSendMessage: () -> Unit,
     onUserClick: () -> Unit = {},
+    highlight: Boolean = false,
     modifier: Modifier = Modifier
 ) {
     Row(
         modifier = modifier
             .fillMaxWidth()
+            .background(
+                if (highlight) MaterialTheme.colorScheme.onSurface.copy(alpha = 0.10f)
+                else androidx.compose.ui.graphics.Color.Transparent
+            )
             .padding(horizontal = 10.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {

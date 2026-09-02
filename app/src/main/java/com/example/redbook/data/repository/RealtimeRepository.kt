@@ -17,6 +17,7 @@ import okhttp3.Request
 import okhttp3.Response
 import okhttp3.WebSocket
 import okhttp3.WebSocketListener
+import com.example.redbook.data.model.NotificationSettings
 import org.json.JSONArray
 import org.json.JSONObject
 import kotlin.coroutines.resume
@@ -78,6 +79,38 @@ class RealtimeRepository(private val app: Application) {
         return resp.optJSONArray("users") ?: resp.optJSONArray("notifications") ?: JSONArray()
     }
 
+    /** 指定时间之后产生的未读互动通知(离线补发用;已读说明用户已看过,不再打扰) */
+    suspend fun getNotificationsSince(uid: String, sinceTs: Long): JSONArray {
+        if (uid.isBlank()) return JSONArray()
+        return withContext(Dispatchers.IO) {
+            try {
+                val resp = queryRest(
+                    "notifications",
+                    "select=*&recipient_uid=eq.$uid&is_read=eq.false&created_at=gt.$sinceTs&order=created_at.asc&limit=50"
+                )
+                resp.optJSONArray("users") ?: resp.optJSONArray("notifications") ?: JSONArray()
+            } catch (e: Exception) {
+                JSONArray()
+            }
+        }
+    }
+
+    /** 指定时间之后发给我的未读私信(离线补发用);历史消息无发送者昵称,由上层查 users 补齐 */
+    suspend fun getUnreadMessagesSince(uid: String, sinceTs: Long): JSONArray {
+        if (uid.isBlank()) return JSONArray()
+        return withContext(Dispatchers.IO) {
+            try {
+                val resp = queryRest(
+                    "messages",
+                    "select=*&receiver_uid=eq.$uid&is_read=eq.false&created_at=gt.$sinceTs&order=created_at.asc&limit=50"
+                )
+                resp.optJSONArray("users") ?: resp.optJSONArray("messages") ?: JSONArray()
+            } catch (e: Exception) {
+                JSONArray()
+            }
+        }
+    }
+
     suspend fun markNotificationsRead(uid: String, types: List<String>? = null) {
         if (uid.isBlank()) return
         val body = JSONObject().apply { put("is_read", true) }
@@ -88,6 +121,48 @@ class RealtimeRepository(private val app: Application) {
             "recipient_uid=eq.$uid&is_read=eq.false&or=($or)"
         }
         patchRest("notifications", filter, body)
+    }
+
+    // ---------------- 通知设置(users 表双存) ----------------
+
+    /** 从 users 表读取通知设置;缺列/查不到时返回默认全开 */
+    suspend fun getNotificationSettings(uid: String): NotificationSettings {
+        if (uid.isBlank()) return NotificationSettings()
+        return withContext(Dispatchers.IO) {
+            try {
+                val resp = queryRest(
+                    "users",
+                    "select=notif_receive_enabled,notif_like_fav,notif_follow,notif_comment,notif_dm,notif_version&uid=eq.$uid&limit=1"
+                )
+                val arr = resp.optJSONArray("users") ?: resp.optJSONArray("notifications") ?: JSONArray()
+                if (arr.length() == 0) return@withContext NotificationSettings()
+                val u = arr.getJSONObject(0)
+                NotificationSettings(
+                    receiveEnabled = if (u.isNull("notif_receive_enabled")) true else u.optBoolean("notif_receive_enabled", true),
+                    likeFavEnabled = if (u.isNull("notif_like_fav")) true else u.optBoolean("notif_like_fav", true),
+                    followEnabled = if (u.isNull("notif_follow")) true else u.optBoolean("notif_follow", true),
+                    commentEnabled = if (u.isNull("notif_comment")) true else u.optBoolean("notif_comment", true),
+                    dmEnabled = if (u.isNull("notif_dm")) true else u.optBoolean("notif_dm", true),
+                    version = u.optLong("notif_version", 0L)
+                )
+            } catch (e: Exception) {
+                NotificationSettings()
+            }
+        }
+    }
+
+    /** 云端保存通知设置(仅 PATCH 五个布尔列 + 版本号) */
+    suspend fun saveNotificationSettings(uid: String, s: NotificationSettings) {
+        if (uid.isBlank()) return
+        val body = JSONObject().apply {
+            put("notif_receive_enabled", s.receiveEnabled)
+            put("notif_like_fav", s.likeFavEnabled)
+            put("notif_follow", s.followEnabled)
+            put("notif_comment", s.commentEnabled)
+            put("notif_dm", s.dmEnabled)
+            put("notif_version", s.version)
+        }
+        patchRest("users", "uid=eq.$uid", body)
     }
 
     /** 写入一条互动通知（调用方保证 actor != recipient） */

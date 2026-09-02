@@ -1,9 +1,14 @@
 package com.example.redbook
 
+import android.Manifest
+import android.content.Intent
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -18,6 +23,12 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import com.example.redbook.data.repository.RealtimeRepository
+import com.example.redbook.data.repository.SupabaseAuthRepository
+import com.example.redbook.notification.NotifClickRouter
+import com.example.redbook.notification.NotifPrefs
+import com.example.redbook.notification.NotificationService
+import com.example.redbook.notification.PendingNotif
 import com.example.redbook.ui.PostDetail.DetailScreen
 import com.example.redbook.ui.auth.LoginScreen
 import com.example.redbook.ui.auth.RegisterScreen
@@ -38,8 +49,6 @@ import com.example.redbook.ui.messages.ReceivedCommentsScreen
 import com.example.redbook.ui.messages.FollowersScreen
 import com.example.redbook.ui.messages.ChatScreen
 import com.example.redbook.data.model.Draft
-import com.example.redbook.data.repository.RealtimeRepository
-import com.example.redbook.data.repository.SupabaseAuthRepository
 import com.example.redbook.R
 import kotlinx.coroutines.launch
 
@@ -56,17 +65,31 @@ class MainActivity : ComponentActivity() {
                 ) {
                     AppScreen(
                         isDarkTheme = isDarkTheme,
-                        onToggleDarkTheme = { isDarkTheme = !isDarkTheme }
+                        onToggleDarkTheme = { isDarkTheme = !isDarkTheme },
+                        initialIntent = intent
                     )
                 }
             }
         }
     }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        notificationTapDispatcher?.invoke(intent)
+    }
+
+    companion object {
+        /** AppScreen 注册的通知点击分发器(Activity 存活期间有效) */
+        @Volatile
+        var notificationTapDispatcher: ((Intent) -> Unit)? = null
+    }
 }
 @Composable
 fun AppScreen(
     isDarkTheme: Boolean = false,
-    onToggleDarkTheme: () -> Unit = {}
+    onToggleDarkTheme: () -> Unit = {},
+    initialIntent: Intent? = null
 ) {
     val context = LocalContext.current
     val browseRepo = remember { SupabaseAuthRepository(context.applicationContext as android.app.Application) }
@@ -100,6 +123,134 @@ fun AppScreen(
     var unreadFollows by remember { mutableIntStateOf(0) }
     var unreadComments by remember { mutableIntStateOf(0) }
     var unreadMessages by remember { mutableIntStateOf(0) }
+
+    // ---- 通知点击/定位状态 ----
+    var pendingNotif by remember { mutableStateOf<PendingNotif?>(null) }
+    var highlightActorUid by remember { mutableStateOf("") }
+
+    fun startNotificationService() {
+        if (userUid.isBlank()) return
+        try {
+            context.startForegroundService(Intent(context, NotificationService::class.java))
+        } catch (_: Exception) { }
+    }
+
+    // 首次进入(登录后)申请系统通知权限
+    val notificationPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        // 授权后重启服务触发“离线未读补发”(此前无权限时补发被跳过且不推进水印)
+        if (granted && userUid.isNotBlank()) {
+            startNotificationService()
+        }
+    }
+    LaunchedEffect(userUid) {
+        if (userUid.isNotBlank() && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            val granted = androidx.core.content.ContextCompat.checkSelfPermission(
+                context, Manifest.permission.POST_NOTIFICATIONS
+            ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+            if (!granted) {
+                notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+            }
+        }
+    }
+
+    // 注册通知点击分发(供 onNewIntent / 冷启动 intent 使用)
+    fun handleNotifIntent(intent: Intent?) {
+        if (intent?.action == NotifClickRouter.ACTION_NOTIF_TAP) {
+            val n = NotifClickRouter.parse(intent)
+            if (!n.isBlank) pendingNotif = n
+        }
+    }
+    DisposableEffect(Unit) {
+        MainActivity.notificationTapDispatcher = { i -> handleNotifIntent(i) }
+        onDispose {
+            if (MainActivity.notificationTapDispatcher != null) {
+                MainActivity.notificationTapDispatcher = null
+            }
+        }
+    }
+    LaunchedEffect(Unit) {
+        handleNotifIntent(initialIntent)
+    }
+
+    // 通知点击跳转
+    fun handleNotificationTap(n: PendingNotif) {
+        if (userUid.isBlank()) { pendingNotif = n; return }
+        when (n.type) {
+            "like", "favorite" -> {
+                unreadLikesFavs = 0
+                scope.launch { try { realtimeRepo.markNotificationsRead(userUid, listOf("like", "favorite")) } catch (_: Exception) { } }
+                highlightActorUid = n.actorUid
+                screenStack = listOf(Screen.Home, Screen.ReceivedReactions)
+                currentScreen = Screen.ReceivedReactions
+            }
+            "comment", "reply" -> {
+                unreadComments = 0
+                scope.launch { try { realtimeRepo.markNotificationsRead(userUid, listOf("comment", "reply")) } catch (_: Exception) { } }
+                highlightActorUid = n.actorUid
+                screenStack = listOf(Screen.Home, Screen.ReceivedComments)
+                currentScreen = Screen.ReceivedComments
+            }
+            "follow" -> {
+                unreadFollows = 0
+                scope.launch { try { realtimeRepo.markNotificationsRead(userUid, listOf("follow")) } catch (_: Exception) { } }
+                highlightActorUid = n.actorUid
+                screenStack = listOf(Screen.Home, Screen.Followers)
+                currentScreen = Screen.Followers
+            }
+            "dm" -> {
+                chatUserName = n.actorName.ifBlank { "小红书用户" }
+                chatUserAvatarUrl = n.actorAvatar
+                chatPeerUid = n.actorUid
+                chatConversationId = ""
+                screenStack = listOf(Screen.Home, Screen.Chat)
+                currentScreen = Screen.Chat
+                scope.launch {
+                    try {
+                        // 通知未带头像(旧通知/查询失败)时按 uid 兜底拉一次
+                        if (chatUserAvatarUrl.isBlank()) {
+                            browseRepo.getUserByUid(n.actorUid)?.let {
+                                val av = it.optString("avatar_url", "")
+                                if (av.isNotBlank()) chatUserAvatarUrl = av
+                            }
+                        }
+                    } catch (_: Exception) { }
+                    try {
+                        val conv = realtimeRepo.getOrCreateConversation(userUid, n.actorUid)
+                        chatConversationId = conv
+                        unreadMessages = 0
+                        realtimeRepo.markConversationRead(conv, userUid)
+                    } catch (_: Exception) { }
+                }
+            }
+        }
+        pendingNotif = null
+    }
+
+    // 登录后:启动通知前台服务 + 合并云端通知设置
+    LaunchedEffect(userUid) {
+        if (userUid.isNotBlank()) {
+            NotifPrefs.setCachedLoginUid(userUid, context)
+            startNotificationService()
+            // 拉云端通知设置,version 较新则覆盖本地(登录同步)
+            try {
+                val cloud = realtimeRepo.getNotificationSettings(userUid)
+                val local = NotifPrefs.load(userUid, context)
+                if (cloud.version >= local.version) {
+                    NotifPrefs.save(userUid, cloud, context)
+                }
+            } catch (_: Exception) { }
+        }
+    }
+
+    // 通知点击消费:冷启动登录前暂存,登录后 / 热启动 onNewIntent 均会触发跳转
+    LaunchedEffect(pendingNotif, userUid) {
+        val p = pendingNotif
+        if (p != null && !p.isBlank && userUid.isNotBlank()) {
+            handleNotificationTap(p)
+        }
+    }
 
     // 建立实时连接：登录成功后拉取初始未读数 + 订阅 WebSocket 增量
     LaunchedEffect(userUid) {
@@ -354,9 +505,16 @@ fun AppScreen(
                     chatPeerUid = ""
                     chatConversationId = ""
                     viewProfileUid = ""
+                    pendingNotif = null
+                    highlightActorUid = ""
                     loginResetKey++
                     screenStack = listOf(Screen.Login)
                     currentScreen = Screen.Login
+                    try {
+                        context.stopService(Intent(context, NotificationService::class.java))
+                    } catch (_: Exception) { }
+                    // 清除缓存 uid,防止 START_STICKY 服务在进程被杀后带旧账号重启
+                    NotifPrefs.setCachedLoginUid("", context)
                 }
             )
         }
@@ -424,6 +582,8 @@ fun AppScreen(
         Screen.ReceivedReactions -> {
             ReceivedReactionsScreen(
                 userUid = userUid,
+                highlightActorUid = highlightActorUid,
+                onHighlightConsumed = { highlightActorUid = "" },
                 onBack = { goBack() },
                 onPostClick = { postId ->
                     selectedPostId = postId
@@ -442,6 +602,8 @@ fun AppScreen(
         Screen.ReceivedComments -> {
             ReceivedCommentsScreen(
                 userUid = userUid,
+                highlightActorUid = highlightActorUid,
+                onHighlightConsumed = { highlightActorUid = "" },
                 onBack = { goBack() },
                 onPostClick = { postId, commentId ->
                     selectedPostId = postId
@@ -482,6 +644,8 @@ fun AppScreen(
         Screen.Followers -> {
             FollowersScreen(
                 userUid = userUid,
+                highlightActorUid = highlightActorUid,
+                onHighlightConsumed = { highlightActorUid = "" },
                 onBack = { goBack() },
                 onSendMessage = { peerUid, peerName, peerAvatar ->
                     openChatWith(peerUid, peerName, peerAvatar)
@@ -564,6 +728,7 @@ fun AppScreen(
         }
         Screen.NotificationSetting -> {
             NotificationSettingScreen(
+                userUid = userUid,
                 onBack = { goBack() }
             )
         }
