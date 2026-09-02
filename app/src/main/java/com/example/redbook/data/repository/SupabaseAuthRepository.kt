@@ -388,7 +388,8 @@ class SupabaseAuthRepository(private val app: Application) {
     }
 
     suspend fun insertPost(postId: String, title: String, content: String,
-                           authorUid: String, authorName: String, authorAvatar: String) {
+                           authorUid: String, authorName: String, authorAvatar: String,
+                           ipLocation: String = "") {
         val body = JSONObject().apply {
             put("post_id", postId)
             put("title", title)
@@ -396,6 +397,7 @@ class SupabaseAuthRepository(private val app: Application) {
             put("author_uid", authorUid)
             put("author_name", authorName)
             put("author_avatar", authorAvatar)
+            if (ipLocation.isNotBlank()) put("ip_location", ipLocation)
             put("created_at", System.currentTimeMillis())
         }
         supabasePostBody("/rest/v1/posts", body)
@@ -446,7 +448,8 @@ class SupabaseAuthRepository(private val app: Application) {
     }
 
     suspend fun publishPost(postId: String, title: String, content: String,
-                            authorUid: String, authorName: String, authorXhsId: String, imageUrl: String = "", authorAvatar: String = "") {
+                            authorUid: String, authorName: String, authorXhsId: String, imageUrl: String = "", authorAvatar: String = "",
+                            ipLocation: String = "") {
         val body = JSONObject().apply {
             put("post_id", postId)
             put("title", title)
@@ -456,6 +459,7 @@ class SupabaseAuthRepository(private val app: Application) {
             put("author_xhs_id", authorXhsId)
             put("author_avatar", authorAvatar)
             put("image_url", imageUrl)
+            if (ipLocation.isNotBlank()) put("ip_location", ipLocation)
             put("created_at", System.currentTimeMillis())
         }
         supabasePostBody("/rest/v1/posts", body)
@@ -764,7 +768,8 @@ class SupabaseAuthRepository(private val app: Application) {
 
     suspend fun insertComment(commentId: String, postId: String, content: String,
                               authorUid: String, authorName: String, authorAvatar: String,
-                              authorXhsId: String, postTitle: String, imageUrl: String = "") {
+                              authorXhsId: String, postTitle: String, imageUrl: String = "",
+                              ipLocation: String = "") {
         val body = JSONObject().apply {
             put("comment_id", commentId)
             put("post_id", postId)
@@ -775,6 +780,7 @@ class SupabaseAuthRepository(private val app: Application) {
             put("author_xhs_id", authorXhsId)
             put("post_title", postTitle)
             put("image_url", imageUrl)
+            if (ipLocation.isNotBlank()) put("ip_location", ipLocation)
             put("created_at", System.currentTimeMillis())
         }
         supabasePostBody("/rest/v1/comments", body)
@@ -782,7 +788,8 @@ class SupabaseAuthRepository(private val app: Application) {
     }
 
     suspend fun insertReply(replyId: String, postId: String, parentId: String, content: String,
-                            authorUid: String, authorName: String, authorAvatar: String, authorXhsId: String, postTitle: String, imageUrl: String = "") {
+                            authorUid: String, authorName: String, authorAvatar: String, authorXhsId: String, postTitle: String, imageUrl: String = "",
+                            ipLocation: String = "") {
         val body = JSONObject().apply {
             put("comment_id", replyId)
             put("post_id", postId)
@@ -794,6 +801,7 @@ class SupabaseAuthRepository(private val app: Application) {
             put("author_xhs_id", authorXhsId)
             put("post_title", postTitle)
             put("image_url", imageUrl)
+            if (ipLocation.isNotBlank()) put("ip_location", ipLocation)
             put("created_at", System.currentTimeMillis())
         }
         supabasePostBody("/rest/v1/comments", body)
@@ -856,14 +864,32 @@ class SupabaseAuthRepository(private val app: Application) {
         } catch (e: Exception) { false }
     }
 
-    /** 按 uid 查用户基础资料（头像/昵称/背景/性别/生日/xhs_id），找不到返回 null */
+    /** 按 uid 查用户基础资料（头像/昵称/背景/性别/生日/xhs_id/ip），找不到返回 null */
     suspend fun getUserByUid(uid: String): JSONObject? {
         if (uid.isBlank()) return null
         return try {
-            val resp = queryRest("users", "select=uid,nickname,avatar_url,background_url,gender,birthday,xhs_id&uid=eq.$uid&limit=1")
+            val resp = queryRest("users", "select=uid,nickname,avatar_url,background_url,gender,birthday,xhs_id,ip_location&uid=eq.$uid&limit=1")
             val arr = resp.optJSONArray("users") ?: JSONArray()
             if (arr.length() > 0) arr.getJSONObject(0) else null
         } catch (e: Exception) { null }
+    }
+
+    /** 写入我的 IP 归属地（users 表），供资料页展示 */
+    suspend fun updateUserIpLocation(uid: String, province: String) {
+        if (uid.isBlank() || province.isBlank()) return
+        try {
+            patchUserRow(uid, JSONObject().apply { put("ip_location", province) })
+        } catch (_: Exception) { }
+    }
+
+    /** 查询用户的 IP 归属地（空则返回空串） */
+    suspend fun getUserIpLocation(uid: String): String {
+        if (uid.isBlank()) return ""
+        return try {
+            val resp = queryRest("users", "select=ip_location&uid=eq.$uid&limit=1")
+            val arr = resp.optJSONArray("users") ?: JSONArray()
+            if (arr.length() > 0) arr.getJSONObject(0).optString("ip_location", "") else ""
+        } catch (e: Exception) { "" }
     }
 
     /** 按昵称或小红书号模糊搜索用户（ilike），排除自己；返回 uid,nickname,xhs_id,avatar_url */

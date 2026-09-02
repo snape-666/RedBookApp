@@ -125,11 +125,13 @@ fun ReplyItem(
                     fontSize = 12.sp,
                     color = getOnSurfaceTertiary()
                 )
-                Text(
-                    text = " · ${reply.ipLocation}",
-                    fontSize = 12.sp,
-                    color = getOnSurfaceTertiary()
-                )
+                if (reply.ipLocation.isNotBlank() && reply.ipLocation != "未知") {
+                    Text(
+                        text = " · ${reply.ipLocation}",
+                        fontSize = 12.sp,
+                        color = getOnSurfaceTertiary()
+                    )
+                }
                 Spacer(modifier = Modifier.width(12.dp))
                 Text(
                     text = "回复",

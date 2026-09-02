@@ -144,11 +144,13 @@ fun CommentItem(
                         fontSize = 12.sp,
                         color = getOnSurfaceTertiary()
                     )
-                    Text(
-                        text = " · ${comment.ipLocation}",
-                        fontSize = 12.sp,
-                        color = getOnSurfaceTertiary()
-                    )
+                    if (comment.ipLocation.isNotBlank() && comment.ipLocation != "未知") {
+                        Text(
+                            text = " · ${comment.ipLocation}",
+                            fontSize = 12.sp,
+                            color = getOnSurfaceTertiary()
+                        )
+                    }
                     Spacer(modifier = Modifier.width(12.dp))
                     Text(
                         text = "回复",

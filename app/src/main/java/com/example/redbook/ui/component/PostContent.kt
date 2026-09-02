@@ -115,8 +115,10 @@ fun PostContent(
         Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp)) {
             Text(text = SimpleDateFormat("yyyy-MM-dd HH:mm", LocalLocale.current.platformLocale).format(post.publishTime),
                 fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Text(text = " · ${post.ipLocation}", fontSize = 12.sp,
-                color = MaterialTheme.colorScheme.onSurfaceVariant)
+            if (post.ipLocation.isNotBlank() && post.ipLocation != "未知") {
+                Text(text = " · ${post.ipLocation}", fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
             Spacer(modifier = Modifier.weight(1f))
             Text(text = "${post.viewCount}次浏览", fontSize = 12.sp,
                 color = MaterialTheme.colorScheme.onSurfaceVariant)

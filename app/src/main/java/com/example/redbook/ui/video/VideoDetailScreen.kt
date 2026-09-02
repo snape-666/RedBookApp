@@ -442,12 +442,18 @@ fun VideoDetailScreen(
                                     if (i >= 0) cmts[i] = cmts[i].copy(replies = cmts[i].replies + Reply("r${System.currentTimeMillis()}", "me", "我", R.drawable.test, imgs, ct, System.currentTimeMillis(), "未知", 0, false, false, userAvatarUrl))
                                     replyTgt = null
                                     scope.launch {
-                                        try { repository.insertReply("r${System.currentTimeMillis()}", videoId, rt.first, ct, userUid, "我", userAvatarUrl, userXhsId, title) } catch (_: Exception) { }
+                                        try {
+                                            val ip = com.example.redbook.data.repository.IpLocationProvider.resolveProvince(context.applicationContext) ?: ""
+                                            repository.insertReply("r${System.currentTimeMillis()}", videoId, rt.first, ct, userUid, "我", userAvatarUrl, userXhsId, title, "", ip)
+                                        } catch (_: Exception) { }
                                     }
                                 } else {
                                     cmts.add(Comment("c${System.currentTimeMillis()}", "me", "我", R.drawable.test, imgs, ct, System.currentTimeMillis(), "未知", 0, false, false, userAvatarUrl))
                                     scope.launch {
-                                        try { repository.insertComment("c${System.currentTimeMillis()}", videoId, ct, userUid, "我", userAvatarUrl, userXhsId, title) } catch (_: Exception) { }
+                                        try {
+                                            val ip = com.example.redbook.data.repository.IpLocationProvider.resolveProvince(context.applicationContext) ?: ""
+                                            repository.insertComment("c${System.currentTimeMillis()}", videoId, ct, userUid, "我", userAvatarUrl, userXhsId, title, "", ip)
+                                        } catch (_: Exception) { }
                                     }
                                 }
                                 cmtText = ""; selUris.clear()

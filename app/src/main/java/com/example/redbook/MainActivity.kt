@@ -118,6 +118,7 @@ fun AppScreen(
     var userBirthday by remember { mutableStateOf("") }
     var userAvatarUrl by remember { mutableStateOf("") }
     var userBackgroundUrl by remember { mutableStateOf("") }
+    var myIpLocation by remember { mutableStateOf("") }
     var editingDraft by remember { mutableStateOf<Draft?>(null) }
     var loginResetKey by remember { mutableIntStateOf(0) }
 
@@ -156,6 +157,71 @@ fun AppScreen(
                 notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
             }
         }
+    }
+
+    // ---- 定位权限(用于 IP 归属地展示；拒绝后自动走公网 IP 方案) ----
+    // 解析我的省份(定位优先→公网 IP 兜底)，写 users.ip_location 并刷新内存态，供资料页展示
+    fun refreshMyIp() {
+        if (userUid.isBlank()) return
+        scope.launch {
+            val province = try {
+                com.example.redbook.data.repository.IpLocationProvider.resolveProvince(context.applicationContext)
+            } catch (e: Exception) {
+                android.util.Log.d("RedBookIp", "resolveProvince error ${e.message}")
+                null
+            }
+            if (province.isNullOrBlank()) {
+                // 兜底：读云端已有值（可能之前存过）
+                try {
+                    val cloud = browseRepo.getUserIpLocation(userUid)
+                    if (cloud.isNotBlank()) {
+                        myIpLocation = com.example.redbook.data.repository.IpLocationProvider.cleanProvince(cloud)
+                        android.util.Log.d("RedBookIp", "fallback cloud ip=$myIpLocation")
+                    }
+                } catch (_: Exception) { }
+                return@launch
+            }
+            myIpLocation = province
+            android.util.Log.d("RedBookIp", "resolved province=$province")
+            try { browseRepo.updateUserIpLocation(userUid, province) } catch (e: Exception) {
+                android.util.Log.d("RedBookIp", "updateUserIpLocation failed ${e.message}")
+            }
+        }
+    }
+    val locationPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { refreshMyIp() }
+    LaunchedEffect(userUid) {
+        if (userUid.isNotBlank()) {
+            val fineGranted = androidx.core.content.ContextCompat.checkSelfPermission(
+                context, Manifest.permission.ACCESS_FINE_LOCATION
+            ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+            val coarseGranted = androidx.core.content.ContextCompat.checkSelfPermission(
+                context, Manifest.permission.ACCESS_COARSE_LOCATION
+            ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+            if (!fineGranted && !coarseGranted) {
+                locationPermissionLauncher.launch(
+                    arrayOf(
+                        Manifest.permission.ACCESS_FINE_LOCATION,
+                        Manifest.permission.ACCESS_COARSE_LOCATION
+                    )
+                )
+            } else {
+                refreshMyIp()
+            }
+        }
+    }
+
+    // 回到前台时重试 IP 解析（用户可能刚开虚拟定位/授权），成功过则跳过
+    val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner, userUid) {
+        val obs = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME && userUid.isNotBlank() && myIpLocation.isBlank()) {
+                refreshMyIp()
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(obs)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(obs) }
     }
 
     // 注册通知点击分发(供 onNewIntent / 冷启动 intent 使用)
@@ -460,7 +526,7 @@ fun AppScreen(
                 userUid = userUid,
                 userName = userName.ifBlank { "用户" },
                 userXhsId = userXhsId.ifBlank { "00000000000" },
-                ipLocation = "未知",
+                ipLocation = myIpLocation,
                 followCount = 0, fansCount = 0, likeCount = 0,
                 gender = userGender,
                 birthday = userBirthday,
@@ -508,6 +574,7 @@ fun AppScreen(
                     unreadMessages = 0
                     SupabaseAuthRepository.currentUserName = ""
                     SupabaseAuthRepository.currentUserAvatar = ""
+                    com.example.redbook.data.repository.IpLocationProvider.cachedProvince = null
                     userUid = ""
                     userXhsId = ""
                     userName = ""
@@ -517,6 +584,7 @@ fun AppScreen(
                     userBirthday = ""
                     userAvatarUrl = ""
                     userBackgroundUrl = ""
+                    myIpLocation = ""
                     chatUserName = ""
                     chatUserAvatarUrl = ""
                     chatPeerUid = ""

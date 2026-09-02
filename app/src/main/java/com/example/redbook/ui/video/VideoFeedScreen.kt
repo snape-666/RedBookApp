@@ -200,6 +200,7 @@ private fun FeedVideoPage(
     repository: SupabaseAuthRepository,
     scope: kotlinx.coroutines.CoroutineScope
 ) {
+    val appContext = LocalContext.current.applicationContext
     var curMs by remember { mutableIntStateOf(0) }
     var durMs by remember { mutableIntStateOf(0) }
     var vv by remember { mutableStateOf<VideoView?>(null) }
@@ -501,12 +502,18 @@ private fun FeedVideoPage(
                                     if (i >= 0) cmts[i] = cmts[i].copy(replies = cmts[i].replies + Reply("r${System.currentTimeMillis()}", "me", "我", R.drawable.test, imgs, ct, System.currentTimeMillis(), "未知", 0, false, false, userAvatarUrl))
                                     replyTgt = null
                                     scope.launch {
-                                        try { repository.insertReply("r${System.currentTimeMillis()}", video.videoId, rt.first, ct, userUid, "我", userAvatarUrl, "", video.title) } catch (_: Exception) { }
+                                        try {
+                                            val ip = com.example.redbook.data.repository.IpLocationProvider.resolveProvince(appContext) ?: ""
+                                            repository.insertReply("r${System.currentTimeMillis()}", video.videoId, rt.first, ct, userUid, "我", userAvatarUrl, "", video.title, "", ip)
+                                        } catch (_: Exception) { }
                                     }
                                 } else {
                                     cmts.add(Comment("c${System.currentTimeMillis()}", "me", "我", R.drawable.test, imgs, ct, System.currentTimeMillis(), "未知", 0, false, false, userAvatarUrl))
                                     scope.launch {
-                                        try { repository.insertComment("c${System.currentTimeMillis()}", video.videoId, ct, userUid, "我", userAvatarUrl, "", video.title) } catch (_: Exception) { }
+                                        try {
+                                            val ip = com.example.redbook.data.repository.IpLocationProvider.resolveProvince(appContext) ?: ""
+                                            repository.insertComment("c${System.currentTimeMillis()}", video.videoId, ct, userUid, "我", userAvatarUrl, "", video.title, "", ip)
+                                        } catch (_: Exception) { }
                                     }
                                 }
                                 cmtText = ""; selUris.clear()

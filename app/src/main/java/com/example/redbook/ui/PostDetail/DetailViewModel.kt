@@ -143,18 +143,38 @@ class DetailViewModel(
                     }
                     val remarks = try { repository.getRemarks(userUid, allUids) } catch (_: Exception) { emptyMap<String, String>() }
                     val displayName = { uid: String, fallback: String -> remarks[uid].orEmpty().ifBlank { fallback } }
+                    // 帖子作者 IP 兜底：posts.ip_location 为空(老帖)时，用作者 users.ip_location
+                    val myIp = com.example.redbook.data.repository.IpLocationProvider.cachedProvince.orEmpty()
+                    val effPostIp = when {
+                        post.ipLocation.isNotBlank() && post.ipLocation != "未知" -> post.ipLocation
+                        post.authorId == userUid && myIp.isNotBlank() -> myIp
+                        else -> try {
+                            val authorIp = repository.getUserIpLocation(post.authorId)
+                            if (authorIp.isNotBlank()) authorIp else ""
+                        } catch (_: Exception) { "" }
+                    }
+                    val effIp = { uid: String, ip: String ->
+                        if (ip.isBlank() || ip == "未知") {
+                            when {
+                                uid == userUid && myIp.isNotBlank() -> myIp
+                                else -> ip
+                            }
+                        } else ip
+                    }
                     val finalPost = post.copy(
                         isLiked = isLiked,
                         isFavorited = isFavorited,
                         isFollowed = isFollowed,
                         likeCount = post.likeCount,
                         favoriteCount = post.favoriteCount,
-                        authorName = displayName(post.authorId, post.authorName)
+                        authorName = displayName(post.authorId, post.authorName),
+                        ipLocation = effPostIp
                     )
                     val remarksComments = comments.map { c ->
                         c.copy(
                             userName = displayName(c.userId, c.userName),
-                            replies = c.replies.map { r -> r.copy(userName = displayName(r.userId, r.userName)) }
+                            ipLocation = effIp(c.userId, c.ipLocation),
+                            replies = c.replies.map { r -> r.copy(userName = displayName(r.userId, r.userName), ipLocation = effIp(r.userId, r.ipLocation)) }
                         )
                     }
                     _uiState.value = DetailUiState.Success(finalPost, remarksComments)
@@ -351,6 +371,9 @@ class DetailViewModel(
                 val post = currentState.post
                 val name = userName.ifBlank { "我" }
                 val isAuthor = userUid == post.authorId
+                val ip = try {
+                    com.example.redbook.data.repository.IpLocationProvider.resolveProvince(getApplication()) ?: "未知"
+                } catch (e: Exception) { "未知" }
                 val newComment = Comment(
                     id = "new_${System.currentTimeMillis()}",
                     userId = userUid,
@@ -360,7 +383,7 @@ class DetailViewModel(
                     images = images,
                     content = content,
                     timestamp = System.currentTimeMillis(),
-                    ipLocation = "未知",
+                    ipLocation = ip,
                     likeCount = 0,
                     isLiked = false,
                     isAuthor = isAuthor,
@@ -377,7 +400,7 @@ class DetailViewModel(
                     val url = repository.uploadImage(uri, getApplication())
                     if (url != null) imageUrl = if (imageUrl.isEmpty()) url else "$imageUrl,$url"
                 }
-                repository.insertComment(newComment.id, post.postId, content, userUid, name, userAvatarUrl, userXhsId, post.title, imageUrl)
+                repository.insertComment(newComment.id, post.postId, content, userUid, name, userAvatarUrl, userXhsId, post.title, imageUrl, ip)
 
                 _commentText.value = ""
                 clearSelectedImages()
@@ -393,6 +416,9 @@ class DetailViewModel(
                 val post = currentState.post
                 val name = userName.ifBlank { "我" }
                 val isAuthor = userUid == post.authorId
+                val ip = try {
+                    com.example.redbook.data.repository.IpLocationProvider.resolveProvince(getApplication()) ?: "未知"
+                } catch (e: Exception) { "未知" }
                 val newReply = Reply(
                     id = "reply_${System.currentTimeMillis()}",
                     userId = userUid,
@@ -402,7 +428,7 @@ class DetailViewModel(
                     images = images,
                     content = content,
                     timestamp = System.currentTimeMillis(),
-                    ipLocation = "未知",
+                    ipLocation = ip,
                     likeCount = 0,
                     isLiked = false,
                     isAuthor = isAuthor
@@ -420,7 +446,7 @@ class DetailViewModel(
                     val url = repository.uploadImage(uri, getApplication())
                     if (url != null) imageUrl = if (imageUrl.isEmpty()) url else "$imageUrl,$url"
                 }
-                repository.insertReply(newReply.id, post.postId, parentCommentId, content, userUid, name, userAvatarUrl, userXhsId, post.title, imageUrl)
+                repository.insertReply(newReply.id, post.postId, parentCommentId, content, userUid, name, userAvatarUrl, userXhsId, post.title, imageUrl, ip)
             }
         }
     }

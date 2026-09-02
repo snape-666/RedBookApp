@@ -115,6 +115,10 @@ class PublishViewModel(
         val state = _uiState.value
         viewModelScope.launch {
             _uiState.value = state.copy(isSaving = true, savedAsDraft = false)
+            // IP 归属地：缓存命中则直接返回，未命中时定位/公网 IP 解析
+            val ipLocation = try {
+                com.example.redbook.data.repository.IpLocationProvider.resolveProvince(getApplication()) ?: ""
+            } catch (e: Exception) { "" }
             try {
                 if (isVideoMode) {
                     val uri = state.images.first()
@@ -122,7 +126,7 @@ class PublishViewModel(
                     if (url == null) { _uiState.value = state.copy(isSaving = false, error = "上传失败"); return@launch }
                     // 视频存 posts 表，image_url 带 video: 前缀
                     repository.publishPost("vid_${System.currentTimeMillis()}", state.title, "",
-                        authorUid, authorName, authorXhsId, url, authorAvatar)
+                        authorUid, authorName, authorXhsId, url, authorAvatar, ipLocation)
                 } else {
                     val urls = mutableListOf<String>()
                     for (img in state.images) {
@@ -132,7 +136,7 @@ class PublishViewModel(
                     }
                     if (state.images.isNotEmpty() && urls.isEmpty()) { _uiState.value = state.copy(isSaving = false, error = "上传失败"); return@launch }
                     android.util.Log.d("RedBook", "publish images=${state.images.size} urls=${urls.size} -> ${urls.joinToString(",")}")
-                    repository.publishPost("post_${System.currentTimeMillis()}", state.title, state.content, authorUid, authorName, authorXhsId, urls.joinToString(","), authorAvatar)
+                    repository.publishPost("post_${System.currentTimeMillis()}", state.title, state.content, authorUid, authorName, authorXhsId, urls.joinToString(","), authorAvatar, ipLocation)
                 }
                 if (editDraftId != null) {
                     try { repository.deleteDraft(editDraftId) } catch (e: Exception) { }

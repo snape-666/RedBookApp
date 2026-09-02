@@ -70,13 +70,20 @@ class ProfileViewModel(
             }
             val parsedPosts = applyRemarksToPosts(parsePosts(posts, likedIds))
             val latestDraftImage = if (drafts.length() > 0) drafts.getJSONObject(0).optString("image_url", "") else ""
+            val parsedComments = parseUserComments(comments).map { c ->
+                // 自己主页的历史评论缺 ip_location 时用已解析的缓存省份兜底；对方主页不替换
+                if (viewerUid.isBlank() && (c.ipLocation.isBlank() || c.ipLocation == "未知")) {
+                    val mine = com.example.redbook.data.repository.IpLocationProvider.cachedProvince
+                    if (!mine.isNullOrBlank()) c.copy(ipLocation = mine) else c
+                } else c
+            }
             _uiState.value = ProfileUiState(
                 posts = parsedPosts,
                 draftCount = drafts.length(),
                 likedPosts = applyRemarksToPosts(parsePosts(liked, likedIds)),
                 favoritedPosts = applyRemarksToPosts(parsePosts(favorited, likedIds)),
                 commentCount = comments.length(),
-                comments = parseUserComments(comments),
+                comments = parsedComments,
                 latestPostImage = parsedPosts.firstOrNull()?.imageUrl ?: "",
                 latestDraftImage = latestDraftImage,
                 followCount = followCount,
@@ -107,6 +114,7 @@ class ProfileViewModel(
                 val followCount = try { repository.getFollowingCount(targetUid) } catch (_: Exception) { 0 }
                 val fansCount = try { repository.getFansCount(targetUid) } catch (_: Exception) { 0 }
                 val likeCount = try { repository.getLikeCount(targetUid, u.optString("xhs_id", "")) } catch (_: Exception) { 0 }
+                val ip = u.optString("ip_location", "").ifBlank { "未知" }
                 _userProfile.value = UserProfileState(
                     uid = targetUid,
                     userName = u.optString("nickname", "").ifBlank { "小红书用户" },
@@ -115,7 +123,7 @@ class ProfileViewModel(
                     xhsId = u.optString("xhs_id", ""),
                     gender = u.optString("gender", ""),
                     birthday = u.optString("birthday", ""),
-                    ipLocation = "未知",
+                    ipLocation = ip,
                     iFollow = iFollow,
                     heFollowsMe = heFollowsMe,
                     remark = remark,

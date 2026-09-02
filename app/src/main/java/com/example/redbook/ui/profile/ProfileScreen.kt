@@ -536,7 +536,10 @@ private fun OtherUserHeader(
                         fontWeight = FontWeight.Bold,
                         color = onPri)
                     Text("小红书号：${userProfile.xhsId.ifBlank { "00000000000" }}", fontSize = 13.sp, color = onPri.copy(alpha = 0.95f))
-                    Text("IP：${userProfile.ipLocation}", fontSize = 13.sp, color = onPri.copy(alpha = 0.95f))
+                    // IP 归属地：解析不到时不展示空/未知，避免出现 "IP："
+                    if (userProfile.ipLocation.isNotBlank() && userProfile.ipLocation != "未知") {
+                        Text("IP：${userProfile.ipLocation}", fontSize = 13.sp, color = onPri.copy(alpha = 0.95f))
+                    }
                 }
             }
 
@@ -901,7 +904,10 @@ private fun ProfileHeader(
                 Column {
                     Text(userName, fontSize = 18.sp, fontWeight = FontWeight.Bold, color = onPri)
                     Text("小红书号：$userXhsId", fontSize = 13.sp, color = onPri.copy(alpha = 0.95f))
-                    Text("IP：$ipLocation", fontSize = 13.sp, color = onPri.copy(alpha = 0.95f))
+                    // IP 归属地：解析不到时不展示空/未知，避免出现 "IP："
+                    if (ipLocation.isNotBlank() && ipLocation != "未知") {
+                        Text("IP：$ipLocation", fontSize = 13.sp, color = onPri.copy(alpha = 0.95f))
+                    }
                 }
             }
 
@@ -1166,7 +1172,11 @@ private fun ProfileCommentItem(comment: UserComment, onCommentClick: (String, St
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text("$timeText · ${comment.ipLocation}", fontSize = 12.sp, color = getOnSurfaceTertiary())
+                if (comment.ipLocation.isNotBlank() && comment.ipLocation != "未知") {
+                    Text("$timeText · ${comment.ipLocation}", fontSize = 12.sp, color = getOnSurfaceTertiary())
+                } else {
+                    Text(timeText, fontSize = 12.sp, color = getOnSurfaceTertiary())
+                }
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(
                         painter = painterResource(R.drawable.favorite_light),
