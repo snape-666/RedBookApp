@@ -44,6 +44,7 @@ import com.example.redbook.ui.browse.BrowseScreen
 import com.example.redbook.ui.editprofile.EditProfileScreen
 import com.example.redbook.ui.notificationsetting.NotificationSettingScreen
 import com.example.redbook.ui.messages.MessagesScreen
+import com.example.redbook.ui.messages.MessageSearchScreen
 import com.example.redbook.ui.messages.ReceivedReactionsScreen
 import com.example.redbook.ui.messages.ReceivedCommentsScreen
 import com.example.redbook.ui.messages.FollowersScreen
@@ -105,6 +106,7 @@ fun AppScreen(
     var chatConversationId by remember { mutableStateOf("") }
     var viewProfileUid by remember { mutableStateOf("") }
     var scrollToCommentId by remember { mutableStateOf("") }
+    var scrollToMessageId by remember { mutableStateOf("") }
     var screenStack by remember { mutableStateOf(listOf<Screen>(Screen.Login)) }
     var userUid by remember { mutableStateOf("") }
     var userXhsId by remember { mutableStateOf("") }
@@ -204,6 +206,7 @@ fun AppScreen(
                 chatUserAvatarUrl = n.actorAvatar
                 chatPeerUid = n.actorUid
                 chatConversationId = ""
+                scrollToMessageId = ""
                 screenStack = listOf(Screen.Home, Screen.Chat)
                 currentScreen = Screen.Chat
                 scope.launch {
@@ -215,6 +218,11 @@ fun AppScreen(
                                 if (av.isNotBlank()) chatUserAvatarUrl = av
                             }
                         }
+                    } catch (_: Exception) { }
+                    // 备注名全局同步：通知里展示的是昵称，进入聊天前查备注并覆盖标题
+                    try {
+                        val remark = browseRepo.getRemark(userUid, n.actorUid)
+                        if (remark.isNotBlank()) chatUserName = remark
                     } catch (_: Exception) { }
                     try {
                         val conv = realtimeRepo.getOrCreateConversation(userUid, n.actorUid)
@@ -305,14 +313,22 @@ fun AppScreen(
         }
     }
 
-    // 账户间桥梁：与某用户建立会话并进入聊天页
+    // 账户间桥梁：与某用户建立会话并进入聊天页（有备注名时优先用备注名展示）
     fun openChatWith(peerUid: String, peerName: String, peerAvatar: String) {
         if (peerUid.isBlank() || peerUid == userUid) return
         chatPeerUid = peerUid
         chatUserName = peerName
         chatUserAvatarUrl = peerAvatar
         chatConversationId = ""
+        scrollToMessageId = ""
         scope.launch {
+            // 备注名全局同步：进入聊天前先查我对该用户的备注，有备注则覆盖昵称
+            try {
+                if (userUid.isNotBlank()) {
+                    val remark = browseRepo.getRemark(userUid, peerUid)
+                    if (remark.isNotBlank()) chatUserName = remark
+                }
+            } catch (_: Exception) { }
             try {
                 chatConversationId = realtimeRepo.getOrCreateConversation(userUid, peerUid)
             } catch (_: Exception) { }
@@ -504,6 +520,7 @@ fun AppScreen(
                     chatUserAvatarUrl = ""
                     chatPeerUid = ""
                     chatConversationId = ""
+                    scrollToMessageId = ""
                     viewProfileUid = ""
                     pendingNotif = null
                     highlightActorUid = ""
@@ -570,12 +587,45 @@ fun AppScreen(
                     chatUserAvatarUrl = avatar
                     chatPeerUid = peerUid
                     chatConversationId = ""
+                    scrollToMessageId = ""
                     scope.launch {
                         try {
                             chatConversationId = realtimeRepo.getOrCreateConversation(userUid, peerUid)
                         } catch (_: Exception) { }
                         navigateTo(Screen.Chat)
                     }
+                },
+                onSearchClick = {
+                    navigateTo(Screen.MessagesSearch)
+                }
+            )
+        }
+        Screen.MessagesSearch -> {
+            MessageSearchScreen(
+                userUid = userUid,
+                onBack = { goBack() },
+                onContactChatClick = { peerUid, peerName, peerAvatar ->
+                    // 联系人"去聊天"：与普通会话点击一致
+                    chatUserName = peerName
+                    chatUserAvatarUrl = peerAvatar
+                    chatPeerUid = peerUid
+                    chatConversationId = ""
+                    scrollToMessageId = ""
+                    scope.launch {
+                        try {
+                            chatConversationId = realtimeRepo.getOrCreateConversation(userUid, peerUid)
+                        } catch (_: Exception) { }
+                        navigateTo(Screen.Chat)
+                    }
+                },
+                onMessageResultClick = { conversationId, messageId, peerName, peerAvatar, peerUid, _ ->
+                    // 聊天记录：进入对应会话并定位到该条消息
+                    chatUserName = peerName
+                    chatUserAvatarUrl = peerAvatar
+                    chatPeerUid = peerUid
+                    chatConversationId = conversationId
+                    scrollToMessageId = messageId
+                    navigateTo(Screen.Chat)
                 }
             )
         }
@@ -637,6 +687,8 @@ fun AppScreen(
                 conversationId = chatConversationId,
                 repository = realtimeRepo,
                 myAvatarUrl = userAvatarUrl,
+                scrollToMessageId = scrollToMessageId,
+                onMessageScrolled = { scrollToMessageId = "" },
                 onBack = { goBack() },
                 onUserClick = { targetUid -> openUserProfile(targetUid) }
             )
@@ -750,6 +802,7 @@ sealed class Screen {
     object Draft : Screen()
     object Browse : Screen()
     object Messages : Screen()
+    object MessagesSearch : Screen()
     object ReceivedReactions : Screen()
     object ReceivedComments : Screen()
     object Followers : Screen()

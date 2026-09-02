@@ -37,14 +37,18 @@ class FollowersViewModel(application: Application, private val userUid: String) 
             try {
                 val followersArr = repository.getMyFollowers(userUid)
                 val followingUids = try { repository.getFollowingUids(userUid) } catch (e: Exception) { emptySet() }
+                val uids = (0 until followersArr.length()).map { followersArr.getJSONObject(it).optString("uid", "") }
+                // 批量读取我对这些人的备注名（remarks: viewer=我,target=对方）
+                val remarks = try { repository.getRemarks(userUid, uids) } catch (e: Exception) { emptyMap<String, String>() }
                 _followers.value = (0 until followersArr.length()).map { i ->
                     val u = followersArr.getJSONObject(i)
+                    val uid = u.optString("uid", "")
                     FollowerItem(
-                        uid = u.optString("uid", ""),
-                        userName = u.optString("nickname", "").ifBlank { "小红书用户" },
+                        uid = uid,
+                        userName = remarks[uid].orEmpty().ifBlank { u.optString("nickname", "").ifBlank { "小红书用户" } },
                         avatarUrl = u.optString("avatar_url", ""),
                         followTime = u.optLong("created_at", 0L),
-                        followed = followingUids.contains(u.optString("uid", ""))
+                        followed = followingUids.contains(uid)
                     )
                 }
             } catch (e: Exception) {

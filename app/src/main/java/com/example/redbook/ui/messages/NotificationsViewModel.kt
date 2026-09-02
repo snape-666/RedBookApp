@@ -91,17 +91,24 @@ class NotificationsViewModel(
                         commentId = n.optString("comment_id", "")
                     )
                 }
+                // 按 actor_uid 批量替换为我对该用户的备注名（有备注优先）
+                val actorUids = rawItems.map { it.actorUid }.filter { it.isNotBlank() }.distinct()
+                val remarks = try { authRepository.getRemarks(userUid, actorUids) } catch (e: Exception) { emptyMap<String, String>() }
+                val itemsWithRemark = rawItems.map { item ->
+                    val remark = remarks[item.actorUid]
+                    if (!remark.isNullOrBlank()) item.copy(actorName = remark) else item
+                }
                 // 评论类型：批量查 comment_id 是否仍存在，标记已删除
                 if (kind == NotificationKind.COMMENT) {
-                    val commentIds = rawItems.map { it.commentId }.filter { it.isNotBlank() }.toSet()
+                    val commentIds = itemsWithRemark.map { it.commentId }.filter { it.isNotBlank() }.toSet()
                     val existing = authRepository.getExistingCommentIds(commentIds)
-                    _items.value = rawItems.map { item ->
+                    _items.value = itemsWithRemark.map { item ->
                         if (item.commentId.isNotBlank() && item.commentId !in existing) {
                             item.copy(deleted = true)
                         } else item
                     }
                 } else {
-                    _items.value = rawItems
+                    _items.value = itemsWithRemark
                 }
             } catch (e: Exception) {
                 _items.value = emptyList()

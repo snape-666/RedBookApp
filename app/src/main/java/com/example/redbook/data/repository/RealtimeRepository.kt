@@ -256,6 +256,81 @@ class RealtimeRepository(private val app: Application) {
         return resp.optJSONArray("users") ?: resp.optJSONArray("messages") ?: JSONArray()
     }
 
+    /** 全局搜索我的聊天记录（content ilike 模糊匹配，倒序最多 100 条）
+     *  返回字段：conversation_id, message_id, sender_uid, receiver_uid, content, created_at,
+     *  peer_uid, peer_name, peer_avatar, peer_remark（有备注优先用于展示） */
+    suspend fun searchMyMessages(uid: String, query: String): JSONArray {
+        val q = query.trim()
+        if (uid.isBlank() || q.isBlank()) return JSONArray()
+        return withContext(Dispatchers.IO) {
+            try {
+                // 对查询词做 URL 编码，避免特殊字符破坏请求（* 编码为 %2A 由服务端还原）
+                val encoded = java.net.URLEncoder.encode("*$q*", "UTF-8")
+                val resp = queryRest(
+                    "messages",
+                    "select=conversation_id,message_id,sender_uid,receiver_uid,content,created_at" +
+                        "&or=(sender_uid.eq.$uid,receiver_uid.eq.$uid)" +
+                        "&content=ilike.$encoded&order=created_at.desc&limit=100"
+                )
+                val arr = resp.optJSONArray("users") ?: resp.optJSONArray("messages") ?: JSONArray()
+                if (arr.length() == 0) return@withContext JSONArray()
+
+                // 解析对端 uid
+                val peerUids = LinkedHashSet<String>()
+                val rows = (0 until arr.length()).map { i ->
+                    val m = arr.getJSONObject(i)
+                    val sender = m.optString("sender_uid", "")
+                    val receiver = m.optString("receiver_uid", "")
+                    val peerUid = if (sender == uid) receiver else sender
+                    if (peerUid.isNotBlank()) peerUids.add(peerUid)
+                    Triple(m, peerUid, m.optLong("created_at", 0L))
+                }.filter { it.first.optString("content", "").isNotBlank() }
+
+                // 批量查对端资料（昵称/头像）
+                val nameMap = mutableMapOf<String, String>()
+                val avatarMap = mutableMapOf<String, String>()
+                try {
+                    val filters = peerUids.joinToString(",") { "uid.eq.$it" }
+                    val uresp = queryRest("users", "select=uid,nickname,avatar_url&or=($filters)")
+                    val uarr = uresp.optJSONArray("users") ?: JSONArray()
+                    for (i in 0 until uarr.length()) {
+                        val u = uarr.getJSONObject(i)
+                        nameMap[u.optString("uid", "")] = u.optString("nickname", "")
+                        avatarMap[u.optString("uid", "")] = u.optString("avatar_url", "")
+                    }
+                } catch (_: Exception) { }
+                // 批量查我对各对端的备注名
+                val remarkMap = mutableMapOf<String, String>()
+                try {
+                    val filters = peerUids.joinToString(",") { "target_uid.eq.$it" }
+                    val rresp = queryRest("remarks", "select=target_uid,remark&viewer_uid=eq.$uid&or=($filters)")
+                    val rarr = rresp.optJSONArray("users") ?: rresp.optJSONArray("remarks") ?: JSONArray()
+                    for (i in 0 until rarr.length()) {
+                        val r = rarr.getJSONObject(i)
+                        remarkMap[r.optString("target_uid", "")] = r.optString("remark", "")
+                    }
+                } catch (_: Exception) { }
+
+                val result = JSONArray()
+                for ((m, peerUid, _) in rows) {
+                    if (peerUid.isBlank()) continue
+                    result.put(JSONObject().apply {
+                        put("conversation_id", m.optString("conversation_id", ""))
+                        put("message_id", m.optString("message_id", ""))
+                        put("sender_uid", m.optString("sender_uid", ""))
+                        put("content", m.optString("content", ""))
+                        put("created_at", m.optLong("created_at", 0L))
+                        put("peer_uid", peerUid)
+                        put("peer_name", nameMap[peerUid].orEmpty().ifBlank { "小红书用户" })
+                        put("peer_avatar", avatarMap[peerUid].orEmpty())
+                        put("peer_remark", remarkMap[peerUid].orEmpty())
+                    })
+                }
+                result
+            } catch (e: Exception) { JSONArray() }
+        }
+    }
+
     suspend fun markConversationRead(conversationId: String, uid: String) {
         patchRest("messages", "conversation_id=eq.$conversationId&receiver_uid=eq.$uid&is_read=eq.false", JSONObject().apply { put("is_read", true) })
     }
@@ -271,7 +346,8 @@ class RealtimeRepository(private val app: Application) {
         }
     }
 
-    /** 会话列表（对方昵称/头像 + lastMessage + 未读数），按 last_time 倒序 */
+    /** 会话列表（对方昵称/头像 + lastMessage + 未读数），按 last_time 倒序
+     *  返回字段额外包含 peer_remark（我对对方的备注名，无备注为空串），由上层展示时优先使用 */
     suspend fun getConversations(uid: String): JSONArray {
         if (uid.isBlank()) return JSONArray()
         return withContext(Dispatchers.IO) {
@@ -305,6 +381,7 @@ class RealtimeRepository(private val app: Application) {
                         put("peer_uid", peerUid)
                         put("peer_name", "")
                         put("peer_avatar", "")
+                        put("peer_remark", "")
                         put("last_message", lastMessage)
                         put("last_time", lastTime)
                         put("unread_count", unread)
@@ -317,6 +394,14 @@ class RealtimeRepository(private val app: Application) {
                             val u = uarr.getJSONObject(0)
                             peer.put("peer_name", u.optString("nickname", ""))
                             peer.put("peer_avatar", u.optString("avatar_url", ""))
+                        }
+                    } catch (_: Exception) { }
+                    // 查我对对方的备注名
+                    try {
+                        val rresp = queryRest("remarks", "select=remark&viewer_uid=eq.$uid&target_uid=eq.$peerUid&limit=1")
+                        val rarr = rresp.optJSONArray("users") ?: rresp.optJSONArray("remarks") ?: JSONArray()
+                        if (rarr.length() > 0) {
+                            peer.put("peer_remark", rarr.getJSONObject(0).optString("remark", ""))
                         }
                     } catch (_: Exception) { }
                     result.put(peer)

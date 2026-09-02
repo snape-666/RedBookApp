@@ -18,8 +18,13 @@ data class ConversationItem(
     val peerAvatar: String,
     val lastMessage: String,
     val lastTime: Long,
-    val unreadCount: Int
-)
+    val unreadCount: Int,
+    val peerRemark: String = ""
+) {
+    /** 展示名：有备注用备注，否则用昵称 */
+    val displayName: String
+        get() = peerRemark.ifBlank { peerName }
+}
 
 class ConversationsViewModel(application: Application) : AndroidViewModel(application) {
 
@@ -46,7 +51,8 @@ class ConversationsViewModel(application: Application) : AndroidViewModel(applic
                         peerAvatar = c.optString("peer_avatar", ""),
                         lastMessage = c.optString("last_message", ""),
                         lastTime = c.optLong("last_time", 0L),
-                        unreadCount = c.optInt("unread_count", 0)
+                        unreadCount = c.optInt("unread_count", 0),
+                        peerRemark = c.optString("peer_remark", "")
                     )
                 }
             } catch (e: Exception) {

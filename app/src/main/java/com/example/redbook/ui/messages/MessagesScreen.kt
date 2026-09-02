@@ -72,7 +72,8 @@ fun MessagesScreen(
     onLikeFavoriteClick: () -> Unit = {},
     onCommentClick: () -> Unit = {},
     onFollowClick: () -> Unit = {},
-    onConversationClick: (String, String, String) -> Unit = { _, _, _ -> }
+    onConversationClick: (String, String, String) -> Unit = { _, _, _ -> },
+    onSearchClick: () -> Unit = {}
 ) {
     var bottomIndex by remember { mutableIntStateOf(2) }
     val context = LocalContext.current
@@ -92,7 +93,7 @@ fun MessagesScreen(
     ) {
         Spacer(modifier = Modifier.fillMaxWidth().height(24.dp).background(MaterialTheme.colorScheme.surface))
 
-        MessagesTopBar()
+        MessagesTopBar(onSearchClick = onSearchClick)
 
         ReactionGroupRow(
             unreadLikesFavs = unreadLikesFavs,
@@ -117,7 +118,7 @@ fun MessagesScreen(
                     ConversationItem(
                         conversation = conversation,
                         onClick = {
-                            onConversationClick(conversation.peerName, conversation.peerAvatar, conversation.peerUid)
+                            onConversationClick(conversation.displayName, conversation.peerAvatar, conversation.peerUid)
                         },
                         modifier = Modifier.padding(vertical = 5.dp)
                     )
@@ -144,7 +145,7 @@ fun MessagesScreen(
 }
 
 @Composable
-private fun MessagesTopBar() {
+private fun MessagesTopBar(onSearchClick: () -> Unit = {}) {
     Box(
         modifier = Modifier
             .fillMaxWidth()
@@ -166,7 +167,12 @@ private fun MessagesTopBar() {
             Icon(
                 painter = painterResource(id = R.drawable.search),
                 contentDescription = "搜索",
-                modifier = Modifier.size(24.dp),
+                modifier = Modifier
+                    .size(24.dp)
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null
+                    ) { onSearchClick() },
                 tint = getOnSurfaceTertiary()
             )
             Spacer(modifier = Modifier.width(5.dp))
@@ -321,7 +327,7 @@ private fun ConversationItem(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = conversation.peerName,
+                    text = conversation.displayName,
                     fontSize = 16.sp,
                     fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.onSurface,

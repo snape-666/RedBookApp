@@ -154,9 +154,23 @@ class ProfileViewModel(
     fun setRemark(remark: String) {
         val cur = _userProfile.value
         if (cur.uid.isBlank() || viewerUid.isBlank()) return
+        // 先乐观更新本地状态，保存成功后用云端返回结果校准
         _userProfile.value = cur.copy(remark = remark)
         viewModelScope.launch {
-            try { repository.setRemark(viewerUid, cur.uid, remark) } catch (_: Exception) { }
+            try {
+                repository.setRemark(viewerUid, cur.uid, remark)
+                // 保存成功后回读一次，确保与云端一致
+                val saved = repository.getRemark(viewerUid, cur.uid)
+                if (_userProfile.value.uid == cur.uid) {
+                    _userProfile.value = _userProfile.value.copy(remark = saved)
+                }
+            } catch (_: Exception) {
+                // 保存失败回滚本地乐观状态，避免假保存
+                if (_userProfile.value.uid == cur.uid) {
+                    val real = try { repository.getRemark(viewerUid, cur.uid) } catch (_: Exception) { cur.remark }
+                    _userProfile.value = _userProfile.value.copy(remark = real)
+                }
+            }
         }
     }
 

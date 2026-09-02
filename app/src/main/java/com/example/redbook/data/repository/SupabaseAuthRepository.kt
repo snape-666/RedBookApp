@@ -891,6 +891,24 @@ class SupabaseAuthRepository(private val app: Application) {
         } catch (e: Exception) { "" }
     }
 
+    /** 批量读取我对多人的备注名（target_uid -> remark），用于列表页统一展示 */
+    suspend fun getRemarks(viewerUid: String, targetUids: Collection<String>): Map<String, String> {
+        if (viewerUid.isBlank()) return emptyMap()
+        val targets = targetUids.filter { it.isNotBlank() }.distinct()
+        if (targets.isEmpty()) return emptyMap()
+        return try {
+            val filters = targets.joinToString(",") { "target_uid.eq.$it" }
+            val resp = queryRest("remarks", "select=target_uid,remark&viewer_uid=eq.$viewerUid&or=($filters)")
+            val arr = resp.optJSONArray("users") ?: resp.optJSONArray("remarks") ?: JSONArray()
+            (0 until arr.length()).mapNotNull { i ->
+                val row = arr.getJSONObject(i)
+                val remark = row.optString("remark", "")
+                if (remark.isBlank()) null
+                else row.optString("target_uid", "") to remark
+            }.toMap()
+        } catch (e: Exception) { emptyMap() }
+    }
+
     /** 设置/清除我对某人的备注名（upsert，空则清空备注） */
     suspend fun setRemark(viewerUid: String, targetUid: String, remark: String) {
         if (viewerUid.isBlank() || targetUid.isBlank()) return
@@ -1005,6 +1023,35 @@ class SupabaseAuthRepository(private val app: Application) {
             val arr = resp.optJSONArray("users") ?: resp.optJSONArray("follows") ?: JSONArray()
             (0 until arr.length()).map { arr.getJSONObject(it).getString("followed_uid") }.toSet()
         } catch (e: Exception) { emptySet() }
+    }
+
+    /** 我关注的用户完整资料列表（uid,nickname,avatar_url，按关注时间倒序），用于联系人搜索 */
+    suspend fun getFollowingUsers(userUid: String): JSONArray {
+        if (userUid.isBlank()) return JSONArray()
+        try {
+            val resp = queryRest("follows", "select=followed_uid,created_at&follower_uid=eq.$userUid&order=created_at.desc")
+            val arr = resp.optJSONArray("users") ?: resp.optJSONArray("follows") ?: JSONArray()
+            if (arr.length() == 0) return JSONArray()
+            val uids = (0 until arr.length()).map { arr.getJSONObject(it).getString("followed_uid") }
+            val filters = uids.joinToString(",") { "uid.eq.$it" }
+            val usersResp = queryRest("users", "select=uid,nickname,avatar_url&or=($filters)")
+            val usersArr = usersResp.optJSONArray("users") ?: JSONArray()
+            val userMap = (0 until usersArr.length()).associateBy(
+                { usersArr.getJSONObject(it).optString("uid", "") },
+                { usersArr.getJSONObject(it) }
+            )
+            val result = JSONArray()
+            for (i in 0 until arr.length()) {
+                val uid = arr.getJSONObject(i).optString("followed_uid", "")
+                val u = userMap[uid] ?: continue
+                result.put(JSONObject().apply {
+                    put("uid", uid)
+                    put("nickname", u.optString("nickname", ""))
+                    put("avatar_url", u.optString("avatar_url", ""))
+                })
+            }
+            return result
+        } catch (e: Exception) { return JSONArray() }
     }
 
     // 更新用户资料

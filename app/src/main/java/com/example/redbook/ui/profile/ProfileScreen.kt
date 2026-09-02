@@ -204,7 +204,9 @@ fun ProfileScreen(
                         onFollowClick = { viewModel.toggleFollowTarget() },
                         onActionClick = { showActionSheet = true },
                         onSendMessage = {
-                            onSendMessage(userProfile.uid, userProfile.userName.ifBlank { userProfile.uid }, userProfile.avatarUrl)
+                            // 有备注名时发私信也用备注名（保证全局同步）
+                            val display = userProfile.remark.ifBlank { userProfile.userName.ifBlank { userProfile.uid } }
+                            onSendMessage(userProfile.uid, display, userProfile.avatarUrl)
                         },
                         expanded = showActionSheet
                     )
@@ -432,6 +434,7 @@ fun ProfileScreen(
         // 对方主页：底部操作弹窗（设置备注名 / 取消关注）
         if (showActionSheet && !isSelf) {
             ActionSheet(
+                hasRemark = userProfile.remark.isNotBlank(),
                 onDismiss = { showActionSheet = false },
                 onRemarkClick = {
                     showActionSheet = false
@@ -447,6 +450,7 @@ fun ProfileScreen(
         // 对方主页：添加备注弹窗
         if (showRemarkDialog && !isSelf) {
             RemarkDialog(
+                key = "remark_${userProfile.uid}_${userProfile.remark}",
                 initialRemark = userProfile.remark,
                 onDismiss = { showRemarkDialog = false },
                 onConfirm = { remark ->
@@ -639,7 +643,8 @@ private fun OtherUserHeader(
 private fun ActionSheet(
     onDismiss: () -> Unit,
     onRemarkClick: () -> Unit,
-    onUnfollowClick: () -> Unit
+    onUnfollowClick: () -> Unit,
+    hasRemark: Boolean = false
 ) {
     Box(Modifier.fillMaxSize()) {
         // 遮罩
@@ -686,7 +691,7 @@ private fun ActionSheet(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = "设置备注名",
+                    text = if (hasRemark) "修改备注名" else "设置备注名",
                     fontSize = 14.sp,
                     color = MaterialTheme.colorScheme.onSurface,
                     modifier = Modifier.weight(1f)
@@ -732,9 +737,11 @@ private fun ActionSheet(
 private fun RemarkDialog(
     initialRemark: String,
     onDismiss: () -> Unit,
-    onConfirm: (String) -> Unit
+    onConfirm: (String) -> Unit,
+    key: String = initialRemark
 ) {
-    var remarkInput by remember { mutableStateOf(initialRemark) }
+    // 用 key 保证每次打开/备注变化时都重新初始化输入框
+    var remarkInput by remember(key) { mutableStateOf(initialRemark) }
     Dialog(onDismissRequest = onDismiss) {
         Column(
             Modifier
@@ -748,7 +755,10 @@ private fun RemarkDialog(
                     .padding(horizontal = 24.dp, vertical = 20.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                Text("添加备注", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = MaterialTheme.colorScheme.onSurface)
+                Text(
+                    text = if (initialRemark.isNotBlank()) "修改备注" else "添加备注",
+                    fontWeight = FontWeight.Bold, fontSize = 16.sp, color = MaterialTheme.colorScheme.onSurface
+                )
                 Spacer(Modifier.height(8.dp))
                 Text("最多不超过8个字", fontSize = 13.sp, color = getOnSurfaceSecondary())
                 Spacer(Modifier.height(12.dp))

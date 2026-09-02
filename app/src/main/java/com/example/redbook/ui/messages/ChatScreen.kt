@@ -61,7 +61,8 @@ private data class ChatMessage(
     val content: String,
     val time: Long,
     val isMine: Boolean,
-    val mediaUrl: String = ""
+    val mediaUrl: String = "",
+    val messageId: String = ""
 )
 
 @Composable
@@ -73,6 +74,8 @@ fun ChatScreen(
     conversationId: String = "",
     repository: RealtimeRepository? = null,
     myAvatarUrl: String = "",
+    scrollToMessageId: String = "",
+    onMessageScrolled: () -> Unit = {},
     onBack: () -> Unit = {},
     onUserClick: (String) -> Unit = {}
 ) {
@@ -112,7 +115,8 @@ fun ChatScreen(
                         content = m.optString("content", ""),
                         time = m.optLong("created_at", 0L),
                         isMine = m.optString("sender_uid") == currentUserUid,
-                        mediaUrl = m.optString("media_url", "")
+                        mediaUrl = m.optString("media_url", ""),
+                        messageId = m.optString("message_id", "")
                     )
                 )
             }
@@ -133,8 +137,9 @@ fun ChatScreen(
                         val content = record.optString("content", "")
                         val time = record.optLong("created_at", 0L)
                         val mediaUrl = record.optString("media_url", "")
+                        val messageId = record.optString("message_id", "")
                         if (messages.none { it.content == content && it.time == time && !it.isMine }) {
-                            messages.add(ChatMessage(content, time, false, mediaUrl))
+                            messages.add(ChatMessage(content, time, false, mediaUrl, messageId))
                         }
                     }
                 }
@@ -146,8 +151,29 @@ fun ChatScreen(
         }
     }
 
-    LaunchedEffect(messages.size) {
-        if (messages.isNotEmpty()) listState.animateScrollToItem(messages.size - 1)
+    var highlightMessageId by remember { mutableStateOf("") }
+    var locatedMessageId by remember { mutableStateOf("") }
+
+    // 常规进入（非搜索定位）：消息加载完后滚动到底部
+    LaunchedEffect(messages.size, locatedMessageId, scrollToMessageId) {
+        if (messages.isNotEmpty() && locatedMessageId.isBlank() && scrollToMessageId.isBlank()) {
+            listState.animateScrollToItem(messages.size - 1)
+        }
+    }
+
+    // 从聊天记录搜索进入：定位到指定消息并做 0.5s 高亮涟漪
+    LaunchedEffect(messages.size, scrollToMessageId) {
+        if (scrollToMessageId.isNotBlank() && messages.isNotEmpty()) {
+            val idx = messages.indexOfFirst { it.messageId == scrollToMessageId }
+            if (idx >= 0) {
+                locatedMessageId = scrollToMessageId
+                highlightMessageId = scrollToMessageId
+                listState.animateScrollToItem(idx)
+                kotlinx.coroutines.delay(500)
+                highlightMessageId = ""
+            }
+            onMessageScrolled()
+        }
     }
 
     Column(
@@ -241,6 +267,7 @@ fun ChatScreen(
                 ChatBubble(
                     message = msg,
                     avatarUrl = if (msg.isMine) myAvatarUrl else avatarUrl,
+                    highlighted = msg.messageId.isNotBlank() && msg.messageId == highlightMessageId,
                     modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
                 )
             }
@@ -449,9 +476,21 @@ private fun sendChatMessage(
 }
 
 @Composable
-private fun ChatBubble(message: ChatMessage, avatarUrl: String, modifier: Modifier = Modifier) {
+private fun ChatBubble(
+    message: ChatMessage,
+    avatarUrl: String,
+    modifier: Modifier = Modifier,
+    highlighted: Boolean = false
+) {
+    // 定位涟漪：被定位到的消息行短暂高亮 0.5s
+    val rowBg = if (highlighted) {
+        MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f)
+    } else Color.Transparent
     Row(
-        modifier = modifier.fillMaxWidth(),
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(16.dp))
+            .background(rowBg),
         verticalAlignment = Alignment.Top
     ) {
         if (message.isMine) {
