@@ -110,6 +110,7 @@ fun ProfileScreen(
     onToggleDarkTheme: () -> Unit = {},
     onLogout: () -> Unit = {},
     onNotification: () -> Unit = {},
+    onPrivacyClick: () -> Unit = {},
     onNavigateToMessages: () -> Unit = {},
     unreadMessageCount: Int = 0,
     onUserCardClick: () -> Unit = {},
@@ -130,6 +131,7 @@ fun ProfileScreen(
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val userProfile by viewModel.userProfile.collectAsStateWithLifecycle()
     val refreshing by viewModel.refreshing.collectAsStateWithLifecycle()
+    val privacy by viewModel.privacy.collectAsStateWithLifecycle()
     val noRipple = remember { MutableInteractionSource() }
     var bottomIndex by remember { mutableIntStateOf(3) }
     var selectedTab by remember { mutableIntStateOf(0) }
@@ -141,6 +143,7 @@ fun ProfileScreen(
 
     LaunchedEffect(userUid) {
         viewModel.refresh()
+        viewModel.loadPrivacy()
         if (!isSelf) viewModel.loadUserProfile(userUid)
     }
 
@@ -167,7 +170,10 @@ fun ProfileScreen(
     val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner, userUid) {
         val obs = androidx.lifecycle.LifecycleEventObserver { _, event ->
-            if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) viewModel.refresh()
+            if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
+                viewModel.refresh()
+                viewModel.loadPrivacy()
+            }
         }
         lifecycleOwner.lifecycle.addObserver(obs)
         onDispose { lifecycleOwner.lifecycle.removeObserver(obs) }
@@ -223,7 +229,24 @@ fun ProfileScreen(
                 color = MaterialTheme.colorScheme.surface
             ) {
                 Column(Modifier.fillMaxSize()) {
-                    TabRow(selectedTab, onTabSelected = { selectedTab = it })
+                    // 隐私可见性：自己主页四类全部显示(关闭项带锁)；对方主页隐藏关闭项
+                    val showFlags = listOf(privacy.showPosts, privacy.showComments, privacy.showFavorites, privacy.showLikes)
+                    val tabNames = listOf("笔记", "评论", "收藏", "赞过")
+                    val visibleTabs = if (isSelf) listOf(0, 1, 2, 3) else (0..3).filter { showFlags[it] }
+                    val lockedTabs = if (isSelf) (0..3).filter { !showFlags[it] }.toSet() else emptySet()
+                    // 若当前选中的 tab 因隐私被隐藏，自动切到第一个可见项
+                    LaunchedEffect(visibleTabs) {
+                        if (selectedTab !in visibleTabs) {
+                            selectedTab = visibleTabs.firstOrNull() ?: 0
+                        }
+                    }
+                    TabRow(
+                        selected = selectedTab,
+                        tabNames = tabNames,
+                        visibleTabs = visibleTabs,
+                        lockedTabs = lockedTabs,
+                        onTabSelected = { selectedTab = it }
+                    )
 
                     LazyVerticalStaggeredGrid(
                         columns = StaggeredGridCells.Fixed(2),
@@ -239,6 +262,13 @@ fun ProfileScreen(
                                 0 -> {
                                     if (state.draftCount > 0) {
                                         item { DraftBox(state.latestDraftImage, state.draftCount, onDraftClick) }
+                                    }
+                                    if (state.posts.isEmpty() && state.draftCount == 0) {
+                                        item(span = StaggeredGridItemSpan.FullLine) {
+                                            Box(Modifier.fillMaxWidth().height(200.dp), Alignment.Center) {
+                                                Text("暂无笔记", color = Color.Gray, fontSize = 14.sp)
+                                            }
+                                        }
                                     }
                                     items(state.posts, key = { it.id }) { note ->
                                         PostCard(
@@ -289,6 +319,13 @@ fun ProfileScreen(
                                     }
                                 }
                                 2 -> {
+                                    if (state.favoritedPosts.isEmpty()) {
+                                        item(span = StaggeredGridItemSpan.FullLine) {
+                                            Box(Modifier.fillMaxWidth().height(200.dp), Alignment.Center) {
+                                                Text("暂无收藏", color = Color.Gray, fontSize = 14.sp)
+                                            }
+                                        }
+                                    }
                                     items(state.favoritedPosts, key = { it.id }) { note ->
                                         PostCard(
                                             imageRes = note.imageRes,
@@ -306,6 +343,13 @@ fun ProfileScreen(
                                     }
                                 }
                                 3 -> {
+                                    if (state.likedPosts.isEmpty()) {
+                                        item(span = StaggeredGridItemSpan.FullLine) {
+                                            Box(Modifier.fillMaxWidth().height(200.dp), Alignment.Center) {
+                                                Text("暂无赞过", color = Color.Gray, fontSize = 14.sp)
+                                            }
+                                        }
+                                    }
                                     items(state.likedPosts, key = { it.id }) { note ->
                                         PostCard(
                                             imageRes = note.imageRes,
@@ -420,6 +464,7 @@ fun ProfileScreen(
                     onBrowseClick = { showDrawer = false; onBrowseClick() },
                     onChangePassword = { showDrawer = false; changePasswordVisible = true },
                     onNotification = { showDrawer = false; onNotification() },
+                    onPrivacyClick = { showDrawer = false; onPrivacyClick() },
                     onLogout = { showDrawer = false; onLogout() },
                     onToggleDarkTheme = onToggleDarkTheme
                 )
@@ -1006,17 +1051,24 @@ private fun StatItem(num: String, label: String, color: Color) {
 }
 
 @Composable
-private fun TabRow(selected: Int, onTabSelected: (Int) -> Unit) {
-    val tabs = listOf("笔记", "评论", "收藏", "赞过")
+private fun TabRow(
+    selected: Int,
+    tabNames: List<String>,
+    visibleTabs: List<Int>,
+    lockedTabs: Set<Int>,
+    onTabSelected: (Int) -> Unit
+) {
     Row(Modifier
         .fillMaxWidth()
         .background(MaterialTheme.colorScheme.surface)
         .padding(start = 12.dp, end = 12.dp, top =10.dp, bottom = 8.dp), Arrangement.spacedBy(15.dp)) {
-        tabs.forEachIndexed { idx, name ->
+        visibleTabs.forEach { idx ->
+            val name = tabNames[idx]
             val isSel = selected == idx
+            val showLock = idx in lockedTabs
             Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.clickable { onTabSelected(idx) }) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    if (idx != 0) {
+                    if (showLock) {
                         Icon(painterResource(R.drawable.lock_black), null, Modifier.size(12.dp), tint = Color.Gray)
                         Spacer(Modifier.width(3.dp))
                     }
@@ -1214,6 +1266,7 @@ private fun DrawerContent(
     onBrowseClick: () -> Unit,
     onChangePassword: () -> Unit,
     onNotification: () -> Unit,
+    onPrivacyClick: () -> Unit,
     onLogout: () -> Unit,
     onToggleDarkTheme: () -> Unit
 ) {
@@ -1291,12 +1344,23 @@ private fun DrawerContent(
         ) {
             Row(Modifier
                 .fillMaxWidth()
-                .padding(vertical = 8.dp)
+                .padding(vertical = 5.dp)
                 .clickable { onNotification() },
                 verticalAlignment = Alignment.CenterVertically) {
                 Icon(painterResource(R.drawable.bell), null, Modifier.size(20.dp), tint = MaterialTheme.colorScheme.onSurface)
                 Spacer(Modifier.width(5.dp))
                 Text("通知设置", fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurface)
+                Spacer(Modifier.weight(1f))
+                Icon(painterResource(R.drawable.arrow_right), null, Modifier.size(20.dp), tint = getOnSurfaceTertiary())
+            }
+            Row(Modifier
+                .fillMaxWidth()
+                .padding(vertical = 5.dp)
+                .clickable { onPrivacyClick() },
+                verticalAlignment = Alignment.CenterVertically) {
+                Icon(painterResource(R.drawable.lock_black), null, Modifier.size(20.dp), tint = MaterialTheme.colorScheme.onSurface)
+                Spacer(Modifier.width(5.dp))
+                Text("隐私设置", fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurface)
                 Spacer(Modifier.weight(1f))
                 Icon(painterResource(R.drawable.arrow_right), null, Modifier.size(20.dp), tint = getOnSurfaceTertiary())
             }

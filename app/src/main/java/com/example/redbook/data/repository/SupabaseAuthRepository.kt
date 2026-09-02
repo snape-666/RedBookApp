@@ -892,6 +892,52 @@ class SupabaseAuthRepository(private val app: Application) {
         } catch (e: Exception) { "" }
     }
 
+    // ---------- 隐私设置（主页 笔记/评论/收藏/赞过 可见性） ----------
+
+    /** 读取用户主页隐私设置（缺列/查不到时返回默认全开） */
+    suspend fun getPrivacySettings(uid: String): com.example.redbook.data.model.PrivacySettings {
+        if (uid.isBlank()) return com.example.redbook.data.model.PrivacySettings()
+        return try {
+            val resp = queryRest(
+                "users",
+                "select=privacy_posts,privacy_comments,privacy_favorites,privacy_likes,privacy_version&uid=eq.$uid&limit=1"
+            )
+            val arr = resp.optJSONArray("users") ?: JSONArray()
+            if (arr.length() == 0) return com.example.redbook.data.model.PrivacySettings()
+            val u = arr.getJSONObject(0)
+            val s = com.example.redbook.data.model.PrivacySettings(
+                showPosts = if (u.isNull("privacy_posts")) true else u.optBoolean("privacy_posts", true),
+                showComments = if (u.isNull("privacy_comments")) true else u.optBoolean("privacy_comments", true),
+                showFavorites = if (u.isNull("privacy_favorites")) true else u.optBoolean("privacy_favorites", true),
+                showLikes = if (u.isNull("privacy_likes")) true else u.optBoolean("privacy_likes", true),
+                version = u.optLong("privacy_version", 0L)
+            )
+            android.util.Log.d("RedBookPrivacy", "get uid=$uid -> p=${s.showPosts} c=${s.showComments} f=${s.showFavorites} l=${s.showLikes} v=${s.version} raw=$u")
+            s
+        } catch (e: Exception) {
+            android.util.Log.e("RedBookPrivacy", "get FAILED uid=$uid ${e.message}")
+            com.example.redbook.data.model.PrivacySettings()
+        }
+    }
+
+    /** 保存我的主页隐私设置到云端（覆盖写 version 与 4 个开关） */
+    suspend fun savePrivacySettings(uid: String, s: com.example.redbook.data.model.PrivacySettings) {
+        if (uid.isBlank()) return
+        val body = JSONObject().apply {
+            put("privacy_posts", s.showPosts)
+            put("privacy_comments", s.showComments)
+            put("privacy_favorites", s.showFavorites)
+            put("privacy_likes", s.showLikes)
+            put("privacy_version", s.version)
+        }
+        try {
+            patchUserRow(uid, body)
+            android.util.Log.d("RedBookPrivacy", "save ok uid=$uid posts=${s.showPosts} comments=${s.showComments} fav=${s.showFavorites} likes=${s.showLikes} v=${s.version}")
+        } catch (e: Exception) {
+            android.util.Log.e("RedBookPrivacy", "save FAILED uid=$uid ${e.message}")
+        }
+    }
+
     /** 按昵称或小红书号模糊搜索用户（ilike），排除自己；返回 uid,nickname,xhs_id,avatar_url */
     suspend fun searchUsers(query: String, excludeUid: String = ""): JSONArray {
         val q = query.trim()

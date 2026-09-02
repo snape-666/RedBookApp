@@ -33,8 +33,36 @@ class ProfileViewModel(
     private val _userProfile = MutableStateFlow<UserProfileState>(UserProfileState())
     val userProfile: StateFlow<UserProfileState> = _userProfile.asStateFlow()
 
+    /** 隐私设置（自己主页读自己的；对方主页读对方的） */
+    private val _privacy = MutableStateFlow(com.example.redbook.data.model.PrivacySettings())
+    val privacy: StateFlow<com.example.redbook.data.model.PrivacySettings> = _privacy.asStateFlow()
+
     /** 是否为查看自己的主页 */
     val isSelf: Boolean = profileUid == viewerUid || viewerUid.isBlank()
+
+    /** 加载当前主页的隐私设置：自己读本地+云端，对方只读云端 */
+    fun loadPrivacy() {
+        viewModelScope.launch {
+            try {
+                android.util.Log.d("RedBookPrivacy", "loadPrivacy profileUid=$profileUid viewerUid=$viewerUid isSelf=$isSelf")
+                if (isSelf) {
+                    val local = com.example.redbook.notification.PrivacyPrefs.load(profileUid, getApplication())
+                    _privacy.value = local
+                    val cloud = repository.getPrivacySettings(profileUid)
+                    if (cloud.version >= local.version) {
+                        _privacy.value = cloud
+                        com.example.redbook.notification.PrivacyPrefs.save(profileUid, cloud, getApplication())
+                    }
+                } else {
+                    val cloud = repository.getPrivacySettings(profileUid)
+                    _privacy.value = cloud
+                    android.util.Log.d("RedBookPrivacy", "loadPrivacy other -> ${cloud.showPosts}/${cloud.showComments}/${cloud.showFavorites}/${cloud.showLikes} v${cloud.version}")
+                }
+            } catch (e: Exception) {
+                android.util.Log.e("RedBookPrivacy", "loadPrivacy failed ${e.message}")
+            }
+        }
+    }
 
     fun refresh() {
         viewModelScope.launch {

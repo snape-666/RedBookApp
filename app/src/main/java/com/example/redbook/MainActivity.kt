@@ -40,6 +40,7 @@ import com.example.redbook.ui.publish.PublishScreen
 import com.example.redbook.ui.video.VideoDetailScreen
 import com.example.redbook.ui.video.VideoFeedScreen
 import com.example.redbook.ui.profile.ProfileScreen
+import com.example.redbook.ui.profile.PrivacySettingScreen
 import com.example.redbook.ui.profile.UserCardScreen
 import com.example.redbook.ui.draft.DraftScreen
 import com.example.redbook.ui.browse.BrowseScreen
@@ -572,6 +573,7 @@ fun AppScreen(
                 isDarkTheme = isDarkTheme,
                 onToggleDarkTheme = onToggleDarkTheme,
                 onNotification = { navigateTo(Screen.NotificationSetting) },
+                onPrivacyClick = { navigateTo(Screen.PrivacySetting) },
                 onNavigateToMessages = {
                     // 只导航到消息页，不清零未读；点击具体分组时再清零对应未读
                     navigateTo(Screen.Messages)
@@ -883,6 +885,12 @@ fun AppScreen(
                 onBack = { goBack() }
             )
         }
+        Screen.PrivacySetting -> {
+            PrivacySettingScreen(
+                userUid = userUid,
+                onBack = { goBack() }
+            )
+        }
     }
 }
 
@@ -910,4 +918,5 @@ sealed class Screen {
     object EditProfile : Screen()
     object NotificationSetting : Screen()
     object UserCard : Screen()
+    object PrivacySetting : Screen()
 }
