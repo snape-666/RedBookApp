@@ -11,7 +11,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
-class SearchViewModel(application: Application) : AndroidViewModel(application) {
+class SearchViewModel(application: Application, private val userUid: String = "") : AndroidViewModel(application) {
 
     private val repository = SupabaseAuthRepository(application)
     private val prefs = application.getSharedPreferences("search_history", 0)
@@ -32,7 +32,7 @@ class SearchViewModel(application: Application) : AndroidViewModel(application) 
         viewModelScope.launch {
             try {
                 val posts = repository.getPosts()
-                val results = (0 until posts.length()).map { i ->
+                var results = (0 until posts.length()).map { i ->
                     val p = posts.getJSONObject(i)
                     Note(
                         id = p.optString("post_id", ""),
@@ -42,9 +42,25 @@ class SearchViewModel(application: Application) : AndroidViewModel(application) 
                         avatarUrl = p.optString("author_avatar", ""),
                         imageUrl = p.optString("image_url", ""),
                         userName = p.optString("author_name", ""),
-                        likeCount = p.optInt("like_count", 0)
+                        likeCount = p.optInt("like_count", 0),
+                        authorUid = p.optString("author_uid", "")
                     )
                 }.filter { it.title.contains(q, ignoreCase = true) }
+                // 备注名替换：作者名替换为"我"对该作者的备注
+                if (userUid.isNotBlank() && results.isNotEmpty()) {
+                    try {
+                        val uids = results.map { it.authorUid }.filter { it.isNotBlank() }.distinct()
+                        if (uids.isNotEmpty()) {
+                            val remarks = repository.getRemarks(userUid, uids)
+                            if (remarks.isNotEmpty()) {
+                                results = results.map { note ->
+                                    val remark = remarks[note.authorUid]
+                                    if (!remark.isNullOrBlank()) note.copy(userName = remark) else note
+                                }
+                            }
+                        }
+                    } catch (_: Exception) { }
+                }
                 _uiState.value = _uiState.value.copy(searchResults = results)
             } catch (e: Exception) {
                 _uiState.value = _uiState.value.copy(searchResults = emptyList())

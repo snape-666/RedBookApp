@@ -133,14 +133,31 @@ class DetailViewModel(
                     val isLiked = repository.hasLiked(userUid, post.postId)
                     val isFavorited = repository.hasFavorited(userUid, post.postId)
                     val isFollowed = repository.isFollowing(userUid, post.authorId)
+                    // 备注名全局替换：作者 + 评论 + 回复 的用户名统一替换为我对该用户的备注（有备注优先）
+                    val allUids = buildSet {
+                        if (post.authorId.isNotBlank()) add(post.authorId)
+                        comments.forEach { c ->
+                            if (c.userId.isNotBlank()) add(c.userId)
+                            c.replies.forEach { r -> if (r.userId.isNotBlank()) add(r.userId) }
+                        }
+                    }
+                    val remarks = try { repository.getRemarks(userUid, allUids) } catch (_: Exception) { emptyMap<String, String>() }
+                    val displayName = { uid: String, fallback: String -> remarks[uid].orEmpty().ifBlank { fallback } }
                     val finalPost = post.copy(
                         isLiked = isLiked,
                         isFavorited = isFavorited,
                         isFollowed = isFollowed,
                         likeCount = post.likeCount,
-                        favoriteCount = post.favoriteCount
+                        favoriteCount = post.favoriteCount,
+                        authorName = displayName(post.authorId, post.authorName)
                     )
-                    _uiState.value = DetailUiState.Success(finalPost, comments)
+                    val remarksComments = comments.map { c ->
+                        c.copy(
+                            userName = displayName(c.userId, c.userName),
+                            replies = c.replies.map { r -> r.copy(userName = displayName(r.userId, r.userName)) }
+                        )
+                    }
+                    _uiState.value = DetailUiState.Success(finalPost, remarksComments)
                     repository.incrementViewCount(postId)
                     return@launch
                 }

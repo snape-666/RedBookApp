@@ -157,10 +157,15 @@ fun VideoDetailScreen(
                     viewCount = p.optInt("view_count", 0)
                     if (authorUid.isNotBlank()) {
                         followed = repository.isFollowing(userUid, authorUid)
+                        // 备注名全局替换：作者名替换为"我"对该作者的备注
+                        try {
+                            val remark = repository.getRemark(userUid, authorUid)
+                            if (remark.isNotBlank()) realAuthorName = remark
+                        } catch (_: Exception) { }
                     }
                 }
                 // 加载云端评论（评论存 comments 表，post_id = videoId）
-                loadVideoComments(repository, videoId, authorUid, cmts)
+                loadVideoComments(repository, videoId, authorUid, userUid, cmts)
                 // 从通知跳转时定位评论，高亮 0.5s
                 if (scrollToCommentId.isNotBlank()) {
                     val idx = cmts.indexOfFirst { it.id == scrollToCommentId }
@@ -473,11 +478,12 @@ private fun toggleLike(cid: String, cmts: MutableList<Comment>) {
     }
 }
 
-/** 加载云端评论到本地列表 */
+/** 加载云端评论到本地列表（viewerUid 视角做备注名替换） */
 private suspend fun loadVideoComments(
     repository: SupabaseAuthRepository,
     postId: String,
     postAuthorUid: String,
+    viewerUid: String,
     cmts: MutableList<Comment>
 ) {
     if (postId.isBlank()) return
@@ -502,7 +508,7 @@ private suspend fun loadVideoComments(
             )
         }
         val replies = raw.filter { it.first.isNotEmpty() }
-        val comments = raw.filter { it.first.isEmpty() }.map { (_, comment) ->
+        var comments = raw.filter { it.first.isEmpty() }.map { (_, comment) ->
             comment.copy(
                 replies = replies.filter { it.first == comment.id }.map { (_, r) ->
                     Reply(
@@ -520,6 +526,27 @@ private suspend fun loadVideoComments(
                     )
                 }
             )
+        }
+        // 备注名替换：评论/回复作者名替换为"我"对他们的备注
+        if (viewerUid.isNotBlank() && comments.isNotEmpty()) {
+            try {
+                val uids = buildSet {
+                    comments.forEach { c ->
+                        if (c.userId.isNotBlank()) add(c.userId)
+                        c.replies.forEach { r -> if (r.userId.isNotBlank()) add(r.userId) }
+                    }
+                }
+                val remarks = repository.getRemarks(viewerUid, uids)
+                if (remarks.isNotEmpty()) {
+                    val displayName = { uid: String, fallback: String -> remarks[uid].orEmpty().ifBlank { fallback } }
+                    comments = comments.map { c ->
+                        c.copy(
+                            userName = displayName(c.userId, c.userName),
+                            replies = c.replies.map { r -> r.copy(userName = displayName(r.userId, r.userName)) }
+                        )
+                    }
+                }
+            } catch (_: Exception) { }
         }
         cmts.clear()
         cmts.addAll(comments)

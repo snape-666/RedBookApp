@@ -64,12 +64,13 @@ private val OutlineLight = Color.Gray.copy(alpha = 0.5f)
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun SearchScreen(
+    userUid: String = "",
     onBack: () -> Unit,
     onNavigateToDetail: (String) -> Unit
 ) {
     val context = LocalContext.current
     val viewModel: SearchViewModel =
-        viewModel(factory = SearchViewModelFactory(context.applicationContext as android.app.Application))
+        viewModel(key = userUid, factory = SearchViewModelFactory(context.applicationContext as android.app.Application, userUid))
     val state by viewModel.uiState.collectAsState()
     val history = state.historyList
     var isDeleteMode by remember { mutableStateOf(false) }

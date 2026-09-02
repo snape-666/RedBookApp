@@ -104,10 +104,11 @@ fun MessageSearchScreen(
     ) {
         // 搜索 row 距顶部 24dp；结果列表底部留 16dp
         Spacer(modifier = Modifier.height(24.dp))
-        SearchInputRow(
+        MessageTopSearchBar(
             query = query,
             onQueryChange = { query = it },
-            onCancel = { onBack() }
+            onCancel = { onBack() },
+            placeholder = "搜索聊天记录/好友"
         )
 
         val q = query.trim()
@@ -184,86 +185,6 @@ fun MessageSearchScreen(
                 }
             }
         }
-    }
-}
-
-/** 顶部搜索 row：输入框(15dp 圆角,background 底色) + 5dp + 取消 */
-@Composable
-private fun SearchInputRow(
-    query: String,
-    onQueryChange: (String) -> Unit,
-    onCancel: () -> Unit
-) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Row(
-            modifier = Modifier
-                .weight(1f)
-                .clip(RoundedCornerShape(15.dp))
-                .background(MaterialTheme.colorScheme.background)
-                .padding(horizontal = 12.dp, vertical = 9.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Icon(
-                painter = painterResource(id = R.drawable.search),
-                contentDescription = "搜索",
-                modifier = Modifier.size(18.dp),
-                tint = getOnSurfaceSecondary()
-            )
-            Spacer(modifier = Modifier.width(6.dp))
-            Box(modifier = Modifier.weight(1f)) {
-                BasicTextField(
-                    value = query,
-                    onValueChange = onQueryChange,
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true,
-                    textStyle = androidx.compose.ui.text.TextStyle(
-                        fontSize = 14.sp,
-                        color = MaterialTheme.colorScheme.onSurface
-                    ),
-                    cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
-                    decorationBox = { innerTextField ->
-                        Box(contentAlignment = Alignment.CenterStart) {
-                            if (query.isEmpty()) {
-                                Text(
-                                    text = "搜索聊天记录/好友",
-                                    fontSize = 14.sp,
-                                    color = getOnSurfaceSecondary()
-                                )
-                            }
-                            innerTextField()
-                        }
-                    }
-                )
-            }
-            // 有输入时末尾显示清空按钮
-            if (query.isNotEmpty()) {
-                Spacer(modifier = Modifier.width(4.dp))
-                Icon(
-                    painter = painterResource(id = R.drawable.close_ring_fill),
-                    contentDescription = "清空",
-                    modifier = Modifier
-                        .size(16.dp)
-                        .clickable(
-                            interactionSource = remember { MutableInteractionSource() },
-                            indication = null
-                        ) { onQueryChange("") },
-                    tint = getOnSurfaceSecondary()
-                )
-            }
-        }
-        Spacer(modifier = Modifier.width(5.dp))
-        Text(
-            text = "取消",
-            fontSize = 14.sp,
-            color = getOnSurfaceSecondary(),
-            modifier = Modifier.clickable(
-                interactionSource = remember { MutableInteractionSource() },
-                indication = null
-            ) { onCancel() }
-        )
     }
 }
 

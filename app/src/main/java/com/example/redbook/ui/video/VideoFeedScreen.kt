@@ -124,7 +124,21 @@ fun VideoFeedScreen(
                     }
                 }
             } catch (_: Exception) { }
-            videos = merged
+            // 备注名全局替换：作者名替换为"我"对该作者的备注
+            videos = if (userUid.isNotBlank()) {
+                try {
+                    val uids = merged.map { it.authorUid }.filter { it.isNotBlank() }.distinct()
+                    if (uids.isEmpty()) merged
+                    else {
+                        val remarks = repository.getRemarks(userUid, uids)
+                        if (remarks.isEmpty()) merged
+                        else merged.map { v ->
+                            val remark = remarks[v.authorUid]
+                            if (!remark.isNullOrBlank()) v.copy(authorName = remark) else v
+                        }
+                    }
+                } catch (_: Exception) { merged }
+            } else merged
         } catch (_: Exception) { }
         loading = false
     }
@@ -226,7 +240,7 @@ private fun FeedVideoPage(
                     }
                 }
                 // 加载云端评论（post_id = videoId）
-                loadFeedComments(repository, video.videoId, video.authorUid, cmts)
+                loadFeedComments(repository, video.videoId, video.authorUid, userUid, cmts)
             } catch (_: Exception) { }
         }
     }
@@ -523,11 +537,12 @@ private fun toggleFeedLike(cid: String, cmts: MutableList<Comment>) {
     }
 }
 
-/** 加载云端评论到本地列表 */
+/** 加载云端评论到本地列表（viewerUid 视角做备注名替换） */
 private suspend fun loadFeedComments(
     repository: SupabaseAuthRepository,
     postId: String,
     postAuthorUid: String,
+    viewerUid: String,
     cmts: MutableList<Comment>
 ) {
     if (postId.isBlank()) return
@@ -552,7 +567,7 @@ private suspend fun loadFeedComments(
             )
         }
         val replies = raw.filter { it.first.isNotEmpty() }
-        val comments = raw.filter { it.first.isEmpty() }.map { (_, comment) ->
+        var comments = raw.filter { it.first.isEmpty() }.map { (_, comment) ->
             comment.copy(
                 replies = replies.filter { it.first == comment.id }.map { (_, r) ->
                     Reply(
@@ -570,6 +585,27 @@ private suspend fun loadFeedComments(
                     )
                 }
             )
+        }
+        // 备注名替换：评论/回复作者名替换为"我"对他们的备注
+        if (viewerUid.isNotBlank() && comments.isNotEmpty()) {
+            try {
+                val uids = buildSet {
+                    comments.forEach { c ->
+                        if (c.userId.isNotBlank()) add(c.userId)
+                        c.replies.forEach { r -> if (r.userId.isNotBlank()) add(r.userId) }
+                    }
+                }
+                val remarks = repository.getRemarks(viewerUid, uids)
+                if (remarks.isNotEmpty()) {
+                    val displayName = { uid: String, fallback: String -> remarks[uid].orEmpty().ifBlank { fallback } }
+                    comments = comments.map { c ->
+                        c.copy(
+                            userName = displayName(c.userId, c.userName),
+                            replies = c.replies.map { r -> r.copy(userName = displayName(r.userId, r.userName)) }
+                        )
+                    }
+                }
+            } catch (_: Exception) { }
         }
         cmts.clear()
         cmts.addAll(comments)

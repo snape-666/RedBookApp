@@ -45,6 +45,7 @@ import com.example.redbook.ui.editprofile.EditProfileScreen
 import com.example.redbook.ui.notificationsetting.NotificationSettingScreen
 import com.example.redbook.ui.messages.MessagesScreen
 import com.example.redbook.ui.messages.MessageSearchScreen
+import com.example.redbook.ui.messages.AddFriendScreen
 import com.example.redbook.ui.messages.ReceivedReactionsScreen
 import com.example.redbook.ui.messages.ReceivedCommentsScreen
 import com.example.redbook.ui.messages.FollowersScreen
@@ -597,7 +598,17 @@ fun AppScreen(
                 },
                 onSearchClick = {
                     navigateTo(Screen.MessagesSearch)
+                },
+                onAddFriendClick = {
+                    navigateTo(Screen.AddFriend)
                 }
+            )
+        }
+        Screen.AddFriend -> {
+            AddFriendScreen(
+                userUid = userUid,
+                onBack = { goBack() },
+                onUserClick = { targetUid -> openUserProfile(targetUid) }
             )
         }
         Screen.MessagesSearch -> {
@@ -770,6 +781,7 @@ fun AppScreen(
         }
         Screen.Search -> {
             SearchScreen(
+                userUid = userUid,
                 onBack = { goBack() },
                 onNavigateToDetail = { postId ->
                     selectedPostId = postId
@@ -803,6 +815,7 @@ sealed class Screen {
     object Browse : Screen()
     object Messages : Screen()
     object MessagesSearch : Screen()
+    object AddFriend : Screen()
     object ReceivedReactions : Screen()
     object ReceivedComments : Screen()
     object Followers : Screen()

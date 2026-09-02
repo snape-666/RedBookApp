@@ -866,6 +866,41 @@ class SupabaseAuthRepository(private val app: Application) {
         } catch (e: Exception) { null }
     }
 
+    /** 按昵称或小红书号模糊搜索用户（ilike），排除自己；返回 uid,nickname,xhs_id,avatar_url */
+    suspend fun searchUsers(query: String, excludeUid: String = ""): JSONArray {
+        val q = query.trim()
+        if (q.isBlank()) return JSONArray()
+        return try {
+            val encoded = java.net.URLEncoder.encode("*$q*", "UTF-8")
+            val resp = queryRest(
+                "users",
+                "select=uid,nickname,xhs_id,avatar_url&or=(nickname.ilike.$encoded,xhs_id.ilike.$encoded)&limit=50"
+            )
+            val arr = resp.optJSONArray("users") ?: JSONArray()
+            if (excludeUid.isBlank()) return arr
+            val result = JSONArray()
+            for (i in 0 until arr.length()) {
+                val u = arr.getJSONObject(i)
+                if (u.optString("uid", "") != excludeUid) result.put(u)
+            }
+            result
+        } catch (e: Exception) { JSONArray() }
+    }
+
+    /** 批量判断我是否关注了这些人（返回 uid -> followed） */
+    suspend fun isFollowingBatch(followerUid: String, targetUids: Collection<String>): Map<String, Boolean> {
+        if (followerUid.isBlank()) return emptyMap()
+        val targets = targetUids.filter { it.isNotBlank() }.distinct()
+        if (targets.isEmpty()) return emptyMap()
+        return try {
+            val filters = targets.joinToString(",") { "followed_uid.eq.$it" }
+            val resp = queryRest("follows", "select=followed_uid&follower_uid=eq.$followerUid&or=($filters)")
+            val arr = resp.optJSONArray("users") ?: resp.optJSONArray("follows") ?: JSONArray()
+            val followed = (0 until arr.length()).map { arr.getJSONObject(it).optString("followed_uid", "") }.toSet()
+            targets.associateWith { it in followed }
+        } catch (e: Exception) { emptyMap() }
+    }
+
     /** 批量查用户头像（uid -> avatar_url），用于评论头像兜底 */
     suspend fun getAvatarsByUids(uids: Set<String>): Map<String, String> {
         if (uids.isEmpty()) return emptyMap()

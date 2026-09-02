@@ -68,13 +68,13 @@ class ProfileViewModel(
                 fansCount = d8.await()
                 likeCount = d9.await()
             }
-            val parsedPosts = parsePosts(posts, likedIds)
+            val parsedPosts = applyRemarksToPosts(parsePosts(posts, likedIds))
             val latestDraftImage = if (drafts.length() > 0) drafts.getJSONObject(0).optString("image_url", "") else ""
             _uiState.value = ProfileUiState(
                 posts = parsedPosts,
                 draftCount = drafts.length(),
-                likedPosts = parsePosts(liked, likedIds),
-                favoritedPosts = parsePosts(favorited, likedIds),
+                likedPosts = applyRemarksToPosts(parsePosts(liked, likedIds)),
+                favoritedPosts = applyRemarksToPosts(parsePosts(favorited, likedIds)),
                 commentCount = comments.length(),
                 comments = parseUserComments(comments),
                 latestPostImage = parsedPosts.firstOrNull()?.imageUrl ?: "",
@@ -219,9 +219,25 @@ class ProfileViewModel(
                 avatarUrl = p.optString("author_avatar", ""),
                 userName = p.optString("author_name", ""),
                 likeCount = p.optInt("like_count", 0),
-                isLiked = likedIds.contains(postId)
+                isLiked = likedIds.contains(postId),
+                authorUid = p.optString("author_uid", "")
             )
         }
+    }
+
+    /** 把帖子作者名替换为"我(viewerUid)"对作者的备注；自己主页(viewerUid 空)不需要 */
+    private suspend fun applyRemarksToPosts(posts: List<Note>): List<Note> {
+        if (viewerUid.isBlank() || posts.isEmpty()) return posts
+        return try {
+            val uids = posts.map { it.authorUid }.filter { it.isNotBlank() }.distinct()
+            if (uids.isEmpty()) return posts
+            val remarks = repository.getRemarks(viewerUid, uids)
+            if (remarks.isEmpty()) return posts
+            posts.map { note ->
+                val remark = remarks[note.authorUid]
+                if (!remark.isNullOrBlank()) note.copy(userName = remark) else note
+            }
+        } catch (e: Exception) { posts }
     }
 
     data class ProfileUiState(

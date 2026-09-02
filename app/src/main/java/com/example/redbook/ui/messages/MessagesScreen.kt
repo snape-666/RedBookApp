@@ -73,7 +73,8 @@ fun MessagesScreen(
     onCommentClick: () -> Unit = {},
     onFollowClick: () -> Unit = {},
     onConversationClick: (String, String, String) -> Unit = { _, _, _ -> },
-    onSearchClick: () -> Unit = {}
+    onSearchClick: () -> Unit = {},
+    onAddFriendClick: () -> Unit = {}
 ) {
     var bottomIndex by remember { mutableIntStateOf(2) }
     val context = LocalContext.current
@@ -93,7 +94,7 @@ fun MessagesScreen(
     ) {
         Spacer(modifier = Modifier.fillMaxWidth().height(24.dp).background(MaterialTheme.colorScheme.surface))
 
-        MessagesTopBar(onSearchClick = onSearchClick)
+        MessagesTopBar(onSearchClick = onSearchClick, onAddFriendClick = onAddFriendClick)
 
         ReactionGroupRow(
             unreadLikesFavs = unreadLikesFavs,
@@ -145,7 +146,7 @@ fun MessagesScreen(
 }
 
 @Composable
-private fun MessagesTopBar(onSearchClick: () -> Unit = {}) {
+private fun MessagesTopBar(onSearchClick: () -> Unit = {}, onAddFriendClick: () -> Unit = {}) {
     Box(
         modifier = Modifier
             .fillMaxWidth()
@@ -179,7 +180,12 @@ private fun MessagesTopBar(onSearchClick: () -> Unit = {}) {
             Icon(
                 painter = painterResource(id = R.drawable.user_add),
                 contentDescription = "添加好友",
-                modifier = Modifier.size(24.dp),
+                modifier = Modifier
+                    .size(24.dp)
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null
+                    ) { onAddFriendClick() },
                 tint = getOnSurfaceTertiary()
             )
         }

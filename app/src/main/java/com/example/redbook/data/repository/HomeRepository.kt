@@ -12,9 +12,10 @@ class HomeRepository(val supabase: SupabaseAuthRepository) {
             val likedIds = try { supabase.getLikedPostIds(userUid) } catch (e: Exception) { emptySet() }
             if (posts.length() == 0) {
                 seedMockPosts()
-                return try { parsePosts(supabase.getPosts(), likedIds) } catch (e: Exception) { mockNotes() }
+                val seeded = try { parsePosts(supabase.getPosts(), likedIds) } catch (e: Exception) { mockNotes() }
+                return applyRemarks(seeded, userUid)
             }
-            parsePosts(posts, likedIds)
+            applyRemarks(parsePosts(posts, likedIds), userUid)
         } catch (e: Exception) {
             mockNotes()
         }
@@ -27,10 +28,26 @@ class HomeRepository(val supabase: SupabaseAuthRepository) {
             val followingUids = supabase.getFollowingUids(userUid)
             val posts = supabase.getPosts()
             val likedIds = try { supabase.getLikedPostIds(userUid) } catch (e: Exception) { emptySet() }
-            parsePosts(posts, likedIds).filter { it.authorUid in followingUids }
+            val notes = parsePosts(posts, likedIds).filter { it.authorUid in followingUids }
+            applyRemarks(notes, userUid)
         } catch (e: Exception) {
             emptyList()
         }
+    }
+
+    /** 将作者名替换为我对该作者的备注（有备注优先），authorUid 为空的 mock 数据跳过 */
+    private suspend fun applyRemarks(notes: List<Note>, userUid: String): List<Note> {
+        if (userUid.isBlank() || notes.isEmpty()) return notes
+        return try {
+            val uids = notes.map { it.authorUid }.filter { it.isNotBlank() }.distinct()
+            if (uids.isEmpty()) return notes
+            val remarks = supabase.getRemarks(userUid, uids)
+            if (remarks.isEmpty()) return notes
+            notes.map { note ->
+                val remark = remarks[note.authorUid]
+                if (!remark.isNullOrBlank()) note.copy(userName = remark) else note
+            }
+        } catch (e: Exception) { notes }
     }
 
     private fun parsePosts(posts: JSONArray, likedIds: Set<String> = emptySet()): List<Note> {
