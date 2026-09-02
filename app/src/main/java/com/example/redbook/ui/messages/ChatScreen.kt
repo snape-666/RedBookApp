@@ -77,7 +77,8 @@ fun ChatScreen(
     scrollToMessageId: String = "",
     onMessageScrolled: () -> Unit = {},
     onBack: () -> Unit = {},
-    onUserClick: (String) -> Unit = {}
+    onUserClick: (String) -> Unit = {},
+    onUserCardClick: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val realtimeRepo = repository ?: remember { RealtimeRepository(context.applicationContext as android.app.Application) }
@@ -242,8 +243,13 @@ fun ChatScreen(
             )
             Icon(
                 painter = painterResource(id = R.drawable.menu),
-                contentDescription = "菜单",
-                modifier = Modifier.size(24.dp),
+                contentDescription = "资料卡",
+                modifier = Modifier
+                    .size(24.dp)
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null
+                    ) { onUserCardClick() },
                 tint = MaterialTheme.colorScheme.onSurface
             )
         }

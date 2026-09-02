@@ -112,6 +112,7 @@ fun ProfileScreen(
     onNotification: () -> Unit = {},
     onNavigateToMessages: () -> Unit = {},
     unreadMessageCount: Int = 0,
+    onUserCardClick: () -> Unit = {},
     // 对方主页模式：viewerUid 为当前登录者，isSelf=false 时展示对方主页
     viewerUid: String = "",
     onSendMessage: (String, String, String) -> Unit = { _, _, _ -> }
@@ -201,6 +202,7 @@ fun ProfileScreen(
                     OtherUserHeader(
                         userProfile = userProfile,
                         onBack = onBack,
+                        onUserCardClick = onUserCardClick,
                         onFollowClick = { viewModel.toggleFollowTarget() },
                         onActionClick = { showActionSheet = true },
                         onSendMessage = {
@@ -467,6 +469,7 @@ fun ProfileScreen(
 private fun OtherUserHeader(
     userProfile: ProfileViewModel.UserProfileState,
     onBack: () -> Unit,
+    onUserCardClick: () -> Unit = {},
     onFollowClick: () -> Unit,
     onActionClick: () -> Unit,
     onSendMessage: () -> Unit,
@@ -500,15 +503,21 @@ private fun OtherUserHeader(
         Column(Modifier
             .fillMaxWidth()
             .padding(top = 36.dp, start = 12.dp, end = 12.dp)) {
-            // 顶部 row：只有返回按钮
+            // 顶部 row：返回 + 资料卡菜单
             Row(Modifier
                 .fillMaxWidth()
                 .padding(vertical = 8.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically) {
                 Icon(painterResource(R.drawable.arrow_left), null, Modifier
                     .size(28.dp)
                     .clickable { onBack() },
                     tint = onPri.copy(alpha = 0.8f))
+                // 我查看的用户主页：end 为 menu 图标(surface 80% 透明度)，点击查看该用户资料卡
+                Icon(painterResource(R.drawable.menu), null, Modifier
+                    .size(28.dp)
+                    .clickable { onUserCardClick() },
+                    tint = MaterialTheme.colorScheme.surface.copy(alpha = 0.8f))
             }
 
             Spacer(Modifier.height(12.dp))

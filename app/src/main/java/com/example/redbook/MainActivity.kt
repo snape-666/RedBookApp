@@ -9,6 +9,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.annotation.RequiresApi
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -39,6 +40,7 @@ import com.example.redbook.ui.publish.PublishScreen
 import com.example.redbook.ui.video.VideoDetailScreen
 import com.example.redbook.ui.video.VideoFeedScreen
 import com.example.redbook.ui.profile.ProfileScreen
+import com.example.redbook.ui.profile.UserCardScreen
 import com.example.redbook.ui.draft.DraftScreen
 import com.example.redbook.ui.browse.BrowseScreen
 import com.example.redbook.ui.editprofile.EditProfileScreen
@@ -51,7 +53,6 @@ import com.example.redbook.ui.messages.ReceivedCommentsScreen
 import com.example.redbook.ui.messages.FollowersScreen
 import com.example.redbook.ui.messages.ChatScreen
 import com.example.redbook.data.model.Draft
-import com.example.redbook.R
 import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
@@ -106,6 +107,7 @@ fun AppScreen(
     var chatPeerUid by remember { mutableStateOf("") }
     var chatConversationId by remember { mutableStateOf("") }
     var viewProfileUid by remember { mutableStateOf("") }
+    var userCardUid by remember { mutableStateOf("") }
     var scrollToCommentId by remember { mutableStateOf("") }
     var scrollToMessageId by remember { mutableStateOf("") }
     var screenStack by remember { mutableStateOf(listOf<Screen>(Screen.Login)) }
@@ -132,6 +134,7 @@ fun AppScreen(
     var pendingNotif by remember { mutableStateOf<PendingNotif?>(null) }
     var highlightActorUid by remember { mutableStateOf("") }
 
+    @RequiresApi(Build.VERSION_CODES.O)
     fun startNotificationService() {
         if (userUid.isBlank()) return
         try {
@@ -410,6 +413,13 @@ fun AppScreen(
         navigateTo(Screen.UserProfile)
     }
 
+    // 打开资料卡（自己或对方，实时拉云端）
+    fun openUserCard(targetUid: String) {
+        if (targetUid.isBlank()) return
+        userCardUid = targetUid
+        navigateTo(Screen.UserCard)
+    }
+
     when (currentScreen) {
         Screen.Login -> {
             LoginScreen(
@@ -518,7 +528,8 @@ fun AppScreen(
                 viewerUid = userUid,
                 onSendMessage = { peerUid, peerName, peerAvatar ->
                     openChatWith(peerUid, peerName, peerAvatar)
-                }
+                },
+                onUserCardClick = { openUserCard(viewProfileUid) }
             )
         }
         Screen.Profile -> {
@@ -591,6 +602,7 @@ fun AppScreen(
                     chatConversationId = ""
                     scrollToMessageId = ""
                     viewProfileUid = ""
+                    userCardUid = ""
                     pendingNotif = null
                     highlightActorUid = ""
                     loginResetKey++
@@ -769,7 +781,8 @@ fun AppScreen(
                 scrollToMessageId = scrollToMessageId,
                 onMessageScrolled = { scrollToMessageId = "" },
                 onBack = { goBack() },
-                onUserClick = { targetUid -> openUserProfile(targetUid) }
+                onUserClick = { targetUid -> openUserProfile(targetUid) },
+                onUserCardClick = { if (chatPeerUid.isNotBlank()) openUserCard(chatPeerUid) }
             )
         }
         Screen.Followers -> {
@@ -864,6 +877,12 @@ fun AppScreen(
                 onBack = { goBack() }
             )
         }
+        Screen.UserCard -> {
+            UserCardScreen(
+                targetUid = userCardUid,
+                onBack = { goBack() }
+            )
+        }
     }
 }
 
@@ -890,4 +909,5 @@ sealed class Screen {
     object Chat : Screen()
     object EditProfile : Screen()
     object NotificationSetting : Screen()
+    object UserCard : Screen()
 }
