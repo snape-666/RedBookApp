@@ -53,6 +53,7 @@ import com.example.redbook.ui.messages.ReceivedReactionsScreen
 import com.example.redbook.ui.messages.ReceivedCommentsScreen
 import com.example.redbook.ui.messages.FollowersScreen
 import com.example.redbook.ui.messages.ChatScreen
+import com.example.redbook.data.local.SessionPrefs
 import com.example.redbook.data.model.Draft
 import kotlinx.coroutines.launch
 
@@ -129,6 +130,29 @@ fun AppScreen(
     var videoRefreshKey by remember { mutableIntStateOf(0) }
     var videoEditMode by remember { mutableStateOf(false) }
     var loginResetKey by remember { mutableIntStateOf(0) }
+
+    // ---- 记住登录：进程被杀/冷启动后恢复已登录会话(仅自动恢复一次) ----
+    var sessionRestored by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        if (sessionRestored) return@LaunchedEffect
+        sessionRestored = true
+        val saved = SessionPrefs.load(context)
+        if (saved != null && currentScreen == Screen.Login) {
+            userUid = saved.uid
+            userXhsId = saved.xhsId
+            userName = saved.nickname.ifBlank { saved.account }
+            userAccount = saved.account
+            userEmail = saved.email
+            userGender = saved.gender
+            userBirthday = saved.birthday
+            userAvatarUrl = saved.avatarUrl
+            userBackgroundUrl = saved.backgroundUrl
+            SupabaseAuthRepository.currentUserName = userName
+            SupabaseAuthRepository.currentUserAvatar = saved.avatarUrl
+            screenStack = listOf(Screen.Home)
+            currentScreen = Screen.Home
+        }
+    }
 
     // ---- 未读角标状态 ----
     var unreadLikesFavs by remember { mutableIntStateOf(0) }
@@ -442,6 +466,8 @@ fun AppScreen(
                     userBackgroundUrl = userData.backgroundUrl
                     SupabaseAuthRepository.currentUserName = userName
                     SupabaseAuthRepository.currentUserAvatar = userData.avatarUrl
+                    // 记住登录：进程被杀/冷启动后仍保持登录
+                    SessionPrefs.save(userData, context)
                     screenStack = listOf(Screen.Home)
                     currentScreen = Screen.Home
                 },
@@ -675,6 +701,8 @@ fun AppScreen(
                     } catch (_: Exception) { }
                     // 清除缓存 uid,防止 START_STICKY 服务在进程被杀后带旧账号重启
                     NotifPrefs.setCachedLoginUid("", context)
+                    // 清除记住登录会话:下次启动回到登录页
+                    SessionPrefs.clear(context)
                 }
             )
         }

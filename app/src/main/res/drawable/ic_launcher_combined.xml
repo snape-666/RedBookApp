@@ -1,10 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 应用图标：primary(红) 背景 + appicon(白色小书本) 居中 -->
+<!-- 应用图标：primary(红) 背景 + appicon(白色小书本) 居中，主体约占图标总尺寸的 40% -->
 <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
     <item android:drawable="@drawable/ic_launcher_bg" />
     <item
-        android:width="66dp"
-        android:height="66dp"
+        android:width="56dp"
+        android:height="56dp"
         android:gravity="center"
         android:drawable="@drawable/appicon" />
 </layer-list>

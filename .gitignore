@@ -14,3 +14,6 @@
 .cxx
 local.properties
 supabase.properties
+*.jks
+app/release/
+
