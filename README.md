@@ -6,7 +6,7 @@
 
 | 类别 | 选型 |
 | --- | --- |
-| 语言 | Kotlin 2.x |
+| 语言 | Kotlin  |
 | UI | Jetpack Compose + Material 3(自定义小红书红主题) |
 | 架构 | 单 Activity + 手写 Screen 导航栈;MVVM(ViewModel + StateFlow / mutableState) |
 | 图片加载 | Coil(AsyncImage) |
@@ -30,23 +30,23 @@
 
 | 功能 | 说明/入口 | 依赖的关键实现 |
 | --- | --- | --- |
-| 登录 / 注册 | 账号或邮箱+密码,注册发小红书号 | `SupabaseAuthRepository`(Auth REST) |
+| 登录 / 注册 | 账号或邮箱+密码,注册自动生成小红书ID | `SupabaseAuthRepository`(Auth REST) |
 | 首页 | 关注 / 发现双 Tab 图文信息流 | `HomeRepository` + Volley REST |
-| 视频流 | 竖滑全屏视频播放与点赞/评论 | `VideoFeedScreen` + Coil/VideoView |
+| 视频流 | 竖滑视频播放与点赞/评论 | `VideoFeedScreen` + Coil/VideoView |
 | 帖子详情 | 图文内容、点赞收藏、评论/回复、长按删评论 | `DetailScreen` + `DetailViewModel` |
 | 作者编辑 | 编辑已发布帖子、权限设置、删除 | `PublishScreen` 编辑模式 + `posts.visibility` |
 | 发布 | 多图/视频发布,支持长按拖拽排序、存草稿 | `PublishScreen` + 图片上传(存储) |
 | 草稿箱 | 草稿列表、续写/删除 | `drafts` 表 + `DraftScreen` |
-| 我的主页 | 笔记/评论/收藏/赞过 分区,抽屉菜单 | `ProfileScreen` + 隐私过滤 |
+| 我的主页 | 笔记/评论/收藏/赞过 分区,侧边栏菜单 | `ProfileScreen` + 隐私过滤 |
 | 他人主页 | 资料卡、关注/取关、备注名、发私信 | `ProfileViewModel` + `follows`/`remarks` |
-| 搜索 | 图文搜索 + 搜索历史/推荐词 | `SearchScreen` + PostgREST 过滤 |
+| 搜索 | 关键字搜索 | `SearchScreen` + PostgREST 过滤 |
 | 消息中心 | 聊天列表、点赞/关注/评论通知分组 | `RealtimeRepository` + WebSocket |
 | 私信聊天 | 点对点会话、消息历史与滚动定位 | 会话表 + Realtime 推送 |
 | 浏览记录 | 最近看过、多选删除 | `browsing_history` 表 |
 | 通知系统 | 前台服务 + 系统通知,点击路由到对应页面 | `NotificationService` + `NotifClickRouter` |
 | 隐私设置 | 笔记/评论/收藏/赞过 对他人可见开关 | `users.privacy_*` 列 + 本地缓存 |
 | 通知设置 | 总开关 + 分类开关,权限引导 | `NotifPrefs` + 云端双存 |
-| 资料卡 | 查看/交换名片式资料 | `UserCardScreen` |
+| 资料卡 | 查看名片式资料 | `UserCardScreen` |
 
 ## 后端说明(Supabase)
 
