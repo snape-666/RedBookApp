@@ -3,6 +3,7 @@ package com.example.redbook.ui.profile
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -28,6 +29,7 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -58,14 +60,14 @@ fun PrivacySettingScreen(
         .background(MaterialTheme.colorScheme.background)
         .padding(start = 12.dp, end = 12.dp, top = 36.dp, bottom = 16.dp)
     ) {
-        Row(
-            Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically
+        Box(
+            Modifier.fillMaxWidth().height(32.dp)
         ) {
             Icon(
                 painter = painterResource(R.drawable.arrow_left),
                 contentDescription = "返回",
                 modifier = Modifier
+                    .align(Alignment.CenterStart)
                     .size(28.dp)
                     .clickable(
                         interactionSource = remember { MutableInteractionSource() },
@@ -73,34 +75,36 @@ fun PrivacySettingScreen(
                     ) { onBack() },
                 tint = MaterialTheme.colorScheme.onSurface
             )
-            Spacer(Modifier.width(10.dp))
-            Text("隐私设置", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
+            Text("隐私设置",
+                fontSize = 16.sp,
+                fontWeight = FontWeight.Bold,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.align(Alignment.Center).fillMaxWidth(),
+                color = MaterialTheme.colorScheme.onSurface)
         }
 
         Spacer(Modifier.height(15.dp))
 
-        Column(Modifier
-            .fillMaxWidth()
-            .shadow(4.dp, RoundedCornerShape(16.dp))
-            .clip(RoundedCornerShape(16.dp))
-            .background(MaterialTheme.colorScheme.surface)
-            .padding(vertical = 3.dp, horizontal = 10.dp)
-        ) {
+        // 每行独立成卡：15dp 圆角 + 阴影；行与行间隔 10dp
+        Column(Modifier.fillMaxWidth()) {
             PrivacySwitchRow(
                 text = "展示笔记",
                 checked = settings.showPosts,
                 onCheckedChange = { viewModel.setShowPosts(it) }
             )
+            Spacer(Modifier.height(10.dp))
             PrivacySwitchRow(
                 text = "展示评论",
                 checked = settings.showComments,
                 onCheckedChange = { viewModel.setShowComments(it) }
             )
+            Spacer(Modifier.height(10.dp))
             PrivacySwitchRow(
                 text = "展示收藏",
                 checked = settings.showFavorites,
                 onCheckedChange = { viewModel.setShowFavorites(it) }
             )
+            Spacer(Modifier.height(10.dp))
             PrivacySwitchRow(
                 text = "展示赞过",
                 checked = settings.showLikes,
@@ -119,7 +123,10 @@ private fun PrivacySwitchRow(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = 5.dp),
+            .shadow(4.dp, RoundedCornerShape(15.dp))
+            .clip(RoundedCornerShape(15.dp))
+            .background(MaterialTheme.colorScheme.surface)
+            .padding(horizontal = 10.dp, vertical = 3.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Text(text = text, fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurface)

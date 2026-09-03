@@ -106,7 +106,7 @@ fun VideoFeedScreen(
             // 数据源：posts 表中 image_url 带 video: 前缀的视频（视频统一存 posts 表）
             val merged = mutableListOf<FeedVideo>()
             try {
-                val posts = repository.getPosts()
+                val posts = repository.filterVisiblePosts(repository.getPosts(), userUid)
                 for (i in 0 until posts.length()) {
                     val p = posts.getJSONObject(i)
                     val imageUrl = p.optString("image_url", "")

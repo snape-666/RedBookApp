@@ -640,6 +640,8 @@ fun NoteCardBottomBar(
     onLikeClick: (Int) -> Unit,
     onFavoriteClick: (Int) -> Unit,
     onCommentIconClick: () -> Unit,
+    // 自定义左侧区域：替换"说点什么..."输入框（如自己的帖子详情页显示编辑入口）
+    leadingContent: (@Composable () -> Unit)? = null,
 ){
 
     var isLiked by remember(initialIsLiked) { mutableStateOf(initialIsLiked) }
@@ -658,33 +660,48 @@ fun NoteCardBottomBar(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween
     ) {
-        Box(
-            modifier = Modifier
-                .weight(1f)
-                .height(36.dp)
-                .clip(RoundedCornerShape(18.dp))
-                .background(MaterialTheme.colorScheme.surfaceVariant)
-                .clickable(
-                    interactionSource = remember { MutableInteractionSource() },
-                    indication = null
-                ) { onCommentInputClick() }
-                .padding(horizontal = 15.dp),
-            contentAlignment = Alignment.CenterStart
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(
-                    painter = painterResource(id = R.drawable.edit_grey),
-                    contentDescription = null,
-                    modifier = Modifier.size(24.dp),
-                    tint = getOnSurfaceSecondary()
-                )
-                Spacer(modifier = Modifier.width(6.dp))
-                Text(
-                    text = "说点什么...",
-                    fontSize = 14.sp,
-                    color = getOnSurfaceSecondary(),
-                    maxLines = 1
-                )
+        if (leadingContent != null) {
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null
+                    ) { onCommentInputClick() }
+                    .padding(vertical = 2.dp),
+                contentAlignment = Alignment.CenterStart
+            ) {
+                leadingContent()
+            }
+        } else {
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .height(36.dp)
+                    .clip(RoundedCornerShape(18.dp))
+                    .background(MaterialTheme.colorScheme.surfaceVariant)
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null
+                    ) { onCommentInputClick() }
+                    .padding(horizontal = 15.dp),
+                contentAlignment = Alignment.CenterStart
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        painter = painterResource(id = R.drawable.edit_grey),
+                        contentDescription = null,
+                        modifier = Modifier.size(24.dp),
+                        tint = getOnSurfaceSecondary()
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = "说点什么...",
+                        fontSize = 14.sp,
+                        color = getOnSurfaceSecondary(),
+                        maxLines = 1
+                    )
+                }
             }
         }
             Spacer(modifier = Modifier.width(36.dp))

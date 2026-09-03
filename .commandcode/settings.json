@@ -1,7 +1,8 @@
 {
   "permissions": {
     "allow": [
-      "Shell(gradlew.bat:*)"
+      "Shell(gradlew.bat:*)",
+      "Shell(findstr:*)"
     ],
     "deny": [],
     "defaultMode": "default"

@@ -59,6 +59,11 @@ class DetailViewModel(
             try {
                 val p = repository.getPost(postId)
                 if (p != null) {
+                    // 仅自己可见的帖子：非作者不可见（视为不存在）
+                    if (!repository.isPostVisibleTo(p, userUid)) {
+                        _uiState.value = DetailUiState.Error("该帖子已删除或不可见")
+                        return@launch
+                    }
                     val post = PostDetail(
                         postId = p.optString("post_id", ""),
                         imageRes = R.drawable.test,
@@ -75,7 +80,8 @@ class DetailViewModel(
                         authorId = p.optString("author_uid", ""),
                         authorName = p.optString("author_name", ""),
                         authorAvatar = R.drawable.test,
-                        authorAvatarUrl = p.optString("author_avatar", "")
+                        authorAvatarUrl = p.optString("author_avatar", ""),
+                        visibility = p.optString("visibility", "public")
                     )
                     val cloudComments = repository.getComments(post.postId)
                     val raw = (0 until cloudComments.length()).map { i ->
@@ -360,6 +366,33 @@ class DetailViewModel(
             _uiState.value = currentState.copy(comments = updatedComments)
             viewModelScope.launch {
                 try { repository.deleteComment(commentId) } catch (_: Exception) { }
+            }
+        }
+    }
+
+    /** 删除整个帖子（仅作者入口可触发） */
+    fun deletePost() {
+        val currentState = _uiState.value
+        if (currentState is DetailUiState.Success) {
+            val postId = currentState.post.postId
+            viewModelScope.launch {
+                try { repository.deletePost(postId) } catch (e: Exception) {
+                    android.util.Log.e("RedBook", "deletePost err: ${e.message}")
+                }
+            }
+        }
+    }
+
+    /** 修改帖子可见性并乐观更新 UI（public/private） */
+    fun setPostVisibility(visibility: String) {
+        val currentState = _uiState.value
+        if (currentState is DetailUiState.Success) {
+            val post = currentState.post
+            updatePost { it.copy(visibility = visibility) }
+            viewModelScope.launch {
+                try { repository.setPostVisibility(post.postId, visibility) } catch (e: Exception) {
+                    android.util.Log.e("RedBook", "setPostVisibility err: ${e.message}")
+                }
             }
         }
     }

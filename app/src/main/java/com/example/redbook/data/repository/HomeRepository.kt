@@ -8,12 +8,13 @@ class HomeRepository(val supabase: SupabaseAuthRepository) {
 
     suspend fun getNotes(userUid: String = ""): List<Note> {
         return try {
-            val posts = supabase.getPosts()
+            val posts = supabase.filterVisiblePosts(supabase.getPosts(), userUid)
             val likedIds = try { supabase.getLikedPostIds(userUid) } catch (e: Exception) { emptySet() }
             if (posts.length() == 0) {
                 seedMockPosts()
-                val seeded = try { parsePosts(supabase.getPosts(), likedIds) } catch (e: Exception) { mockNotes() }
-                return applyRemarks(seeded, userUid)
+                val seeded = try { supabase.filterVisiblePosts(supabase.getPosts(), userUid) } catch (e: Exception) { org.json.JSONArray() }
+                val parsed = try { parsePosts(seeded, likedIds) } catch (e: Exception) { mockNotes() }
+                return applyRemarks(parsed, userUid)
             }
             applyRemarks(parsePosts(posts, likedIds), userUid)
         } catch (e: Exception) {
@@ -26,7 +27,7 @@ class HomeRepository(val supabase: SupabaseAuthRepository) {
         if (userUid.isBlank()) return emptyList()
         return try {
             val followingUids = supabase.getFollowingUids(userUid)
-            val posts = supabase.getPosts()
+            val posts = supabase.filterVisiblePosts(supabase.getPosts(), userUid)
             val likedIds = try { supabase.getLikedPostIds(userUid) } catch (e: Exception) { emptySet() }
             val notes = parsePosts(posts, likedIds).filter { it.authorUid in followingUids }
             applyRemarks(notes, userUid)

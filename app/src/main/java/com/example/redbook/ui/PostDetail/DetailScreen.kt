@@ -60,7 +60,13 @@ import com.example.redbook.ui.component.NoteCardBottomBar
 import com.example.redbook.ui.component.CommentInputArea
 import com.example.redbook.ui.component.CommentItem
 import com.example.redbook.ui.component.PostContent
+import com.example.redbook.ui.component.AuthorBottomSheetOverlay
+import com.example.redbook.ui.component.AuthorPanel
+import com.example.redbook.ui.component.EditPostActionPanel
+import com.example.redbook.ui.component.PostEditAreaContent
+import com.example.redbook.ui.component.PostPermissionPanel
 import com.example.redbook.ui.theme.getOnSurfaceSecondary
+import com.example.redbook.ui.theme.getOnSurfaceTertiary
 import com.example.redbook.ui.theme.getOutline
 import kotlinx.coroutines.launch
 
@@ -73,10 +79,14 @@ fun DetailScreen(
     userName: String = "",
     userAvatarUrl: String = "",
     scrollToCommentId: String = "",
+    editMode: Boolean = false,
+    refreshKey: Int = 0,
     onCommentScrolled: () -> Unit = {},
     onBack: () -> Unit = {},
     onSendMessage: (String, String, String) -> Unit = { _, _, _ -> },
-    onUserClick: (String) -> Unit = {}
+    onUserClick: (String) -> Unit = {},
+    onEditPost: (com.example.redbook.data.model.PostToEdit) -> Unit = {},
+    onPostDeleted: () -> Unit = {}
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
     // 按 userUid 绑定 ViewModel，避免切换账号后复用旧实例
@@ -96,13 +106,18 @@ fun DetailScreen(
     var highlightCommentId by remember { mutableStateOf("") }
     val keyboardController = LocalSoftwareKeyboardController.current
 
+    // 作者模式：底部面板状态（无/操作面板/权限设置）
+    var authorPanel by remember(postId) { mutableStateOf(AuthorPanel.None) }
+    // 删除帖子确认
+    var confirmDeletePost by remember(postId) { mutableStateOf(false) }
+
     // 监听真实键盘状态：键盘收起时同步收起输入栏
     val imeVisible = WindowInsets.isImeVisible
     LaunchedEffect(imeVisible) {
         if (!imeVisible) viewModel.setKeyboardVisible(false)
     }
 
-    LaunchedEffect(postId) { viewModel.loadPost(postId) }
+    LaunchedEffect(postId, refreshKey) { viewModel.loadPost(postId) }
 
     // 回到页面时重新同步关注状态
     val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
@@ -140,6 +155,7 @@ fun DetailScreen(
         uris.forEach { uri -> viewModel.addSelectedImage(uri) }
     }
 
+    Box(Modifier.fillMaxSize()) {
     Scaffold(
         containerColor = MaterialTheme.colorScheme.surface,
         topBar = {
@@ -171,29 +187,67 @@ fun DetailScreen(
                 if (!isKeyboardVisible) {
                     val post = (uiState as? DetailUiState.Success)?.post
                     val comments = (uiState as? DetailUiState.Success)?.comments
-                    NoteCardBottomBar(
-                        modifier = Modifier.fillMaxWidth()
-                            .padding(bottom = 16.dp, start = 10.dp, end = 10.dp),
-                        initialLikeCount = post?.likeCount ?: 0,
-                        initialIsLiked = post?.isLiked ?: false,
-                        initialFavoriteCount = post?.favoriteCount ?: 0,
-                        initialIsFavorited = post?.isFavorited ?: false,
-                        initialCommentCount = comments?.size ?: 0,
-                        likeEnabled = true,
-                        favoriteEnabled = true,
-                        onCommentInputClick = {
-                            viewModel.setKeyboardVisible(true)
-                            focusRequester.requestFocus()
-                        },
-                        onLikeClick = { viewModel.togglePostLike() },
-                        onFavoriteClick = { viewModel.togglePostFavorite() },
-                        onCommentIconClick = {
-                            coroutineScope.launch {
-                                // 0: PostContent, 1: CommentInputArea, 所以评论从索引 2 开始
-                                lazyListState.animateScrollToItem(1)
-                            }
+
+                    Column {
+                        // 底栏顶部细分隔线
+                        HorizontalDivider(
+                            color = getOutline().copy(alpha = 0.5f),
+                            thickness = 0.5.dp
+                        )
+                        if (editMode && post != null) {
+                            // ===== 作者模式：底栏常驻编辑区域；面板以遮罩浮层形式在根层弹出 =====
+                            val isPublic = post.visibility != "private"
+                            NoteCardBottomBar(
+                                modifier = Modifier.fillMaxWidth()
+                                    .padding(start = 10.dp, end = 10.dp),
+                                initialLikeCount = post.likeCount,
+                                initialIsLiked = post.isLiked,
+                                initialFavoriteCount = post.favoriteCount,
+                                initialIsFavorited = post.isFavorited,
+                                initialCommentCount = comments?.size ?: 0,
+                                likeEnabled = true,
+                                favoriteEnabled = true,
+                                onCommentInputClick = { authorPanel = AuthorPanel.Actions },
+                                onLikeClick = { viewModel.togglePostLike() },
+                                onFavoriteClick = { viewModel.togglePostFavorite() },
+                                onCommentIconClick = {
+                                    coroutineScope.launch {
+                                        lazyListState.animateScrollToItem(1)
+                                    }
+                                },
+                                leadingContent = {
+                                    PostEditAreaContent(
+                                        isPublic = isPublic,
+                                        onAreaClick = { authorPanel = AuthorPanel.Actions }
+                                    )
+                                }
+                            )
+                        } else {
+                            NoteCardBottomBar(
+                                modifier = Modifier.fillMaxWidth()
+                                    .padding(bottom = 16.dp, start = 10.dp, end = 10.dp),
+                                initialLikeCount = post?.likeCount ?: 0,
+                                initialIsLiked = post?.isLiked ?: false,
+                                initialFavoriteCount = post?.favoriteCount ?: 0,
+                                initialIsFavorited = post?.isFavorited ?: false,
+                                initialCommentCount = comments?.size ?: 0,
+                                likeEnabled = true,
+                                favoriteEnabled = true,
+                                onCommentInputClick = {
+                                    viewModel.setKeyboardVisible(true)
+                                    focusRequester.requestFocus()
+                                },
+                                onLikeClick = { viewModel.togglePostLike() },
+                                onFavoriteClick = { viewModel.togglePostFavorite() },
+                                onCommentIconClick = {
+                                    coroutineScope.launch {
+                                        // 0: PostContent, 1: CommentInputArea, 所以评论从索引 2 开始
+                                        lazyListState.animateScrollToItem(1)
+                                    }
+                                }
+                            )
                         }
-                    )
+                    }
                 }
         }
     ) { paddingValues ->
@@ -359,9 +413,9 @@ fun DetailScreen(
                         ) {
                             Text("删除评论", fontWeight = FontWeight.Bold, fontSize = 18.sp, color = MaterialTheme.colorScheme.onSurface)
                             Spacer(Modifier.height(8.dp))
-                            Text("确定删除该评论吗？", fontSize = 14.sp, color = getOnSurfaceSecondary())
+                            Text("确定删除该评论吗？", fontSize = 14.sp, color = getOnSurfaceTertiary())
                         }
-                        Box(Modifier.fillMaxWidth().height(0.5.dp).background(getOutline()))
+                        Box(Modifier.fillMaxWidth().height(0.5.dp).background(getOutline().copy(alpha = 0.5f)))
                         Row(
                             Modifier.fillMaxWidth().height(48.dp),
                             verticalAlignment = Alignment.CenterVertically
@@ -372,7 +426,7 @@ fun DetailScreen(
                             ) {
                                 Text("取消", color = getOnSurfaceSecondary())
                             }
-                            Box(Modifier.width(0.5.dp).fillMaxHeight().background(getOutline()))
+                            Box(Modifier.width(0.5.dp).fillMaxHeight().background(getOutline().copy(alpha = 0.5f)))
                             Box(
                                 Modifier.weight(1f).fillMaxHeight().clickable {
                                     viewModel.deleteComment(commentId)
@@ -385,6 +439,95 @@ fun DetailScreen(
                         }
                     }
                 }
+            }
+
+            // 删除整个帖子确认（作者模式）
+            if (confirmDeletePost) {
+                Dialog(onDismissRequest = { confirmDeletePost = false }) {
+                    Column(
+                        Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(MaterialTheme.colorScheme.surface)
+                    ) {
+                        Column(
+                            Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 24.dp, vertical = 20.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Text("删除帖子", fontWeight = FontWeight.Bold, fontSize = 18.sp, color = MaterialTheme.colorScheme.onSurface)
+                            Spacer(Modifier.height(8.dp))
+                            Text("确定删除该帖子吗？删除后不可恢复。", fontSize = 14.sp, color = getOnSurfaceSecondary())
+                        }
+                        Box(Modifier.fillMaxWidth().height(0.5.dp).background(getOutline()))
+                        Row(
+                            Modifier.fillMaxWidth().height(48.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Box(
+                                Modifier.weight(1f).fillMaxHeight().clickable { confirmDeletePost = false },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text("取消", color = getOnSurfaceSecondary())
+                            }
+                            Box(Modifier.width(0.5.dp).fillMaxHeight().background(getOutline()))
+                            Box(
+                                Modifier.weight(1f).fillMaxHeight().clickable {
+                                    viewModel.deletePost()
+                                    confirmDeletePost = false
+                                    authorPanel = AuthorPanel.None
+                                    onPostDeleted()
+                                },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text("确认", color = MaterialTheme.colorScheme.primary)
+                            }
+                        }
+                    }
+                }
+                }
+            }
+        }
+
+        // ===== 作者模式底部浮层面板（最高层，遮罩 + 顶部16圆角卡片） =====
+        val rootPost = (uiState as? DetailUiState.Success)?.post
+        if (editMode && rootPost != null && authorPanel != AuthorPanel.None) {
+            val panelPublic = rootPost.visibility != "private"
+            when (authorPanel) {
+                AuthorPanel.Actions -> AuthorBottomSheetOverlay(
+                    onDismiss = { authorPanel = AuthorPanel.None }
+                ) {
+                    EditPostActionPanel(
+                        onClose = { authorPanel = AuthorPanel.None },
+                        onEditClick = {
+                            authorPanel = AuthorPanel.None
+                            onEditPost(
+                                com.example.redbook.data.model.PostToEdit(
+                                    postId = rootPost.postId,
+                                    title = rootPost.title,
+                                    content = rootPost.content,
+                                    imageUrl = rootPost.imageUrl,
+                                    visibility = rootPost.visibility
+                                )
+                            )
+                        },
+                        onPermissionClick = { authorPanel = AuthorPanel.Permission },
+                        onDeleteClick = { confirmDeletePost = true }
+                    )
+                }
+                AuthorPanel.Permission -> AuthorBottomSheetOverlay(
+                    onDismiss = { authorPanel = AuthorPanel.None }
+                ) {
+                    PostPermissionPanel(
+                        isPublic = panelPublic,
+                        onSelect = { public ->
+                            viewModel.setPostVisibility(if (public) "public" else "private")
+                        },
+                        onClose = { authorPanel = AuthorPanel.None }
+                    )
+                }
+                AuthorPanel.None -> { }
             }
         }
     }

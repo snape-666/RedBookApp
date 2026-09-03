@@ -123,6 +123,11 @@ fun AppScreen(
     var userBackgroundUrl by remember { mutableStateOf("") }
     var myIpLocation by remember { mutableStateOf("") }
     var editingDraft by remember { mutableStateOf<Draft?>(null) }
+    var editingPost by remember { mutableStateOf<com.example.redbook.data.model.PostToEdit?>(null) }
+    var detailRefreshKey by remember { mutableIntStateOf(0) }
+    var detailEditMode by remember { mutableStateOf(false) }
+    var videoRefreshKey by remember { mutableIntStateOf(0) }
+    var videoEditMode by remember { mutableStateOf(false) }
     var loginResetKey by remember { mutableIntStateOf(0) }
 
     // ---- 未读角标状态 ----
@@ -455,6 +460,7 @@ fun AppScreen(
                 unreadMessageCount = unreadMessages,
                 onNavigateToDetail = { postId ->
                     selectedPostId = postId
+                    detailEditMode = false
                     recordBrowse(postId)
                     navigateTo(Screen.Detail)
                 },
@@ -471,6 +477,7 @@ fun AppScreen(
                 onNavigateToVideo = { videoId, videoUrl ->
                     selectedVideoId = videoId
                     selectedVideoUrl = videoUrl
+                    videoEditMode = false
                     recordBrowse(videoId)
                     navigateTo(Screen.Video)
                 }
@@ -484,12 +491,27 @@ fun AppScreen(
                 userName = userName,
                 userAvatarUrl = userAvatarUrl,
                 scrollToCommentId = scrollToCommentId,
+                editMode = detailEditMode,
+                refreshKey = detailRefreshKey,
                 onCommentScrolled = { scrollToCommentId = "" },
-                onBack = { goBack() },
+                onBack = {
+                    detailEditMode = false
+                    goBack()
+                },
                 onSendMessage = { peerUid, peerName, peerAvatar ->
                     openChatWith(peerUid, peerName, peerAvatar)
                 },
-                onUserClick = { targetUid -> openUserProfile(targetUid) }
+                onUserClick = { targetUid -> openUserProfile(targetUid) },
+                onEditPost = { postToEdit ->
+                    editingPost = postToEdit
+                    navigateTo(Screen.Publish)
+                },
+                onPostDeleted = {
+                    detailEditMode = false
+                    // 删除后直接退回上一页（我的主页/浏览列表等）
+                    goBack()
+                    detailRefreshKey++
+                }
             )
         }
         Screen.Publish -> {
@@ -499,8 +521,23 @@ fun AppScreen(
                 authorName = userName,
                 authorAvatar = userAvatarUrl,
                 editDraft = editingDraft,
-                onBack = { editingDraft = null; goBack() },
-                onPublished = { editingDraft = null; goBack() }
+                editPost = editingPost,
+                onBack = {
+                    editingDraft = null
+                    editingPost = null
+                    goBack()
+                },
+                onPublished = {
+                    val wasEditingPost = editingPost != null
+                    editingDraft = null
+                    editingPost = null
+                    // 编辑已发布帖子返回后，刷新详情内容/可见性（图片笔记与视频笔记各自生效）
+                    if (wasEditingPost) {
+                        detailRefreshKey++
+                        videoRefreshKey++
+                    }
+                    goBack()
+                }
             )
         }
         Screen.UserProfile -> {
@@ -513,10 +550,11 @@ fun AppScreen(
                 onBack = { goBack() },
                 onEditProfile = {},
                 onBottomTabClick = {},
-                onPostClick = { postId -> selectedPostId = postId; recordBrowse(postId); navigateTo(Screen.Detail) },
+                onPostClick = { postId -> selectedPostId = postId; detailEditMode = false; recordBrowse(postId); navigateTo(Screen.Detail) },
                 onVideoClick = { videoId, videoUrl ->
                     selectedVideoId = videoId
                     selectedVideoUrl = videoUrl
+                    videoEditMode = false
                     recordBrowse(videoId)
                     navigateTo(Screen.Video)
                 },
@@ -552,10 +590,26 @@ fun AppScreen(
                         1 -> navigateTo(Screen.VideoFeed)
                     }
                 },
-                onPostClick = { postId -> selectedPostId = postId; recordBrowse(postId); navigateTo(Screen.Detail) },
+                onPostClick = { postId -> selectedPostId = postId; detailEditMode = false; recordBrowse(postId); navigateTo(Screen.Detail) },
+                // 自己的笔记进入详情：作者编辑模式
+                onMyPostClick = { postId ->
+                    selectedPostId = postId
+                    detailEditMode = true
+                    recordBrowse(postId)
+                    navigateTo(Screen.Detail)
+                },
+                // 自己的视频笔记进入详情：作者编辑模式
+                onMyVideoClick = { videoId, videoUrl ->
+                    selectedVideoId = videoId
+                    selectedVideoUrl = videoUrl
+                    videoEditMode = true
+                    recordBrowse(videoId)
+                    navigateTo(Screen.Video)
+                },
                 onVideoClick = { videoId, videoUrl ->
                     selectedVideoId = videoId
                     selectedVideoUrl = videoUrl
+                    videoEditMode = false
                     recordBrowse(videoId)
                     navigateTo(Screen.Video)
                 },
@@ -605,6 +659,12 @@ fun AppScreen(
                     scrollToMessageId = ""
                     viewProfileUid = ""
                     userCardUid = ""
+                    editingDraft = null
+                    editingPost = null
+                    detailEditMode = false
+                    detailRefreshKey++
+                    videoEditMode = false
+                    videoRefreshKey++
                     pendingNotif = null
                     highlightActorUid = ""
                     loginResetKey++
@@ -624,12 +684,14 @@ fun AppScreen(
                 onBack = { goBack() },
                 onPostClick = { postId ->
                     selectedPostId = postId
+                    detailEditMode = false
                     recordBrowse(postId)
                     navigateTo(Screen.Detail)
                 },
                 onVideoClick = { videoId, videoUrl ->
                     selectedVideoId = videoId
                     selectedVideoUrl = videoUrl
+                    videoEditMode = false
                     recordBrowse(videoId)
                     navigateTo(Screen.Video)
                 }
@@ -730,12 +792,14 @@ fun AppScreen(
                 onBack = { goBack() },
                 onPostClick = { postId ->
                     selectedPostId = postId
+                    detailEditMode = false
                     recordBrowse(postId)
                     navigateTo(Screen.Detail)
                 },
                 onVideoClick = { videoId, videoUrl ->
                     selectedVideoId = videoId
                     selectedVideoUrl = videoUrl
+                    videoEditMode = false
                     recordBrowse(videoId)
                     navigateTo(Screen.Video)
                 },
@@ -751,6 +815,7 @@ fun AppScreen(
                 onPostClick = { postId, commentId ->
                     selectedPostId = postId
                     scrollToCommentId = commentId
+                    detailEditMode = false
                     recordBrowse(postId)
                     navigateTo(Screen.Detail)
                 },
@@ -758,6 +823,7 @@ fun AppScreen(
                     selectedVideoId = videoId
                     selectedVideoUrl = videoUrl
                     scrollToCommentId = commentId
+                    videoEditMode = false
                     recordBrowse(videoId)
                     navigateTo(Screen.Video)
                 },
@@ -851,7 +917,12 @@ fun AppScreen(
                 userXhsId = userXhsId,
                 userAvatarUrl = userAvatarUrl,
                 authorAvatarUrl = userAvatarUrl,
-                onBack = { goBack() },
+                editMode = videoEditMode,
+                refreshKey = videoRefreshKey,
+                onBack = {
+                    videoEditMode = false
+                    goBack()
+                },
                 onFollowClick = {},
                 onLikeClick = {},
                 onFavoriteClick = {},
@@ -859,7 +930,17 @@ fun AppScreen(
                     openChatWith(peerUid, peerName, peerAvatar)
                 },
                 onUserClick = { targetUid -> openUserProfile(targetUid) },
-                scrollToCommentId = scrollToCommentId
+                scrollToCommentId = scrollToCommentId,
+                onEditPost = { postToEdit ->
+                    editingPost = postToEdit
+                    navigateTo(Screen.Publish)
+                },
+                onVideoDeleted = {
+                    videoEditMode = false
+                    // 删除后直接退回上一页
+                    goBack()
+                    videoRefreshKey++
+                }
             )
         }
         Screen.Search -> {
@@ -868,6 +949,7 @@ fun AppScreen(
                 onBack = { goBack() },
                 onNavigateToDetail = { postId ->
                     selectedPostId = postId
+                    detailEditMode = false
                     recordBrowse(postId)
                     navigateTo(Screen.Detail)
                 }

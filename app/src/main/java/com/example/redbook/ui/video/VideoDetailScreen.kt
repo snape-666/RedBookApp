@@ -71,8 +71,13 @@ import com.example.redbook.R
 import com.example.redbook.data.model.Comment
 import com.example.redbook.data.model.Reply
 import com.example.redbook.data.repository.SupabaseAuthRepository
+import com.example.redbook.ui.component.AuthorBottomSheetOverlay
+import com.example.redbook.ui.component.AuthorPanel
 import com.example.redbook.ui.component.CommentItem
+import com.example.redbook.ui.component.EditPostActionPanel
 import com.example.redbook.ui.component.KeyboardInputBar
+import com.example.redbook.ui.component.PostEditAreaContent
+import com.example.redbook.ui.component.PostPermissionPanel
 import com.example.redbook.ui.theme.getOnSurfaceSecondary
 import com.example.redbook.ui.theme.getOutline
 import kotlinx.coroutines.delay
@@ -96,7 +101,12 @@ fun VideoDetailScreen(
     onLikeClick: (Int) -> Unit, onFavoriteClick: (Int) -> Unit,
     onSendMessage: (String, String, String) -> Unit = { _, _, _ -> },
     onUserClick: (String) -> Unit = {},
-    scrollToCommentId: String = ""
+    scrollToCommentId: String = "",
+    // 作者模式（从我的笔记进入自己视频时编辑底栏）
+    editMode: Boolean = false,
+    refreshKey: Int = 0,
+    onEditPost: (com.example.redbook.data.model.PostToEdit) -> Unit = {},
+    onVideoDeleted: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -109,6 +119,8 @@ fun VideoDetailScreen(
     var authorUid by remember { mutableStateOf("") }
     var realAuthorName by remember { mutableStateOf(authorName) }
     var realAuthorAvatar by remember { mutableStateOf(authorAvatarUrl) }
+    var realTitle by remember { mutableStateOf(title) }
+    var visibility by remember { mutableStateOf("public") }
     var liked by remember { mutableStateOf(false) }
     var faved by remember { mutableStateOf(false) }
     var likeCnt by remember { mutableIntStateOf(likeCount) }
@@ -127,6 +139,10 @@ fun VideoDetailScreen(
     val cmtListState = androidx.compose.foundation.lazy.rememberLazyListState()
     var highlightCommentId by remember { mutableStateOf("") }
 
+    // 作者模式：底部面板状态 + 删除确认
+    var authorPanel by remember(videoId) { mutableStateOf(AuthorPanel.None) }
+    var confirmDeletePost by remember(videoId) { mutableStateOf(false) }
+
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.GetMultipleContents()) { u ->
         u.forEach { if (it !in selUris) selUris.add(it) }
     }
@@ -138,7 +154,7 @@ fun VideoDetailScreen(
     }
 
     LaunchedEffect(vv) { while (true) { delay(50); vv?.let { curMs = it.currentPosition } } }
-    LaunchedEffect(videoId, userUid) {
+    LaunchedEffect(videoId, userUid, refreshKey) {
         if (videoId.isNotBlank() && userUid.isNotBlank()) {
             try {
                 liked = repository.hasLiked(userUid, videoId)
@@ -151,6 +167,8 @@ fun VideoDetailScreen(
                     authorUid = p.optString("author_uid", "")
                     realAuthorName = p.optString("author_name", "").ifBlank { realAuthorName }
                     realAuthorAvatar = p.optString("author_avatar", "").ifBlank { realAuthorAvatar }
+                    realTitle = p.optString("title", "").ifBlank { realTitle }
+                    visibility = p.optString("visibility", "public")
                     content = p.optString("content", "")
                     publishTime = p.optLong("created_at", 0)
                     ipLocation = p.optString("ip_location", "未知")
@@ -286,7 +304,7 @@ fun VideoDetailScreen(
                         if (durMs > 0) Text("${left / 60}:${String.format("%02d", left % 60)}", color = Color.White.copy(alpha = 0.7f), fontSize = 12.sp)
                     }
                     // 标题
-                    Text(title, color = Color.White, fontSize = 14.sp, modifier = Modifier.padding(vertical = 6.dp))
+                    Text(realTitle.ifBlank { title }, color = Color.White, fontSize = 14.sp, modifier = Modifier.padding(vertical = 6.dp))
                 }
             }
 
@@ -299,54 +317,101 @@ fun VideoDetailScreen(
                     }
                     Spacer(Modifier.height(8.dp))
                 }
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    // 左边：评论区输入框（适配黑底的深色半透明，小红书风格）
-                    Box(
-                        Modifier
-                            .weight(1f)
-                            .height(36.dp)
-                            .clip(RoundedCornerShape(16.dp))
-                            .background(Color.White.copy(alpha = 0.12f))
-                            .clickable { kbVisible = true }
-                            .padding(horizontal = 12.dp),
-                        contentAlignment = Alignment.CenterStart
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(painterResource(R.drawable.edit_grey), null, Modifier.size(20.dp), tint = Color(0xFF9A9A9A))
-                            Spacer(Modifier.width(5.dp))
-                            Text("说点什么...", fontSize = 14.sp, color = Color(0xFF9A9A9A))
+
+                // 作者模式（自己的视频笔记）：展示编辑底栏（黑底适配，第一行用 surface 色）
+                val isAuthorMode = editMode && authorUid.isNotBlank() && authorUid == userUid
+                if (isAuthorMode) {
+                    val isPublic = visibility != "private"
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        Box(Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
+                            PostEditAreaContent(
+                                isPublic = isPublic,
+                                isOnDark = true,
+                                onAreaClick = { authorPanel = AuthorPanel.Actions }
+                            )
+                        }
+                        Spacer(Modifier.width(12.dp))
+                        // 右边：点赞收藏评论
+                        Row(Modifier.weight(1f), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.CenterVertically) {
+                            ActIcon(if (liked) R.drawable.favorite_fill else R.drawable.favorite_light, likeCnt, if (liked) Color.Unspecified else Color.White) {
+                                liked = !liked
+                                likeCnt = (likeCnt + if (liked) 1 else -1).coerceAtLeast(0)
+                                onLikeClick(likeCnt)
+                                if (videoId.isNotBlank()) {
+                                    scope.launch {
+                                        try {
+                                            repository.recordLike(userUid, videoId, liked)
+                                            repository.updatePostLike(videoId, if (liked) 1 else -1)
+                                        } catch (_: Exception) { }
+                                    }
+                                }
+                            }
+                            ActIcon(if (faved) R.drawable.star_fill else R.drawable.star, favCnt, if (faved) Color.Unspecified else Color.White) {
+                                faved = !faved
+                                favCnt = (favCnt + if (faved) 1 else -1).coerceAtLeast(0)
+                                onFavoriteClick(favCnt)
+                                if (videoId.isNotBlank()) {
+                                    scope.launch {
+                                        try {
+                                            repository.recordFavorite(userUid, videoId, faved)
+                                            repository.updatePostFav(videoId, if (faved) 1 else -1)
+                                        } catch (_: Exception) { }
+                                    }
+                                }
+                            }
+                            ActIcon(R.drawable.chat, cmts.size) { showCmt = true }
                         }
                     }
-                    Spacer(Modifier.width(12.dp))
-                    // 右边：点赞收藏评论，均匀分布
-                    Row(Modifier.weight(1f), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.CenterVertically) {
-                        ActIcon(if (liked) R.drawable.favorite_fill else R.drawable.favorite_light, likeCnt, if (liked) Color.Unspecified else Color.White) {
-                            liked = !liked
-                            likeCnt = (likeCnt + if (liked) 1 else -1).coerceAtLeast(0)
-                            onLikeClick(likeCnt)
-                            if (videoId.isNotBlank()) {
-                                scope.launch {
-                                    try {
-                                        repository.recordLike(userUid, videoId, liked)
-                                        repository.updatePostLike(videoId, if (liked) 1 else -1)
-                                    } catch (_: Exception) { }
-                                }
+                } else {
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        // 左边：评论区输入框（适配黑底的深色半透明，小红书风格）
+                        Box(
+                            Modifier
+                                .weight(1f)
+                                .height(36.dp)
+                                .clip(RoundedCornerShape(16.dp))
+                                .background(Color.White.copy(alpha = 0.12f))
+                                .clickable { kbVisible = true }
+                                .padding(horizontal = 12.dp),
+                            contentAlignment = Alignment.CenterStart
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(painterResource(R.drawable.edit_grey), null, Modifier.size(20.dp), tint = Color(0xFF9A9A9A))
+                                Spacer(Modifier.width(5.dp))
+                                Text("说点什么...", fontSize = 14.sp, color = Color(0xFF9A9A9A))
                             }
                         }
-                        ActIcon(if (faved) R.drawable.star_fill else R.drawable.star, favCnt, if (faved) Color.Unspecified else Color.White) {
-                            faved = !faved
-                            favCnt = (favCnt + if (faved) 1 else -1).coerceAtLeast(0)
-                            onFavoriteClick(favCnt)
-                            if (videoId.isNotBlank()) {
-                                scope.launch {
-                                    try {
-                                        repository.recordFavorite(userUid, videoId, faved)
-                                        repository.updatePostFav(videoId, if (faved) 1 else -1)
-                                    } catch (_: Exception) { }
+                        Spacer(Modifier.width(12.dp))
+                        // 右边：点赞收藏评论，均匀分布
+                        Row(Modifier.weight(1f), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.CenterVertically) {
+                            ActIcon(if (liked) R.drawable.favorite_fill else R.drawable.favorite_light, likeCnt, if (liked) Color.Unspecified else Color.White) {
+                                liked = !liked
+                                likeCnt = (likeCnt + if (liked) 1 else -1).coerceAtLeast(0)
+                                onLikeClick(likeCnt)
+                                if (videoId.isNotBlank()) {
+                                    scope.launch {
+                                        try {
+                                            repository.recordLike(userUid, videoId, liked)
+                                            repository.updatePostLike(videoId, if (liked) 1 else -1)
+                                        } catch (_: Exception) { }
+                                    }
                                 }
                             }
+                            ActIcon(if (faved) R.drawable.star_fill else R.drawable.star, favCnt, if (faved) Color.Unspecified else Color.White) {
+                                faved = !faved
+                                favCnt = (favCnt + if (faved) 1 else -1).coerceAtLeast(0)
+                                onFavoriteClick(favCnt)
+                                if (videoId.isNotBlank()) {
+                                    scope.launch {
+                                        try {
+                                            repository.recordFavorite(userUid, videoId, faved)
+                                            repository.updatePostFav(videoId, if (faved) 1 else -1)
+                                        } catch (_: Exception) { }
+                                    }
+                                }
+                            }
+                            ActIcon(R.drawable.chat, cmts.size) { showCmt = true }
                         }
-                        ActIcon(R.drawable.chat, cmts.size) { showCmt = true }
                     }
                 }
             }
@@ -465,6 +530,104 @@ fun VideoDetailScreen(
                     focusRequester = focusReq,
                     modifier = Modifier.fillMaxWidth().imePadding().navigationBarsPadding()
                 )
+            }
+        }
+
+        // 删除视频笔记确认（作者模式）
+        if (confirmDeletePost) {
+            androidx.compose.ui.window.Dialog(onDismissRequest = { confirmDeletePost = false }) {
+                Column(
+                    Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(MaterialTheme.colorScheme.surface)
+                ) {
+                    Column(
+                        Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 24.dp, vertical = 20.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Text("删除笔记", fontWeight = FontWeight.Bold, fontSize = 18.sp, color = MaterialTheme.colorScheme.onSurface)
+                        Spacer(Modifier.height(8.dp))
+                        Text("确定删除该视频笔记吗？删除后不可恢复。", fontSize = 14.sp, color = getOnSurfaceSecondary())
+                    }
+                    Box(Modifier.fillMaxWidth().height(0.5.dp).background(getOutline()))
+                    Row(
+                        Modifier.fillMaxWidth().height(48.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Box(
+                            Modifier.weight(1f).fillMaxHeight().clickable { confirmDeletePost = false },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text("取消", color = getOnSurfaceSecondary())
+                        }
+                        Box(Modifier.width(0.5.dp).fillMaxHeight().background(getOutline()))
+                        Box(
+                            Modifier.weight(1f).fillMaxHeight().clickable {
+                                confirmDeletePost = false
+                                authorPanel = AuthorPanel.None
+                                if (videoId.isNotBlank()) {
+                                    scope.launch {
+                                        try { repository.deletePost(videoId) } catch (_: Exception) { }
+                                    }
+                                }
+                                onVideoDeleted()
+                            },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text("确认", color = MaterialTheme.colorScheme.primary)
+                        }
+                    }
+                }
+            }
+        }
+
+        // ===== 作者模式底部浮层面板（最高层，遮罩 + 顶部16圆角卡片） =====
+        val isAuthorOverlay = editMode && authorUid.isNotBlank() && authorUid == userUid && authorPanel != AuthorPanel.None
+        if (isAuthorOverlay) {
+            val panelPublic = visibility != "private"
+            when (authorPanel) {
+                AuthorPanel.Actions -> AuthorBottomSheetOverlay(
+                    onDismiss = { authorPanel = AuthorPanel.None }
+                ) {
+                    EditPostActionPanel(
+                        onClose = { authorPanel = AuthorPanel.None },
+                        onEditClick = {
+                            authorPanel = AuthorPanel.None
+                            onEditPost(
+                                com.example.redbook.data.model.PostToEdit(
+                                    postId = videoId,
+                                    title = realTitle.ifBlank { title },
+                                    content = content,
+                                    imageUrl = if (videoUrl.startsWith("video:")) videoUrl else "video:$videoUrl",
+                                    visibility = visibility
+                                )
+                            )
+                        },
+                        onPermissionClick = { authorPanel = AuthorPanel.Permission },
+                        onDeleteClick = { confirmDeletePost = true }
+                    )
+                }
+                AuthorPanel.Permission -> AuthorBottomSheetOverlay(
+                    onDismiss = { authorPanel = AuthorPanel.None }
+                ) {
+                    PostPermissionPanel(
+                        isPublic = panelPublic,
+                        onSelect = { public ->
+                            val v = if (public) "public" else "private"
+                            visibility = v
+                            if (videoId.isNotBlank()) {
+                                scope.launch {
+                                    try { repository.setPostVisibility(videoId, v) } catch (_: Exception) { }
+                                }
+                            }
+                        },
+                        onClose = { authorPanel = AuthorPanel.None }
+                    )
+                }
+                AuthorPanel.None -> { }
             }
         }
     }

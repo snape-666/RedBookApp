@@ -67,14 +67,16 @@ fun PublishScreen(
     authorName: String,
     authorAvatar: String = "",
     editDraft: com.example.redbook.data.model.Draft? = null,
+    editPost: com.example.redbook.data.model.PostToEdit? = null,
     onBack: () -> Unit,
     onPublished: () -> Unit
 ) {
     val context = LocalContext.current
-    val viewModel = remember(authorUid, authorXhsId, authorName, authorAvatar, editDraft?.draftId) {
-        PublishViewModelBuilder.build(context.applicationContext as android.app.Application, authorUid, authorXhsId, authorName, authorAvatar, editDraft)
+    val viewModel = remember(authorUid, authorXhsId, authorName, authorAvatar, editDraft?.draftId, editPost?.postId) {
+        PublishViewModelBuilder.build(context.applicationContext as android.app.Application, authorUid, authorXhsId, authorName, authorAvatar, editDraft, editPost)
     }
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val isEditMode = editDraft != null || editPost != null
 
     val imagePicker = rememberLauncherForActivityResult(ActivityResultContracts.GetMultipleContents()) { uris ->
         viewModel.addImages(uris)
@@ -179,7 +181,11 @@ fun PublishScreen(
                 contentAlignment = Alignment.Center
             ) {
                 Text(
-                    if (state.isSaving && !state.savedAsDraft) "发布中..." else "发布笔记",
+                    when {
+                        state.isSaving && !state.savedAsDraft -> "保存中..."
+                        editPost != null -> "保存修改"
+                        else -> "发布笔记"
+                    },
                     fontSize = 15.sp, color = Color.White, fontWeight = FontWeight.Medium
                 )
             }
@@ -191,8 +197,9 @@ fun PublishScreen(
 object PublishViewModelBuilder {
     fun build(
         app: android.app.Application, uid: String, xhsId: String, name: String, avatar: String = "",
-        editDraft: com.example.redbook.data.model.Draft? = null
-    ): PublishViewModel = PublishViewModel(app, uid, xhsId, name, avatar, editDraft)
+        editDraft: com.example.redbook.data.model.Draft? = null,
+        editPost: com.example.redbook.data.model.PostToEdit? = null
+    ): PublishViewModel = PublishViewModel(app, uid, xhsId, name, avatar, editDraft, editPost)
 }
 
 /** 单张图片项宽 */

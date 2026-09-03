@@ -449,7 +449,7 @@ class SupabaseAuthRepository(private val app: Application) {
 
     suspend fun publishPost(postId: String, title: String, content: String,
                             authorUid: String, authorName: String, authorXhsId: String, imageUrl: String = "", authorAvatar: String = "",
-                            ipLocation: String = "") {
+                            ipLocation: String = "", visibility: String = "public") {
         val body = JSONObject().apply {
             put("post_id", postId)
             put("title", title)
@@ -459,10 +459,55 @@ class SupabaseAuthRepository(private val app: Application) {
             put("author_xhs_id", authorXhsId)
             put("author_avatar", authorAvatar)
             put("image_url", imageUrl)
+            put("visibility", visibility)
             if (ipLocation.isNotBlank()) put("ip_location", ipLocation)
             put("created_at", System.currentTimeMillis())
         }
         supabasePostBody("/rest/v1/posts", body)
+    }
+
+    /**
+     * 帖子是否对 viewerUid 可见：仅自己可见(private)的帖子只有作者本人能看到。
+     * 公开(public/空)对所有人生效。帖子数据为空时按可见处理（便于调用方自行兜底）。
+     */
+    fun isPostVisibleTo(post: org.json.JSONObject?, viewerUid: String): Boolean {
+        if (post == null) return true
+        val author = post.optString("author_uid", "")
+        return when (post.optString("visibility", "public")) {
+            "private" -> author.isNotBlank() && author == viewerUid
+            else -> true
+        }
+    }
+
+    /** 过滤掉 viewerUid 不可见的帖子（保留原始顺序） */
+    fun filterVisiblePosts(posts: JSONArray, viewerUid: String): JSONArray {
+        val result = JSONArray()
+        for (i in 0 until posts.length()) {
+            val p = posts.getJSONObject(i)
+            if (isPostVisibleTo(p, viewerUid)) result.put(p)
+        }
+        return result
+    }
+
+    /** 更新已发布帖子的标题/正文/图片/可见性（保持原帖 id 与时间） */
+    suspend fun updatePost(postId: String, title: String, content: String, imageUrl: String, visibility: String) {
+        val body = JSONObject().apply {
+            put("title", title)
+            put("content", content)
+            put("image_url", imageUrl)
+            put("visibility", visibility)
+        }
+        patchUserRowByPostId(postId, body)
+    }
+
+    /** 设置帖子可见性（public/private） */
+    suspend fun setPostVisibility(postId: String, visibility: String) {
+        patchUserRowByPostId(postId, JSONObject().apply { put("visibility", visibility) })
+    }
+
+    /** 删除帖子（级联删除评论等由数据库外键/触发器处理，这里直接删 posts 行） */
+    suspend fun deletePost(postId: String) {
+        supabaseDelete("/rest/v1/posts?post_id=eq.$postId")
     }
 
     suspend fun saveDraft(draftId: String, title: String, content: String,

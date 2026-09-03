@@ -31,7 +31,7 @@ class SearchViewModel(application: Application, private val userUid: String = ""
         _uiState.value = _uiState.value.copy(query = q, isSearching = true, searchResults = emptyList(), historyList = getHistory())
         viewModelScope.launch {
             try {
-                val posts = repository.getPosts()
+                val posts = repository.filterVisiblePosts(repository.getPosts(), userUid)
                 var results = (0 until posts.length()).map { i ->
                     val p = posts.getJSONObject(i)
                     Note(

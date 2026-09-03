@@ -99,6 +99,10 @@ fun ProfileScreen(
     onEditProfile: () -> Unit,
     onBottomTabClick: (Int) -> Unit,
     onPostClick: (String) -> Unit,
+    // 自己的主页"笔记"卡片点击（用于进入详情时带作者编辑模式），默认回退到 onPostClick
+    onMyPostClick: ((String) -> Unit)? = null,
+    // 自己的主页"视频笔记"点击（作者编辑模式），默认回退到 onVideoClick
+    onMyVideoClick: ((String, String) -> Unit)? = null,
     onVideoClick: (String, String) -> Unit = { _, _ -> },
     onCommentClick: (String, String) -> Unit = { _, _ -> },
     onPublish: () -> Unit = {},
@@ -279,7 +283,11 @@ fun ProfileScreen(
                                             isLiked = note.isLiked,
                                             likeCount = note.likeCount.toString(),
                                             onCardClick = {
-                                                if (note.imageUrl.startsWith("video:")) onVideoClick(note.id, note.imageUrl.removePrefix("video:"))
+                                                if (note.imageUrl.startsWith("video:")) {
+                                                    if (isSelf && onMyVideoClick != null) onMyVideoClick(note.id, note.imageUrl.removePrefix("video:"))
+                                                    else onVideoClick(note.id, note.imageUrl.removePrefix("video:"))
+                                                }
+                                                else if (isSelf && onMyPostClick != null) onMyPostClick(note.id)
                                                 else onPostClick(note.id)
                                             },
                                             imageUrl = note.imageUrl,

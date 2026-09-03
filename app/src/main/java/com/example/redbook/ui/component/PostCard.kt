@@ -157,7 +157,7 @@ fun PostCard(
                     }
                     Text(
                         text = userName,
-                        modifier = Modifier.padding(start = 8.dp),
+                        modifier = Modifier.padding(start = 8.dp, top = 5.dp),
                         fontSize = 14.sp,
                         color = getOnSurfaceTertiary(),
                         maxLines = 1

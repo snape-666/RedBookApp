@@ -11,6 +11,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -40,6 +41,7 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.redbook.R
@@ -115,14 +117,14 @@ fun NotificationSettingScreen(
         .background(MaterialTheme.colorScheme.background)
         .padding(start = 12.dp, end = 12.dp, top = 36.dp, bottom = 16.dp)
     ) {
-        Row(
-            Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically
+        Box(
+            Modifier.fillMaxWidth().height(32.dp)
         ) {
             Icon(
                 painter = painterResource(R.drawable.arrow_left),
                 contentDescription = "返回",
                 modifier = Modifier
+                    .align(Alignment.CenterStart)
                     .size(28.dp)
                     .clickable(
                         interactionSource = remember { MutableInteractionSource() },
@@ -130,8 +132,12 @@ fun NotificationSettingScreen(
                     ) { onBack() },
                 tint = MaterialTheme.colorScheme.onSurface
             )
-            Spacer(Modifier.width(10.dp))
-            Text("通知设置", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
+            Text("通知设置",
+                fontSize = 16.sp,
+                fontWeight = FontWeight.Bold,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.align(Alignment.Center).fillMaxWidth(),
+                color = MaterialTheme.colorScheme.onSurface)
         }
 
         Spacer(Modifier.height(10.dp))

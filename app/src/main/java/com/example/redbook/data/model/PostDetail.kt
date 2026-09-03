@@ -18,5 +18,6 @@ data class PostDetail(
     val authorId: String,
     val authorName: String,
     val authorAvatar: Int,
-    val authorAvatarUrl: String = ""
+    val authorAvatarUrl: String = "",
+    val visibility: String = "public"
 )

@@ -1,28 +1,38 @@
 package com.example.redbook.ui.publish
 
-import android.net.Uri
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
 import android.app.Application
+import android.net.Uri
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.redbook.data.repository.SupabaseAuthRepository
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
+/**
+ * 发布页 VM。
+ * 三种模式：
+ *  - 新发布（默认）
+ *  - 编辑草稿：editDraft 非空，发布成功后删除草稿
+ *  - 编辑已发布帖子：editPost 非空，发布改为 PATCH 原帖（保留原 id），
+ *    图片列表中的远端 http(s) 图直接保留，仅上传新增的本地图
+ */
 class PublishViewModel(
     application: Application,
     val authorUid: String,
     val authorXhsId: String,
     val authorName: String,
     val authorAvatar: String = "",
-    editDraft: com.example.redbook.data.model.Draft? = null
+    editDraft: com.example.redbook.data.model.Draft? = null,
+    editPost: com.example.redbook.data.model.PostToEdit? = null
 ) : AndroidViewModel(application) {
 
     private val repository = SupabaseAuthRepository(application)
     private val editDraftId: String? = editDraft?.draftId
+    private val editPostId: String? = editPost?.postId
 
     private val _uiState = MutableStateFlow(PublishUiState())
     val uiState: StateFlow<PublishUiState> = _uiState.asStateFlow()
@@ -35,7 +45,19 @@ class PublishViewModel(
                 images = parseDraftImages(draft.imageUrl)
             )
         }
+        editPost?.let { post ->
+            val isVideoPost = post.imageUrl.trimStart().startsWith("video:")
+            _uiState.value = PublishUiState(
+                title = post.title,
+                content = post.content,
+                images = parseDraftImages(post.imageUrl),
+                forceVideo = isVideoPost
+            )
+        }
     }
+
+    /** 编辑帖子模式下要写回的可见性（public/private） */
+    var editPostVisibility: String = editPost?.visibility ?: "public"
 
     private fun parseDraftImages(imageUrl: String): List<Uri> {
         if (imageUrl.isBlank()) return emptyList()
@@ -122,6 +144,7 @@ class PublishViewModel(
     }
 
     val isVideoMode: Boolean get() {
+        if (_uiState.value.forceVideo) return true
         val uri = _uiState.value.images.firstOrNull() ?: return false
         val path = uri.toString().lowercase()
         val videoExts = listOf(".mp4", ".3gp", ".webm", ".mkv", ".mov", ".avi", ".m4v")
@@ -141,6 +164,10 @@ class PublishViewModel(
                 com.example.redbook.data.repository.IpLocationProvider.resolveProvince(getApplication()) ?: ""
             } catch (e: Exception) { "" }
             try {
+                if (editPostId != null) {
+                    publishEditedPost(state)
+                    return@launch
+                }
                 if (isVideoMode) {
                     val uri = state.images.first()
                     val url = repository.uploadImage(uri, getApplication())
@@ -167,18 +194,45 @@ class PublishViewModel(
         }
     }
 
-    fun clearImages() { _uiState.value = _uiState.value.copy(images = emptyList()) }
-
-    private suspend fun cacheVideo(uri: Uri): String? = withContext(Dispatchers.IO) {
-        try {
-            val cr = getApplication<android.app.Application>().contentResolver
-            val input = cr.openInputStream(uri) ?: return@withContext null
-            val file = java.io.File(getApplication<android.app.Application>().filesDir, "video_${System.currentTimeMillis()}.mp4")
-            file.outputStream().use { input.copyTo(it) }
-            input.close()
-            file.absolutePath
-        } catch (e: Exception) { null }
+    /** 编辑已发布帖子：远端图保留，仅上传新增本地图，最后 PATCH 原帖 */
+    private suspend fun publishEditedPost(state: PublishUiState) {
+        val finalImageUrl = if (isVideoMode) {
+            // 视频帖：替换为新的视频文件（若原本就是远端 url 则去掉 video: 前缀判断）
+            val uri = state.images.first()
+            if (isRemoteImage(uri)) {
+                // 未替换视频：保留原始 url
+                "video:${uri.toString().removePrefix("video:")}"
+            } else {
+                val url = repository.uploadImage(uri, getApplication())
+                if (url == null) { _uiState.value = state.copy(isSaving = false, error = "上传失败"); return }
+                "video:$url"
+            }
+        } else {
+            val urls = mutableListOf<String>()
+            for (img in state.images) {
+                if (isRemoteImage(img)) {
+                    urls.add(img.toString())
+                } else {
+                    val url = repository.uploadImage(img, getApplication())
+                    if (url != null) urls.add(url)
+                }
+            }
+            if (state.images.isNotEmpty() && urls.isEmpty()) {
+                _uiState.value = state.copy(isSaving = false, error = "上传失败")
+                return
+            }
+            urls.joinToString(",")
+        }
+        repository.updatePost(editPostId!!, state.title, state.content, finalImageUrl, editPostVisibility)
+        _uiState.value = state.copy(isSaving = false, saved = true, savedAsDraft = false)
     }
+
+    private fun isRemoteImage(uri: Uri): Boolean {
+        val s = uri.toString()
+        return s.startsWith("http://") || s.startsWith("https://")
+    }
+
+    fun clearImages() { _uiState.value = _uiState.value.copy(images = emptyList()) }
 
     private suspend fun cacheImage(uri: Uri): String? = withContext(Dispatchers.IO) {
         try {
@@ -200,6 +254,7 @@ class PublishViewModel(
         val isSaving: Boolean = false,
         val saved: Boolean = false,
         val savedAsDraft: Boolean = false,
-        val error: String? = null
+        val error: String? = null,
+        val forceVideo: Boolean = false
     )
 }

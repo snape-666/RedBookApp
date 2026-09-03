@@ -96,7 +96,6 @@ class ProfileViewModel(
                 fansCount = d8.await()
                 likeCount = d9.await()
             }
-            val parsedPosts = applyRemarksToPosts(parsePosts(posts, likedIds))
             val latestDraftImage = if (drafts.length() > 0) drafts.getJSONObject(0).optString("image_url", "") else ""
             val parsedComments = parseUserComments(comments).map { c ->
                 // 自己主页的历史评论缺 ip_location 时用已解析的缓存省份兜底；对方主页不替换
@@ -105,14 +104,19 @@ class ProfileViewModel(
                     if (!mine.isNullOrBlank()) c.copy(ipLocation = mine) else c
                 } else c
             }
+            // 可见性过滤：自己看自己主页(含仅自己可见)；他人看主页时隐藏仅自己可见的帖子
+            val selfViewer = viewerUid.ifBlank { profileUid }
+            val visiblePosts = repository.filterVisiblePosts(posts, selfViewer)
+            val visibleLiked = repository.filterVisiblePosts(liked, selfViewer)
+            val visibleFavorited = repository.filterVisiblePosts(favorited, selfViewer)
             _uiState.value = ProfileUiState(
-                posts = parsedPosts,
+                posts = applyRemarksToPosts(parsePosts(visiblePosts, likedIds)),
                 draftCount = drafts.length(),
-                likedPosts = applyRemarksToPosts(parsePosts(liked, likedIds)),
-                favoritedPosts = applyRemarksToPosts(parsePosts(favorited, likedIds)),
+                likedPosts = applyRemarksToPosts(parsePosts(visibleLiked, likedIds)),
+                favoritedPosts = applyRemarksToPosts(parsePosts(visibleFavorited, likedIds)),
                 commentCount = comments.length(),
                 comments = parsedComments,
-                latestPostImage = parsedPosts.firstOrNull()?.imageUrl ?: "",
+                latestPostImage = parsePosts(visiblePosts, likedIds).firstOrNull()?.imageUrl ?: "",
                 latestDraftImage = latestDraftImage,
                 followCount = followCount,
                 fansCount = fansCount,
