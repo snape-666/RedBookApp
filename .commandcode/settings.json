@@ -3,7 +3,8 @@
     "allow": [
       "Shell(gradlew.bat:*)",
       "Shell(findstr:*)",
-      "Shell(adb:*)"
+      "Shell(adb:*)",
+      "Shell(%LOCALAPPDATA%\\Android\\Sdk\\platform-tools\\adb.exe:*)"
     ],
     "deny": [],
     "defaultMode": "default"

@@ -39,6 +39,7 @@ import com.example.redbook.ui.search.SearchScreen
 import com.example.redbook.ui.publish.PublishScreen
 import com.example.redbook.ui.video.VideoDetailScreen
 import com.example.redbook.ui.video.VideoFeedScreen
+import com.example.redbook.ui.profile.FollowListScreen
 import com.example.redbook.ui.profile.ProfileScreen
 import com.example.redbook.ui.profile.PrivacySettingScreen
 import com.example.redbook.ui.profile.UserCardScreen
@@ -110,6 +111,9 @@ fun AppScreen(
     var chatConversationId by remember { mutableStateOf("") }
     var viewProfileUid by remember { mutableStateOf("") }
     var userCardUid by remember { mutableStateOf("") }
+    var followListMode by remember { mutableStateOf(com.example.redbook.ui.profile.FollowListMode.FOLLOWING) }
+    // 关注/粉丝列表的目标用户（独立状态，避免与 viewProfileUid 互相污染导致返回后列表漂移）
+    var followListProfileUid by remember { mutableStateOf("") }
     var scrollToCommentId by remember { mutableStateOf("") }
     var scrollToMessageId by remember { mutableStateOf("") }
     var screenStack by remember { mutableStateOf(listOf<Screen>(Screen.Login)) }
@@ -168,7 +172,10 @@ fun AppScreen(
     fun startNotificationService() {
         if (userUid.isBlank()) return
         try {
-            context.startForegroundService(Intent(context, NotificationService::class.java))
+            val intent = Intent(context, NotificationService::class.java).apply {
+                putExtra(NotificationService.EXTRA_UID, userUid)
+            }
+            context.startForegroundService(intent)
         } catch (_: Exception) { }
     }
 
@@ -598,6 +605,16 @@ fun AppScreen(
                     recordBrowse(postId)
                     navigateTo(Screen.Detail)
                 },
+                onFollowingClick = {
+                    followListMode = com.example.redbook.ui.profile.FollowListMode.FOLLOWING
+                    followListProfileUid = viewProfileUid  // 对方主页的关注列表
+                    navigateTo(Screen.FollowList)
+                },
+                onFansClick = {
+                    followListMode = com.example.redbook.ui.profile.FollowListMode.FANS
+                    followListProfileUid = viewProfileUid  // 对方主页的粉丝列表
+                    navigateTo(Screen.FollowList)
+                },
                 viewerUid = userUid,
                 onSendMessage = { peerUid, peerName, peerAvatar ->
                     openChatWith(peerUid, peerName, peerAvatar)
@@ -656,6 +673,17 @@ fun AppScreen(
                 onPublish = { navigateTo(Screen.Publish) },
                 onDraftClick = { navigateTo(Screen.Draft) },
                 onBrowseClick = { navigateTo(Screen.Browse) },
+                onFollowingClick = {
+                    followListMode = com.example.redbook.ui.profile.FollowListMode.FOLLOWING
+                    followListProfileUid = userUid  // 自己主页的关注列表
+                    navigateTo(Screen.FollowList)
+                },
+                onFansClick = {
+                    followListMode = com.example.redbook.ui.profile.FollowListMode.FANS
+                    followListProfileUid = userUid  // 自己主页的粉丝列表
+                    navigateTo(Screen.FollowList)
+                },
+                onLikeFavClick = { }, // 弹窗已在 Profile 内部处理，无需导航
                 account = userAccount,
                 email = userEmail,
                 isDarkTheme = isDarkTheme,
@@ -901,6 +929,15 @@ fun AppScreen(
                 onUserClick = { targetUid -> openUserProfile(targetUid) }
             )
         }
+        Screen.FollowList -> {
+            FollowListScreen(
+                profileUid = followListProfileUid.ifBlank { userUid },
+                userUid = userUid,
+                mode = followListMode,
+                onBack = { goBack() },
+                onUserClick = { targetUid -> openUserProfile(targetUid) }
+            )
+        }
         Screen.EditProfile -> {
             EditProfileScreen(
                 userUid = userUid,
@@ -1034,6 +1071,7 @@ sealed class Screen {
     object ReceivedReactions : Screen()
     object ReceivedComments : Screen()
     object Followers : Screen()
+    object FollowList : Screen()
     object Chat : Screen()
     object EditProfile : Screen()
     object NotificationSetting : Screen()

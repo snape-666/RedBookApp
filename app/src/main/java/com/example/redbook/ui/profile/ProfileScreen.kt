@@ -60,6 +60,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLocale
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -94,6 +95,7 @@ fun ProfileScreen(
     followCount: Int,
     fansCount: Int,
     likeCount: Int,
+    favoriteCount: Int = 0,
     gender: String = "",
     birthday: String = "",
     avatarUrl: String = "",
@@ -111,6 +113,9 @@ fun ProfileScreen(
     onPublish: () -> Unit = {},
     onDraftClick: () -> Unit = {},
     onBrowseClick: () -> Unit = {},
+    onFollowingClick: () -> Unit = {},
+    onFansClick: () -> Unit = {},
+    onLikeFavClick: () -> Unit = {},
     account: String = "",
     email: String = "",
     isDarkTheme: Boolean = false,
@@ -147,6 +152,12 @@ fun ProfileScreen(
     var changePasswordVisible by remember { mutableStateOf(false) }
     var showActionSheet by remember { mutableStateOf(false) }
     var showRemarkDialog by remember { mutableStateOf(false) }
+    var showLikeFavDialog by remember { mutableStateOf(false) }
+
+    // 获赞与收藏：点击统计行弹出并实时拉取云端数据
+    LaunchedEffect(showLikeFavDialog) {
+        if (showLikeFavDialog) viewModel.refresh()
+    }
 
     LaunchedEffect(userUid) {
         viewModel.refresh()
@@ -201,6 +212,10 @@ fun ProfileScreen(
                         followCount = if (state.followCount > 0) state.followCount else followCount,
                         fansCount = if (state.fansCount > 0) state.fansCount else fansCount,
                         likeCount = if (state.likeCount > 0) state.likeCount else likeCount,
+                        favoriteCount = run {
+                            val s = state.likeCount + state.favoriteCount
+                            if (s > 0) s else likeCount + favoriteCount  // 获赞与收藏总和，与弹窗两项合计一致
+                        },
                         gender = gender,
                         birthday = birthday,
                         avatarUrl = avatarUrl,
@@ -209,6 +224,12 @@ fun ProfileScreen(
                         onMenuClick = { showDrawer = true },
                         onEditProfile = onEditProfile,
                         onBrowseClick = onBrowseClick,
+                        onFollowingClick = onFollowingClick,
+                        onFansClick = onFansClick,
+                        onLikeFavClick = {
+                            showLikeFavDialog = true
+                            onLikeFavClick()
+                        },
                         noRipple = noRipple
                     )
                 } else {
@@ -408,6 +429,108 @@ fun ProfileScreen(
                     .fillMaxWidth()
                     .height(16.dp)
                     .background(MaterialTheme.colorScheme.onPrimary))
+            }
+        }
+
+        // 获赞与收藏弹窗：云端实时数据
+        if (showLikeFavDialog) {
+            Dialog(onDismissRequest = { showLikeFavDialog = false }) {
+                Column(
+                    Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(MaterialTheme.colorScheme.surface)
+                ) {
+                    // 标题
+                    Text(
+                        text = "获赞与收藏",
+                        fontSize = 18.sp,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 20.dp),
+                        textAlign = TextAlign.Center
+                    )
+                    Box(Modifier.fillMaxWidth().height(0.5.dp).background(getOutline().copy(alpha = 0.5f)))
+                    // 第一个 row：favorite_fill + 获赞数
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 15.dp, vertical = 5.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            painter = painterResource(R.drawable.favorite_fill),
+                            contentDescription = null,
+                            modifier = Modifier.size(28.dp),
+                            tint = Color.Unspecified
+                        )
+                        Spacer(Modifier.width(5.dp))
+                        Text(
+                            text = "当前获得点赞数",
+                            fontSize = 14.sp,
+                            color = getOnSurfaceTertiary()
+                        )
+                        Spacer(Modifier.width(5.dp))
+                        Text(
+                            text = "${state.likeCount}",
+                            fontSize = 14.sp,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+                    // 第二个 row：star_fill + 收藏数
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 15.dp, vertical = 5.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            painter = painterResource(R.drawable.star_fill),
+                            contentDescription = null,
+                            modifier = Modifier.size(28.dp),
+                            tint = Color.Unspecified
+                        )
+                        Spacer(Modifier.width(5.dp))
+                        Text(
+                            text = "当前获得收藏数",
+                            fontSize = 14.sp,
+                            color = getOnSurfaceTertiary()
+                        )
+                        Spacer(Modifier.width(5.dp))
+                        Text(
+                            text = "${state.favoriteCount}",
+                            fontSize = 14.sp,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+                    // 底部按钮：我知道了，宽 90%、20dp 圆角、primary 背景、surface 文字
+                    Box(
+                        Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 20.dp, vertical = 20.dp),  // row 上下 20dp padding
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Box(
+                            Modifier
+                                .fillMaxWidth(0.9f)
+                                .clip(RoundedCornerShape(20.dp))
+                                .background(MaterialTheme.colorScheme.primary)
+                                .clickable(
+                                    interactionSource = remember { MutableInteractionSource() },
+                                    indication = null
+                                ) { showLikeFavDialog = false }
+                                .padding(vertical = 12.dp),  // 按钮内保持合理高度，外部 row 提供 20dp 上下边距
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = "我知道了",
+                                fontSize = 15.sp,
+                                color = MaterialTheme.colorScheme.surface
+                            )
+                        }
+                    }
+                }
             }
         }
 
@@ -893,6 +1016,7 @@ private fun ProfileHeader(
     followCount: Int,
     fansCount: Int,
     likeCount: Int,
+    favoriteCount: Int = 0,
     gender: String = "",
     birthday: String = "",
     avatarUrl: String = "",
@@ -901,6 +1025,9 @@ private fun ProfileHeader(
     onMenuClick: () -> Unit = {},
     onEditProfile: () -> Unit,
     onBrowseClick: () -> Unit = {},
+    onFollowingClick: () -> Unit = {},
+    onFansClick: () -> Unit = {},
+    onLikeFavClick: () -> Unit = {},
     noRipple: MutableInteractionSource
 ) {
     val onPri = Color.White
@@ -980,9 +1107,9 @@ private fun ProfileHeader(
 
             Row(Modifier
                 .fillMaxWidth(), Arrangement.spacedBy(12.dp)) {
-                StatItem("$followCount", "关注", onPri)
-                StatItem("$fansCount", "粉丝", onPri)
-                StatItem("$likeCount", "获赞", onPri)
+                StatItem("$followCount", "关注", onPri, onClick = onFollowingClick)
+                StatItem("$fansCount", "粉丝", onPri, onClick = onFansClick)
+                StatItem("$favoriteCount", "获赞与收藏", onPri, onClick = onLikeFavClick)
             }
 
             Spacer(Modifier.height(12.dp))
@@ -1053,12 +1180,17 @@ private fun calculateAge(birthday: String): Int {
 }
 
 @Composable
-private fun StatItem(num: String, label: String, color: Color) {
-    Row(verticalAlignment = Alignment.CenterVertically) {
+private fun StatItem(num: String, label: String, color: Color, onClick: (() -> Unit)? = null) {
+    val item = Row(
+        modifier = Modifier
+            .then(if (onClick != null) Modifier.clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) { onClick() } else Modifier),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
         Text(num, fontSize = 16.sp, fontWeight = FontWeight.Bold, color = color)
         Spacer(Modifier.width(4.dp))
         Text(label, fontSize = 14.sp, color = color.copy(alpha = 0.9f))
     }
+    item
 }
 
 @Composable

@@ -76,6 +76,7 @@ class ProfileViewModel(
             var followCount = 0
             var fansCount = 0
             var likeCount = 0
+            var favoriteCount = 0
             kotlinx.coroutines.coroutineScope {
                 val d1 = async { safe { repository.getUserPosts(profileUid, profileXhsId) } }
                 val d2 = async { safe { repository.getUserDrafts(profileUid, profileXhsId) } }
@@ -86,6 +87,7 @@ class ProfileViewModel(
                 val d7 = async { try { repository.getFollowingCount(profileUid) } catch (e: Exception) { 0 } }
                 val d8 = async { try { repository.getFansCount(profileUid) } catch (e: Exception) { 0 } }
                 val d9 = async { try { repository.getLikeCount(profileUid, profileXhsId) } catch (e: Exception) { 0 } }
+                val d10 = async { try { repository.getFavoriteCount(profileUid, profileXhsId) } catch (e: Exception) { 0 } }
                 posts = d1.await()
                 drafts = d2.await()
                 liked = d3.await()
@@ -95,6 +97,7 @@ class ProfileViewModel(
                 followCount = d7.await()
                 fansCount = d8.await()
                 likeCount = d9.await()
+                favoriteCount = d10.await()
             }
             val latestDraftImage = if (drafts.length() > 0) drafts.getJSONObject(0).optString("image_url", "") else ""
             val parsedComments = parseUserComments(comments).map { c ->
@@ -120,7 +123,8 @@ class ProfileViewModel(
                 latestDraftImage = latestDraftImage,
                 followCount = followCount,
                 fansCount = fansCount,
-                likeCount = likeCount
+                likeCount = likeCount,
+                favoriteCount = favoriteCount
             )
             _refreshing.value = false
         }
@@ -292,7 +296,8 @@ class ProfileViewModel(
         val latestDraftImage: String = "",
         val followCount: Int = 0,
         val fansCount: Int = 0,
-        val likeCount: Int = 0
+        val likeCount: Int = 0,
+        val favoriteCount: Int = 0
     )
 
     data class UserProfileState(

@@ -24,6 +24,11 @@ import org.json.JSONObject
  */
 class NotificationService : Service() {
 
+    companion object {
+        /** 启动服务时由 MainActivity 传入的当前登录账号 uid，用于跨设备正确订阅 */
+        const val EXTRA_UID = "extra_uid"
+    }
+
     private var repository: RealtimeRepository? = null
     private val authRepository by lazy { SupabaseAuthRepository(application) }
     private var scope: CoroutineScope? = null
@@ -37,19 +42,26 @@ class NotificationService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        // 优先使用 Intent 显式传入的当前登录 uid（跨设备也始终订阅该设备当前登录账号）
+        val intentUid = intent?.getStringExtra(EXTRA_UID).orEmpty().trim()
         val cachedUid = NotifPrefs.getCachedLoginUid(this)
-        if (cachedUid.isBlank()) {
+        val targetUid = intentUid.ifBlank { cachedUid }
+        if (targetUid.isBlank()) {
             stopSelf()
             return START_NOT_STICKY
+        }
+        // 持久化：避免 START_STICKY 重启后再用旧缓存订阅错误账号
+        if (intentUid.isNotBlank() && intentUid != cachedUid) {
+            NotifPrefs.setCachedLoginUid(intentUid, this)
         }
         if (scope == null) {
             scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
         }
         startAsForeground()
 
-        if (uid != cachedUid) {
+        if (uid != targetUid) {
             // 账号切换(如 A 退出登 B):换 uid 重建连接,并补发离线期间该账号的未读
-            uid = cachedUid
+            uid = targetUid
             repository?.disconnect()
             repository = RealtimeRepository(application)
             repository?.connect(uid, listener)

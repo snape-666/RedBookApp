@@ -12,6 +12,7 @@
 | 图片加载 | Coil(AsyncImage) |
 | 网络(数据) | Supabase PostgREST,经 **Volley** 发起 HTTP/REST 请求 |
 | 网络(实时) | Supabase Realtime,经 **OkHttp WebSocket** 建立长连接 |
+| AI 助手 | 豆包(火山方舟多模态)+ DeepSeek 文本,**双保险自动降级**;OkHttp 直连 OpenAI 兼容接口 |
 | 后端 | Supabase(PostgreSQL + REST + Realtime + 文件上传/存储),脚本见根目录 `supabase_*.sql` |
 | 本地存储 | SharedPreferences(搜索历史、通知/隐私设置本地缓存等) |
 
@@ -25,6 +26,7 @@
 - **数据模型**:视频与图文都存入 `posts` 表,视频以 `image_url` 带 `video:` 前缀区分;评论/回复同存 `comments` 表(空 `parent_id` 为一级评论)。
 - **作者编辑能力**:从"我的-笔记"进入详情页时开启作者模式,底部可展开 编辑/权限设置/删除 浮层面板;权限(公开可见/仅自己可见)落库 `posts.visibility`,各处列表按查看者过滤,仅自己可见帖子只有作者能看到。
 - **IP 归属地**:优先系统定位解析省份,失败回退公网 IP 兜底,写入 `users.ip_location`。
+- **AI 评论小助手**:评论区输入 `@小助手: 问题` 或回复小助手时触发,`AiAssistant` 把帖子标题/正文与图片/视频 URL 一起发给豆包(火山方舟多模态,支持图/视频画面分析),任一次请求失败(未开通模型、超时、欠费等)自动降级为 DeepSeek 纯文本分析。
 
 ## 主要功能模块
 
@@ -41,6 +43,7 @@
 | 他人主页 | 资料卡、关注/取关、备注名、发私信 | `ProfileViewModel` + `follows`/`remarks` |
 | 搜索 | 关键字搜索 | `SearchScreen` + PostgREST 过滤 |
 | 消息中心 | 聊天列表、点赞/关注/评论通知分组 | `RealtimeRepository` + WebSocket |
+| AI 评论助手 | 评论区 `@小助手:` 提问,自动分析帖子(图片/视频)、回复与连续追问 | `AiAssistant` + 豆包/DeepSeek |
 | 私信聊天 | 点对点会话、消息历史与滚动定位 | 会话表 + Realtime 推送 |
 | 浏览记录 | 最近看过、多选删除 | `browsing_history` 表 |
 | 通知系统 | 前台服务 + 系统通知,点击路由到对应页面 | `NotificationService` + `NotifClickRouter` |

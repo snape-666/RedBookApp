@@ -1165,6 +1165,32 @@ class SupabaseAuthRepository(private val app: Application) {
         return total
     }
 
+    /** 收藏数：我发布的所有帖子/视频的 favorite_count 总和（获赞与收藏弹窗用） */
+    suspend fun getFavoriteCount(userUid: String, userXhsId: String): Int {
+        if (userUid.isBlank()) return 0
+        var total = 0
+        try {
+            val postsResp = queryRest("posts", "select=favorite_count&author_uid=eq.$userUid")
+            val postsArr = postsResp.optJSONArray("users") ?: postsResp.optJSONArray("posts") ?: JSONArray()
+            for (i in 0 until postsArr.length()) total += postsArr.getJSONObject(i).optInt("favorite_count", 0)
+        } catch (_: Exception) { }
+        try {
+            val vResp = queryRest("video_notes", "select=favorite_count&author_uid=eq.$userUid")
+            val vArr = vResp.optJSONArray("users") ?: vResp.optJSONArray("video_notes") ?: JSONArray()
+            for (i in 0 until vArr.length()) total += vArr.getJSONObject(i).optInt("favorite_count", 0)
+        } catch (_: Exception) { }
+        return total
+    }
+
+    // 关注我的用户 uid 集合（用于判断互相关注）
+    suspend fun getFollowerUids(userUid: String): Set<String> {
+        return try {
+            val arr = getMyFollowers(userUid)
+            (0 until arr.length()).map { arr.getJSONObject(it).optString("uid", "") }
+                .filter { it.isNotBlank() }.toSet()
+        } catch (e: Exception) { emptySet() }
+    }
+
     // 关注我的用户列表（按关注时间倒序），返回 uid,nickname,avatar_url,created_at
     suspend fun getMyFollowers(userUid: String): JSONArray {
         val resp = queryRest("follows", "select=follower_uid,created_at&followed_uid=eq.$userUid&order=created_at.desc")
