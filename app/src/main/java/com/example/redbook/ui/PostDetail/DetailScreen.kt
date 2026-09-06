@@ -54,6 +54,7 @@ import androidx.compose.ui.window.Dialog
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.redbook.R
+import com.example.redbook.data.repository.AiAssistant
 import com.example.redbook.ui.component.KeyboardInputBar
 import com.example.redbook.ui.component.NoteCardBar
 import com.example.redbook.ui.component.NoteCardBottomBar
@@ -335,14 +336,18 @@ fun DetailScreen(
 
                                 onAvatarClick = { uid -> onUserClick(uid) },
                                 onUserNameClick = { uid -> onUserClick(uid) },
-                                onReplyClick = {  commentId,userName ->
+                                onReplyClick = { commentId, parentCommentId, userName, toAi ->
                                     viewModel.setReplyTarget(
                                         DetailViewModel.ReplyTarget(
-                                            commentId,
-                                            userName
+                                            commentId = commentId,
+                                            parentCommentId = parentCommentId,
+                                            userName = userName,
+                                            toAi = toAi
                                         )
                                     )
-                                    viewModel.updateCommentText("回复 ${userName}：")
+                                    // 回复 AI 时用 @小助手： 开头，方便提问链路识别
+                                    val prefix = if (toAi) "回复 @${AiAssistant.NAME}：" else "回复 ${userName}："
+                                    viewModel.updateCommentText(prefix)
                                     viewModel.setKeyboardVisible(true)
                                     focusRequester.requestFocus()
                                 },
@@ -373,19 +378,31 @@ fun DetailScreen(
                         selectedImages = selectedImages,
                         onAddImageClick = { imagePickerLauncher.launch("image/*") },
                         onRemoveImage = { uri -> viewModel.removeSelectedImage(uri) },
-                        onSend = { content, images ->
-                            if (replyTarget != null) {//评论
-                                viewModel.addReply(replyTarget!!.commentId, content, images)
+                        onSend = { content, images, hasAiPrefix ->
+                            val rt = replyTarget
+                            if (rt != null) {
+                                // 剥离 “回复 xxx：”/“回复 @小助手：” 前缀，得到真正的回复正文
+                                val clean = content.replace(Regex("^回复\\s*(@?\\S+)\\s*[：:]"), "").trim()
+                                if (rt.toAi) {
+                                    // 回复小助手：作为新一轮提问触发 AI 回复
+                                    viewModel.replyToAi(rt.parentCommentId, rt.commentId, clean.ifBlank { content })
+                                } else {
+                                    viewModel.addReply(rt.parentCommentId, clean.ifBlank { content }, images)
+                                }
                                 viewModel.setReplyTarget(null)
                             } else {
-                                // 是普通评论
-                                viewModel.addComment(content, images)
+                                // 普通评论 or @小助手提问
+                                viewModel.addComment(content, images, hasAiPrefix)
                             }
                             viewModel.setKeyboardVisible(false)
                         },
                         onClose = {
                             viewModel.setKeyboardVisible(false)
                             focusRequester.freeFocus()
+                        },
+                        onReplyPrefixRemoved = {
+                            viewModel.setReplyTarget(null)
+                            viewModel.updateCommentText("")
                         },
                         focusRequester = focusRequester,
                         modifier = Modifier

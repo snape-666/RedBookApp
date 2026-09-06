@@ -26,6 +26,10 @@ android {
 
         buildConfigField("String", "SUPABASE_SERVICE_ROLE", "\"${props["SUPABASE_SERVICE_ROLE"] ?: ""}\"")
         buildConfigField("String", "RESEND_API_KEY", "\"${props["RESEND_API_KEY"] ?: ""}\"")
+        buildConfigField("String", "DEEPSEEK_API_KEY", "\"${props["DEEPSEEK_API_KEY"] ?: ""}\"")
+        buildConfigField("String", "VISION_API_KEY", "\"${props["VISION_API_KEY"] ?: ""}\"")
+        buildConfigField("String", "VISION_BASE_URL", "\"${props["VISION_BASE_URL"] ?: ""}\"")
+        buildConfigField("String", "VISION_MODEL", "\"${props["VISION_MODEL"] ?: ""}\"")
     }
 
     buildTypes {
@@ -74,6 +78,8 @@ dependencies {
     implementation(libs.volley)
     //  OkHttp (Realtime WebSocket)
     implementation(libs.okhttp)
+    //  Kotlinx Coroutines Android(评论 AI 小助手网络请求线程池)
+    implementation(libs.kotlinx.coroutines.android)
     //  Test
     testImplementation(libs.junit)
     androidTestImplementation(platform(libs.androidx.compose.bom))

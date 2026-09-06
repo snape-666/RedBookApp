@@ -8,6 +8,7 @@ import com.example.redbook.R
 import com.example.redbook.data.model.Comment
 import com.example.redbook.data.model.PostDetail
 import com.example.redbook.data.model.Reply
+import com.example.redbook.data.repository.AiAssistant
 import com.example.redbook.data.repository.SupabaseAuthRepository
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -44,7 +45,9 @@ class DetailViewModel(
 
     data class ReplyTarget(
         val commentId: String,
-        val userName: String
+        val parentCommentId: String,
+        val userName: String,
+        val toAi: Boolean = false
     )
 
     init { }
@@ -105,9 +108,9 @@ class DetailViewModel(
                             replies = emptyList()
                         )
                     }
-                    // 头像兜底：author_avatar 为空的按 author_uid 批量查 users 表
+                    // 头像兜底：author_avatar 为空的按 author_uid 批量查 users 表（AI 小助手除外，固定用资源头像）
                     val missingAvatarUids = raw.map { it.second.userId }
-                        .filter { it.isNotBlank() }
+                        .filter { it.isNotBlank() && !AiAssistant.isAiUser(it) }
                         .toSet()
                     val avatarMap = try { repository.getAvatarsByUids(missingAvatarUids) } catch (_: Exception) { emptyMap() }
                     val raw2 = raw.map { (parentId, comment) ->
@@ -148,7 +151,11 @@ class DetailViewModel(
                         }
                     }
                     val remarks = try { repository.getRemarks(userUid, allUids) } catch (_: Exception) { emptyMap<String, String>() }
-                    val displayName = { uid: String, fallback: String -> remarks[uid].orEmpty().ifBlank { fallback } }
+                    // AI 小助手固定展示“小助手”+资源头像，不允许被备注名覆盖
+                    val displayName = { uid: String, fallback: String ->
+                        if (AiAssistant.isAiUser(uid)) AiAssistant.NAME
+                        else remarks[uid].orEmpty().ifBlank { fallback }
+                    }
                     // 帖子作者 IP 兜底：posts.ip_location 为空(老帖)时，用作者 users.ip_location
                     val myIp = com.example.redbook.data.repository.IpLocationProvider.cachedProvince.orEmpty()
                     val effPostIp = when {
@@ -397,11 +404,15 @@ class DetailViewModel(
         }
     }
 
-    fun addComment(content: String, images: List<Uri>) {
+    fun addComment(content: String, images: List<Uri>, isAiQuestion: Boolean = false) {
         viewModelScope.launch {
             val currentState = _uiState.value
             if (currentState is DetailUiState.Success) {
                 val post = currentState.post
+                // 发给 AI 小助手的问题（“@小助手：…”）：AI 的回复以“小助手”身份作为二级回复，挂在当前用户新发的一级评论下
+                val aiQuestion = if (isAiQuestion) AiAssistant.parseQuestion(content) else null
+                // 发布到评论区的文本保持原样（提问时整条 “@小助手：问题” 会发出去，AI 回复挂在其下）
+                val textToPost = content
                 val name = userName.ifBlank { "我" }
                 val isAuthor = userUid == post.authorId
                 val ip = try {
@@ -414,7 +425,7 @@ class DetailViewModel(
                     avatarRes = R.drawable.test,
                     avatarUrl = userAvatarUrl,
                     images = images,
-                    content = content,
+                    content = textToPost,
                     timestamp = System.currentTimeMillis(),
                     ipLocation = ip,
                     likeCount = 0,
@@ -433,7 +444,85 @@ class DetailViewModel(
                     val url = repository.uploadImage(uri, getApplication())
                     if (url != null) imageUrl = if (imageUrl.isEmpty()) url else "$imageUrl,$url"
                 }
-                repository.insertComment(newComment.id, post.postId, content, userUid, name, userAvatarUrl, userXhsId, post.title, imageUrl, ip)
+                try {
+                    repository.insertComment(newComment.id, post.postId, textToPost, userUid, name, userAvatarUrl, userXhsId, post.title, imageUrl, ip)
+                } catch (e: Exception) {
+                    android.util.Log.e("RedBook", "insertComment err: ${e.message}")
+                }
+
+                // AI 提问：以小助手身份在刚发出的评论下插入 AI 回答
+                if (aiQuestion != null) {
+                    // 占位回复，提示用户 AI 已收到提问正在思考
+                    val pendingReply = Reply(
+                        id = "ai_pending_${System.currentTimeMillis()}",
+                        userId = AiAssistant.UID,
+                        userName = AiAssistant.NAME,
+                        avatarRes = AiAssistant.AVATAR_RES,
+                        images = emptyList(),
+                        content = "小助手正在思考中…",
+                        timestamp = System.currentTimeMillis(),
+                        ipLocation = "",
+                        likeCount = 0,
+                        isLiked = false,
+                        isAuthor = false,
+                        avatarUrl = ""
+                    )
+                    val st0 = _uiState.value
+                    if (st0 is DetailUiState.Success) {
+                        _uiState.value = st0.copy(
+                            comments = st0.comments.map { c ->
+                                if (c.id == newComment.id) c.copy(replies = c.replies + pendingReply)
+                                else c
+                            }
+                        )
+                    }
+                    val aiResult = AiAssistant.askAndReply(
+                        getApplication(), post.postId, newComment.id, content,
+                        postTitle = post.title, postContent = post.content,
+                        postImages = listOf(post.imageUrl)
+                    )
+                    val st = _uiState.value
+                    if (st is DetailUiState.Success) {
+                        // 无论成功失败都移除占位；成功追加真实回答，失败追加原因提示
+                        val aiReply = if (aiResult != null) Reply(
+                            id = aiResult.replyId,
+                            userId = AiAssistant.UID,
+                            userName = AiAssistant.NAME,
+                            avatarRes = AiAssistant.AVATAR_RES,
+                            images = emptyList(),
+                            content = aiResult.text,
+                            timestamp = System.currentTimeMillis(),
+                            ipLocation = "",
+                            likeCount = 0,
+                            isLiked = false,
+                            isAuthor = false,
+                            avatarUrl = ""
+                        ) else Reply(
+                            id = "ai_fail_${System.currentTimeMillis()}",
+                            userId = AiAssistant.UID,
+                            userName = AiAssistant.NAME,
+                            avatarRes = AiAssistant.AVATAR_RES,
+                            images = emptyList(),
+                            content = "小助手暂时无法回答，请稍后再试",
+                            timestamp = System.currentTimeMillis(),
+                            ipLocation = "",
+                            likeCount = 0,
+                            isLiked = false,
+                            isAuthor = false,
+                            avatarUrl = ""
+                        )
+                        _uiState.value = st.copy(
+                            comments = st.comments.map { c ->
+                                if (c.id == newComment.id) {
+                                    c.copy(
+                                        replies = c.replies
+                                            .filterNot { it.id == pendingReply.id } + aiReply
+                                    )
+                                } else c
+                            }
+                        )
+                    }
+                }
 
                 _commentText.value = ""
                 clearSelectedImages()
@@ -483,6 +572,94 @@ class DetailViewModel(
             }
         }
     }
+
+    /**
+     * 回复小助手（toAi）：
+     * 把“回复 @小助手：追问”当作对 AI 的继续提问——先把自己这条追问追加到一级评论下，
+     * 再把小助手上一轮的回答和当前追问打包发给 DeepSeek，AI 的新回答继续追加在同一线程。
+     */
+    fun replyToAi(parentCommentId: String, aiReplyId: String, content: String) {
+        viewModelScope.launch {
+            val currentState = _uiState.value
+            if (currentState is DetailUiState.Success) {
+                val post = currentState.post
+                // 找到该一级评论下小助手最近一条回复，作为追问上下文
+                val thread = currentState.comments.firstOrNull { it.id == parentCommentId }
+                val aiContext = thread?.replies
+                    ?.filter { AiAssistant.isAiUser(it.userId) }
+                    ?.sortedByDescending { it.timestamp }
+                    ?.firstOrNull()
+                // 把“回复 @小助手：xxx”转成 AI 提问文本
+                val name = userName.ifBlank { "我" }
+                // 回复前缀：显示与存储都带“回复 @小助手：”，方便识别同一线程里的追问
+                val replyPrefix = "回复 @${AiAssistant.NAME}："
+                val displayContent = replyPrefix + content
+                val ip = try {
+                    com.example.redbook.data.repository.IpLocationProvider.resolveProvince(getApplication()) ?: "未知"
+                } catch (e: Exception) { "未知" }
+                // 1) 我的追问以回复形式加入线程
+                val myReply = Reply(
+                    id = "reply_${System.currentTimeMillis()}",
+                    userId = userUid,
+                    userName = name,
+                    avatarRes = R.drawable.test,
+                    avatarUrl = userAvatarUrl,
+                    images = emptyList(),
+                    content = displayContent,
+                    timestamp = System.currentTimeMillis(),
+                    ipLocation = ip,
+                    likeCount = 0,
+                    isLiked = false,
+                    isAuthor = isAuthorOf(post)
+                )
+                val updatedComments = currentState.comments.map { c ->
+                    if (c.id == parentCommentId) c.copy(replies = c.replies + myReply) else c
+                }
+                _uiState.value = currentState.copy(comments = updatedComments)
+                // 我的追问也存云端（父=一级评论）
+                repository.insertReply(myReply.id, post.postId, parentCommentId, displayContent, userUid, name, userAvatarUrl, userXhsId, post.title, "", ip)
+
+                // 2) 组装给 DeepSeek 的带上下文问题
+                val withContextQuestion = buildString {
+                    if (aiContext != null && aiContext.id == aiReplyId) {
+                        append("（小助手上一轮回答：${aiContext.content}）")
+                    }
+                    append(content)
+                }
+                val rawForAi = "@${AiAssistant.NAME}: $withContextQuestion"
+                AiAssistant.askAndReply(
+                    getApplication(), post.postId, parentCommentId, rawForAi,
+                    postTitle = post.title, postContent = post.content,
+                    postImages = listOf(post.imageUrl)
+                )?.let { ai ->
+                    val st = _uiState.value
+                    if (st is DetailUiState.Success) {
+                        val aiReply = Reply(
+                            id = ai.replyId,
+                            userId = AiAssistant.UID,
+                            userName = AiAssistant.NAME,
+                            avatarRes = AiAssistant.AVATAR_RES,
+                            images = emptyList(),
+                            content = ai.text,
+                            timestamp = System.currentTimeMillis(),
+                            ipLocation = "",
+                            likeCount = 0,
+                            isLiked = false,
+                            isAuthor = false,
+                            avatarUrl = ""
+                        )
+                        _uiState.value = st.copy(
+                            comments = st.comments.map { c ->
+                                if (c.id == parentCommentId) c.copy(replies = c.replies + aiReply) else c
+                            }
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    private fun isAuthorOf(post: com.example.redbook.data.model.PostDetail): Boolean = userUid == post.authorId
 
 
     fun updateCommentText(text: String) {

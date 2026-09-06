@@ -70,6 +70,7 @@ import coil.request.ImageRequest
 import com.example.redbook.R
 import com.example.redbook.data.model.Comment
 import com.example.redbook.data.model.Reply
+import com.example.redbook.data.repository.AiAssistant
 import com.example.redbook.data.repository.SupabaseAuthRepository
 import com.example.redbook.ui.component.AuthorBottomSheetOverlay
 import com.example.redbook.ui.component.AuthorPanel
@@ -84,6 +85,9 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 
+// 评论回复目标：(被回复id, 所属一级评论id, 对方名字, 是否回复小助手)
+private data class DetailReplyTarget(val targetId: String, val parentCommentId: String, val name: String, val toAi: Boolean)
+
 private val videoComments = mutableMapOf<String, MutableList<Comment>>()
 
 @SuppressLint("DefaultLocale")
@@ -94,6 +98,7 @@ fun VideoDetailScreen(
     isFollowed: Boolean, likeCount: Int, favoriteCount: Int, commentCount: Int,
     videoId: String = "",
     userUid: String = "",
+    userName: String = "",
     userXhsId: String = "",
     userAvatarUrl: String = "",
     authorAvatarUrl: String = "",
@@ -111,6 +116,9 @@ fun VideoDetailScreen(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val repository = remember { SupabaseAuthRepository(context.applicationContext as android.app.Application) }
+    // 当前用户身份：真实 uid/名，未登录回退占位
+    val myUid = userUid.ifBlank { "me" }
+    val myName = userName.ifBlank { "我" }
     var curMs by remember { mutableIntStateOf(0) }
     var durMs by remember { mutableIntStateOf(0) }
     var vv by remember { mutableStateOf<VideoView?>(null) }
@@ -135,7 +143,7 @@ fun VideoDetailScreen(
     var selUris = remember { mutableStateListOf<Uri>() }
     val focusReq = remember { FocusRequester() }
     val cmts = remember { videoComments.getOrPut(videoUrl) { mutableStateListOf() } }
-    var replyTgt by remember { mutableStateOf<Pair<String, String>?>(null) }
+    var replyTgt by remember { mutableStateOf<DetailReplyTarget?>(null) }
     val cmtListState = androidx.compose.foundation.lazy.rememberLazyListState()
     var highlightCommentId by remember { mutableStateOf("") }
 
@@ -449,10 +457,14 @@ fun VideoDetailScreen(
                             if (cmts.isEmpty()) { item { Text("暂无评论", Modifier.padding(16.dp), color = Color.Gray, fontSize = 14.sp) } }
                             items(cmts.toList(), key = { it.id }) { c ->
                                 CommentItem(comment = c,
-                                    onReplyClick = { cid, name -> replyTgt = cid to name; cmtText = "回复 @$name："; kbVisible = true },
+                                    onReplyClick = { cid, parentId, name, toAi ->
+                                        replyTgt = DetailReplyTarget(cid, parentId, name, toAi)
+                                        cmtText = "回复 @$name："
+                                        kbVisible = true
+                                    },
                                     onLikeClick = { cid -> toggleLike(cid, cmts) },
-                                    onAvatarClick = { uid -> if (uid.isNotBlank() && uid != "me") onUserClick(uid) },
-                                    onUserNameClick = { uid -> if (uid.isNotBlank() && uid != "me") onUserClick(uid) },
+                                    onAvatarClick = { uid -> if (uid.isNotBlank() && uid != "me" && !AiAssistant.isAiUser(uid)) onUserClick(uid) },
+                                    onUserNameClick = { uid -> if (uid.isNotBlank() && uid != "me" && !AiAssistant.isAiUser(uid)) onUserClick(uid) },
                                     highlight = c.id == highlightCommentId)
                             }
                         }
@@ -496,37 +508,92 @@ fun VideoDetailScreen(
                     text = cmtText, onTextChange = { cmtText = it },
                     selectedImages = selUris.toList(), onAddImageClick = { picker.launch("image/*") },
                     onRemoveImage = { selUris.remove(it) },
-                    onSend = { t, imgs ->
+                    onSend = { t, imgs, hasAiPrefix ->
                         val hasContent = t.isNotBlank() || imgs.isNotEmpty()
                         if (hasContent) {
-                            val ct = t.replace(Regex("^回复 @\\S+："), "").trim()
-                            if (ct.isNotBlank() || imgs.isNotEmpty()) {
-                                val rt = replyTgt
-                                if (rt != null) {
-                                    val i = cmts.indexOfFirst { it.id == rt.first }
-                                    if (i >= 0) cmts[i] = cmts[i].copy(replies = cmts[i].replies + Reply("r${System.currentTimeMillis()}", "me", "我", R.drawable.test, imgs, ct, System.currentTimeMillis(), "未知", 0, false, false, userAvatarUrl))
-                                    replyTgt = null
-                                    scope.launch {
-                                        try {
-                                            val ip = com.example.redbook.data.repository.IpLocationProvider.resolveProvince(context.applicationContext) ?: ""
-                                            repository.insertReply("r${System.currentTimeMillis()}", videoId, rt.first, ct, userUid, "我", userAvatarUrl, userXhsId, title, "", ip)
-                                        } catch (_: Exception) { }
-                                    }
-                                } else {
-                                    cmts.add(Comment("c${System.currentTimeMillis()}", "me", "我", R.drawable.test, imgs, ct, System.currentTimeMillis(), "未知", 0, false, false, userAvatarUrl))
-                                    scope.launch {
-                                        try {
-                                            val ip = com.example.redbook.data.repository.IpLocationProvider.resolveProvince(context.applicationContext) ?: ""
-                                            repository.insertComment("c${System.currentTimeMillis()}", videoId, ct, userUid, "我", userAvatarUrl, userXhsId, title, "", ip)
-                                        } catch (_: Exception) { }
+                            val rt = replyTgt
+                            if (rt != null) {
+                                // 回复他人：剥离 “回复 @名字：” 前缀，追加到所属一级评论下
+                                val ct = t.replace(Regex("^回复 @\\S+："), "").trim()
+                                if (ct.isNotBlank() || imgs.isNotEmpty()) {
+                                    val parentIdx = cmts.indexOfFirst { it.id == rt.parentCommentId }
+                                    if (parentIdx >= 0) {
+                                        val parent = cmts[parentIdx]
+                                        if (rt.toAi) {
+                                            // 回复小助手：追问作为线程内的一条回复，再触发 AI 回一轮
+                                            // 显示与存储都带“回复 @小助手：”前缀，方便识别同一线程追问
+                                            val displayContent = "回复 @${AiAssistant.NAME}：" + ct
+                                            cmts[parentIdx] = parent.copy(replies = parent.replies + Reply("r${System.currentTimeMillis()}", myUid, myName, R.drawable.test, imgs, displayContent, System.currentTimeMillis(), "未知", 0, false, false, userAvatarUrl))
+                                            val pendingId = "ai_pending_${System.currentTimeMillis()}"
+                                            cmts[parentIdx] = cmts[parentIdx].copy(replies = cmts[parentIdx].replies + Reply(pendingId, AiAssistant.UID, AiAssistant.NAME, AiAssistant.AVATAR_RES, emptyList(), "小助手正在思考中…", System.currentTimeMillis(), "", 0, false, false, ""))
+                                            scope.launch {
+                                                try {
+                                                    val ip = com.example.redbook.data.repository.IpLocationProvider.resolveProvince(context.applicationContext) ?: ""
+                                                    repository.insertReply("r${System.currentTimeMillis()}", videoId, rt.parentCommentId, displayContent, myUid, myName, userAvatarUrl, userXhsId, title, "", ip)
+                                                    val aiCtx = parent.replies.filter { AiAssistant.isAiUser(it.userId) }.maxByOrNull { it.timestamp }
+                                                    val aiQuestion = "@${AiAssistant.NAME}: " + (aiCtx?.let { "（小助手上一轮回答：${it.content}）" } ?: "") + ct
+                                                    val aiResult = AiAssistant.askAndReply(context.applicationContext as android.app.Application, videoId, rt.parentCommentId, aiQuestion, postTitle = title, postVideoUrl = videoUrl)
+                                                    val pi = cmts.indexOfFirst { it.id == rt.parentCommentId }
+                                                    if (pi >= 0) {
+                                                        val done = if (aiResult != null) Reply(aiResult.replyId, AiAssistant.UID, AiAssistant.NAME, AiAssistant.AVATAR_RES, emptyList(), aiResult.text, System.currentTimeMillis(), "", 0, false, false, "")
+                                                        else Reply("ai_fail_${System.currentTimeMillis()}", AiAssistant.UID, AiAssistant.NAME, AiAssistant.AVATAR_RES, emptyList(), "小助手暂时无法回答，请稍后再试", System.currentTimeMillis(), "", 0, false, false, "")
+                                                        cmts[pi] = cmts[pi].copy(replies = cmts[pi].replies.filterNot { it.id == pendingId } + done)
+                                                    }
+                                                } catch (_: Exception) { }
+                                            }
+                                        } else {
+                                            // 普通回复（回复一级或二级都挂到该一级评论线程）
+                                            cmts[parentIdx] = parent.copy(replies = parent.replies + Reply("r${System.currentTimeMillis()}", myUid, myName, R.drawable.test, imgs, ct, System.currentTimeMillis(), "未知", 0, false, false, userAvatarUrl))
+                                            scope.launch {
+                                                try {
+                                                    val ip = com.example.redbook.data.repository.IpLocationProvider.resolveProvince(context.applicationContext) ?: ""
+                                                    repository.insertReply("r${System.currentTimeMillis()}", videoId, rt.parentCommentId, ct, myUid, myName, userAvatarUrl, userXhsId, title, "", ip)
+                                                } catch (_: Exception) { }
+                                            }
+                                        }
                                     }
                                 }
-                                cmtText = ""; selUris.clear()
+                            } else {
+                                // 新发一级评论：普通 or @小助手提问
+                                val aiQ = if (hasAiPrefix) AiAssistant.parseQuestion(t) else null
+                                val ct = t.trim()
+                                if (ct.isNotBlank() || imgs.isNotEmpty()) {
+                                    if (aiQ != null) {
+                                        val myId = "c${System.currentTimeMillis()}"
+                                        cmts.add(Comment(myId, myUid, myName, R.drawable.test, imgs, ct, System.currentTimeMillis(), "未知", 0, false, false, userAvatarUrl))
+                                        val pendingId = "ai_pending_${System.currentTimeMillis()}"
+                                        cmts.add(Comment(pendingId, AiAssistant.UID, AiAssistant.NAME, AiAssistant.AVATAR_RES, emptyList(), "小助手正在思考中…", System.currentTimeMillis(), "", 0, false, false, ""))
+                                        scope.launch {
+                                            try {
+                                                val ip = com.example.redbook.data.repository.IpLocationProvider.resolveProvince(context.applicationContext) ?: ""
+                                                repository.insertComment(myId, videoId, ct, myUid, myName, userAvatarUrl, userXhsId, title, "", ip)
+                                                val aiResult = AiAssistant.askAndReply(context.applicationContext as android.app.Application, videoId, myId, t, postTitle = title, postVideoUrl = videoUrl)
+                                                val i2 = cmts.indexOfFirst { it.id == myId }
+                                                if (i2 >= 0) {
+                                                    cmts.removeAll { it.id == pendingId }
+                                                    val done = if (aiResult != null) Reply(aiResult.replyId, AiAssistant.UID, AiAssistant.NAME, AiAssistant.AVATAR_RES, emptyList(), aiResult.text, System.currentTimeMillis(), "", 0, false, false, "")
+                                                    else Reply("ai_fail_${System.currentTimeMillis()}", AiAssistant.UID, AiAssistant.NAME, AiAssistant.AVATAR_RES, emptyList(), "小助手暂时无法回答，请稍后再试", System.currentTimeMillis(), "", 0, false, false, "")
+                                                    cmts[i2] = cmts[i2].copy(replies = cmts[i2].replies + done)
+                                                }
+                                            } catch (_: Exception) { }
+                                        }
+                                    } else {
+                                        cmts.add(Comment("c${System.currentTimeMillis()}", myUid, myName, R.drawable.test, imgs, ct, System.currentTimeMillis(), "未知", 0, false, false, userAvatarUrl))
+                                        scope.launch {
+                                            try {
+                                                val ip = com.example.redbook.data.repository.IpLocationProvider.resolveProvince(context.applicationContext) ?: ""
+                                                repository.insertComment("c${System.currentTimeMillis()}", videoId, ct, myUid, myName, userAvatarUrl, userXhsId, title, "", ip)
+                                            } catch (_: Exception) { }
+                                        }
+                                    }
+                                }
                             }
+                            cmtText = ""; selUris.clear(); replyTgt = null
                         }
                         kbVisible = false
                     },
                     onClose = { kbVisible = false; cmtText = ""; selUris.clear(); replyTgt = null },
+                    onReplyPrefixRemoved = { cmtText = ""; replyTgt = null },
                     focusRequester = focusReq,
                     modifier = Modifier.fillMaxWidth().imePadding().navigationBarsPadding()
                 )
@@ -707,7 +774,11 @@ private suspend fun loadVideoComments(
                 }
                 val remarks = repository.getRemarks(viewerUid, uids)
                 if (remarks.isNotEmpty()) {
-                    val displayName = { uid: String, fallback: String -> remarks[uid].orEmpty().ifBlank { fallback } }
+                    // AI 小助手固定展示“小助手”，不允许被备注名覆盖
+                    val displayName = { uid: String, fallback: String ->
+                        if (AiAssistant.isAiUser(uid)) AiAssistant.NAME
+                        else remarks[uid].orEmpty().ifBlank { fallback }
+                    }
                     comments = comments.map { c ->
                         c.copy(
                             userName = displayName(c.userId, c.userName),

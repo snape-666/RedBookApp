@@ -117,11 +117,26 @@ class PublishViewModel(
                 val imageUrl = try {
                     if (isVideoMode) {
                         val uri = state.images.first()
-                        repository.uploadImage(uri, getApplication()) ?: ""
+                        if (isRemoteImage(uri)) {
+                            // 编辑已发布视频帖保存草稿：原视频已是远端地址，直接保留（带 video: 前缀）
+                            "video:${uri.toString().removePrefix("video:")}"
+                        } else {
+                            repository.uploadImage(uri, getApplication())
+                                // 新视频保存草稿：uploadImage 已带 video: 前缀
+                                ?: ""
+                        }
                     } else {
-                        val paths = mutableListOf<String>()
-                        for (img in state.images) { val path = cacheImage(img); if (path != null) paths.add(path) }
-                        paths.joinToString(",")
+                        val parts = mutableListOf<String>()
+                        for (img in state.images) {
+                            if (isRemoteImage(img)) {
+                                // 编辑已发布图片帖保存草稿：原图已是远端地址，直接保留
+                                parts.add(img.toString())
+                            } else {
+                                val path = cacheImage(img)
+                                if (path != null) parts.add(path)
+                            }
+                        }
+                        parts.joinToString(",")
                     }
                 } catch (e: Exception) { "" }
                 android.util.Log.d("RedBook", "saveDraft uid=$authorUid xhs=$authorXhsId imageUrl=$imageUrl")
@@ -134,6 +149,10 @@ class PublishViewModel(
                         authorUid, authorXhsId, authorName,
                         imageUrl
                     )
+                    // 编辑已发布帖子后存草稿：删除原帖，让内容只保留在草稿箱，不再出现在已发布列表
+                    if (editPostId != null) {
+                        repository.deletePost(editPostId)
+                    }
                 }
                 _uiState.value = state.copy(isSaving = false, saved = true, savedAsDraft = true)
             } catch (e: Exception) {
@@ -170,17 +189,24 @@ class PublishViewModel(
                 }
                 if (isVideoMode) {
                     val uri = state.images.first()
-                    val url = repository.uploadImage(uri, getApplication())
-                    if (url == null) { _uiState.value = state.copy(isSaving = false, error = "上传失败"); return@launch }
+                    // 编辑草稿（或编辑已发布帖子）存下来的是远端视频 URL，发布时直接保留，无需重新上传
+                    val url = if (isRemoteImage(uri)) {
+                        "video:${uri.toString().removePrefix("video:")}"
+                    } else {
+                        repository.uploadImage(uri, getApplication())
+                    }
+                    if (url.isNullOrBlank()) { _uiState.value = state.copy(isSaving = false, error = "上传失败"); return@launch }
                     // 视频存 posts 表，image_url 带 video: 前缀
                     repository.publishPost("vid_${System.currentTimeMillis()}", state.title, "",
                         authorUid, authorName, authorXhsId, url, authorAvatar, ipLocation)
                 } else {
                     val urls = mutableListOf<String>()
                     for (img in state.images) {
-                        val url = repository.uploadImage(img, getApplication())
+                        // 草稿中的远端图片直接保留，本地图片才上传
+                        val url = if (isRemoteImage(img)) img.toString()
+                        else repository.uploadImage(img, getApplication())
                         android.util.Log.d("RedBook", "publish uploadImage $img -> $url")
-                        if (url != null) urls.add(url)
+                        if (!url.isNullOrBlank()) urls.add(url)
                     }
                     if (state.images.isNotEmpty() && urls.isEmpty()) { _uiState.value = state.copy(isSaving = false, error = "上传失败"); return@launch }
                     android.util.Log.d("RedBook", "publish images=${state.images.size} urls=${urls.size} -> ${urls.joinToString(",")}")

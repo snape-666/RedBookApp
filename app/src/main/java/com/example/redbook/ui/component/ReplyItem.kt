@@ -31,6 +31,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.redbook.R
 import com.example.redbook.data.model.Reply
+import com.example.redbook.data.repository.AiAssistant
+import com.example.redbook.ui.theme.getBlueFill
 import com.example.redbook.ui.theme.getOnSurfaceSecondary
 import com.example.redbook.ui.theme.getOnSurfaceTertiary
 import java.text.SimpleDateFormat
@@ -54,7 +56,7 @@ fun ReplyItem(
             onClick = {},
             onLongClick = { onLongClick() }
         )) {
-        if (reply.avatarUrl.isNotBlank()) {
+        if (reply.avatarUrl.isNotBlank() && !AiAssistant.isAiUser(reply.userId)) {
             AsyncImage(
                 model = ImageRequest.Builder(LocalContext.current).data(reply.avatarUrl).crossfade(true).build(),
                 contentDescription = null,
@@ -66,12 +68,15 @@ fun ReplyItem(
             )
         } else {
             Image(
-                painter = painterResource(id = reply.avatarRes),
+                painter = painterResource(id = if (AiAssistant.isAiUser(reply.userId)) AiAssistant.AVATAR_RES else reply.avatarRes),
                 contentDescription = null,
                 modifier = Modifier
                     .size(24.dp)
                     .clip(CircleShape)
-                    .clickable { onAvatarClick(reply.userId) },
+                    .then(
+                        if (AiAssistant.isAiUser(reply.userId)) Modifier
+                        else Modifier.clickable { onAvatarClick(reply.userId) }
+                    ),
                 contentScale = ContentScale.Crop
             )
         }
@@ -81,8 +86,8 @@ fun ReplyItem(
                     text = reply.userName,
                     fontSize = 13.sp,
                     fontWeight = FontWeight.Medium,
-                    color = MaterialTheme.colorScheme.onSurface,
-                    modifier = Modifier.clickable { onUserNameClick(reply.userId) }
+                    color = if (AiAssistant.isAiUser(reply.userId)) getBlueFill() else MaterialTheme.colorScheme.onSurface,
+                    modifier = if (AiAssistant.isAiUser(reply.userId)) Modifier else Modifier.clickable { onUserNameClick(reply.userId) }
                 )
                 if (reply.isAuthor) {
                     Spacer(modifier = Modifier.width(4.dp))
@@ -90,7 +95,7 @@ fun ReplyItem(
                 }
             }
             Text(
-                text = reply.content,
+                text = aiMentionHighlight(reply.content),
                 fontSize = 14.sp,
                 color = MaterialTheme.colorScheme.onSurface
             )

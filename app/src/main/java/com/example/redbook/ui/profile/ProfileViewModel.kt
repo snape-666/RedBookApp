@@ -237,6 +237,7 @@ class ProfileViewModel(
                 authorName = c.optString("author_name", ""),
                 isReply = parentId.isNotEmpty(),
                 parentUser = c.optString("parent_user", ""),
+                parentUid = c.optString("parent_user_id", ""),
                 parentContent = c.optString("parent_content", ""),
                 likeCount = c.optInt("like_count", 0),
                 timestamp = c.optLong("created_at", 0),

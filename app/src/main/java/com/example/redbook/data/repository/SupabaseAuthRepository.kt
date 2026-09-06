@@ -407,14 +407,23 @@ class SupabaseAuthRepository(private val app: Application) {
         return withContext(Dispatchers.IO) {
             try {
                 val cr = app.contentResolver
-                val mime = cr.getType(uri) ?: "image/jpeg"
-                val inputStream = cr.openInputStream(uri)
-                if (inputStream == null) {
-                    android.util.Log.e("RedBook", "uploadImage open failed: $uri")
-                    return@withContext null
+                val mime = cr.getType(uri) ?: inferMime(uri)
+                // file:// 本地路径（如保存草稿时缓存到 filesDir）无法通过 contentResolver 打开，直接读文件
+                val bytes = if (uri.scheme == "file") {
+                    val f = java.io.File(uri.path ?: "")
+                    if (!f.exists()) {
+                        android.util.Log.e("RedBook", "uploadImage file not found: $uri")
+                        return@withContext null
+                    }
+                    f.readBytes()
+                } else {
+                    val inputStream = cr.openInputStream(uri)
+                    if (inputStream == null) {
+                        android.util.Log.e("RedBook", "uploadImage open failed: $uri")
+                        return@withContext null
+                    }
+                    inputStream.use { it.readBytes() }
                 }
-                val bytes = inputStream.readBytes()
-                inputStream.close()
                 val isVideo = mime.contains("video")
                 val ext = when { isVideo -> "mp4"; mime.contains("png") -> "png"; mime.contains("webp") -> "webp"; else -> "jpg" }
                 val prefix = if (isVideo) "video:" else ""
@@ -422,9 +431,22 @@ class SupabaseAuthRepository(private val app: Application) {
                 uploadToStorage("post-images", fileName, bytes, mime)
                 "$prefix${SupabaseConfig.url}/storage/v1/object/public/post-images/$fileName"
             } catch (e: Exception) { 
-                android.util.Log.e("RedBook", "uploadImage error: ${e.message}")
+                android.util.Log.e("RedBook", "uploadImage error: $uri -> ${e.message}")
                 null 
             }
+        }
+    }
+
+    /** 对 file:// URI 兜底推断 MIME（contentResolver.getType 对 file scheme 常返回 null） */
+    private fun inferMime(uri: android.net.Uri): String {
+        val p = (uri.path ?: "").lowercase()
+        return when {
+            p.endsWith(".mp4") || p.endsWith(".3gp") || p.endsWith(".webm") ||
+                p.endsWith(".mkv") || p.endsWith(".mov") || p.endsWith(".m4v") || p.endsWith(".avi") -> "video/mp4"
+            p.endsWith(".png") -> "image/png"
+            p.endsWith(".webp") -> "image/webp"
+            p.endsWith(".gif") -> "image/gif"
+            else -> "image/jpeg"
         }
     }
 
@@ -739,10 +761,10 @@ class SupabaseAuthRepository(private val app: Application) {
             arr = resp.optJSONArray("users") ?: resp.optJSONArray("comments") ?: JSONArray()
         }
         // 先建内存 map，避免 N+1 查询
-        val map = mutableMapOf<String, Pair<String, String>>()
+        val map = mutableMapOf<String, Triple<String, String, String>>()
         for (i in 0 until arr.length()) {
             val c = arr.getJSONObject(i)
-            map[c.optString("comment_id")] = c.optString("content") to c.optString("author_name")
+            map[c.optString("comment_id")] = Triple(c.optString("content"), c.optString("author_name"), c.optString("author_uid"))
         }
         val result = JSONArray()
         for (i in 0 until arr.length()) {
@@ -753,6 +775,7 @@ class SupabaseAuthRepository(private val app: Application) {
             obj.put("parent_id", c.optString("parent_id"))
             obj.put("content", c.optString("content"))
             obj.put("author_name", c.optString("author_name"))
+            obj.put("author_uid", c.optString("author_uid"))
             obj.put("created_at", c.optLong("created_at"))
             obj.put("like_count", c.optInt("like_count"))
             obj.put("post_title", c.optString("post_title", ""))
@@ -764,13 +787,15 @@ class SupabaseAuthRepository(private val app: Application) {
                 if (cached != null) {
                     obj.put("parent_content", cached.first)
                     obj.put("parent_user", cached.second)
+                    obj.put("parent_user_id", cached.third)
                 } else {
-                    val pr = queryRest("comments", "select=content,author_name&comment_id=eq.$parentId&limit=1")
+                    val pr = queryRest("comments", "select=content,author_name,author_uid&comment_id=eq.$parentId&limit=1")
                     val parr = pr.optJSONArray("users") ?: pr.optJSONArray("comments") ?: JSONArray()
                     if (parr.length() > 0) {
                         val p = parr.getJSONObject(0)
                         obj.put("parent_content", p.optString("content"))
                         obj.put("parent_user", p.optString("author_name"))
+                        obj.put("parent_user_id", p.optString("author_uid"))
                     }
                 }
             }

@@ -553,16 +553,24 @@ fun AppScreen(
                     editingPost = null
                     goBack()
                 },
-                onPublished = {
+                onPublished = { savedAsDraft ->
                     val wasEditingPost = editingPost != null
                     editingDraft = null
                     editingPost = null
-                    // 编辑已发布帖子返回后，刷新详情内容/可见性（图片笔记与视频笔记各自生效）
-                    if (wasEditingPost) {
+                    // 编辑已发布帖子后存草稿：原帖已被删除，不能再退回到已删除帖子的详情页，
+                    // 直接回到来源页面（我的主页/我的视频等）
+                    if (wasEditingPost && savedAsDraft) {
                         detailRefreshKey++
                         videoRefreshKey++
+                        goBack()   // 退出 发布 页
+                        goBack()   // 退出 详情/视频 页，回到我的主页
+                    } else {
+                        if (wasEditingPost) {
+                            detailRefreshKey++
+                            videoRefreshKey++
+                        }
+                        goBack()
                     }
-                    goBack()
                 }
             )
         }
@@ -927,6 +935,7 @@ fun AppScreen(
         Screen.VideoFeed -> {
             VideoFeedScreen(
                 userUid = userUid,
+                userName = userName,
                 userAvatarUrl = userAvatarUrl,
                 onBack = { goBack() },
                 onUserClick = { targetUid -> openUserProfile(targetUid) }
@@ -942,6 +951,7 @@ fun AppScreen(
                 likeCount = 0, favoriteCount = 0, commentCount = 0,
                 videoId = selectedVideoId,
                 userUid = userUid,
+                userName = userName,
                 userXhsId = userXhsId,
                 userAvatarUrl = userAvatarUrl,
                 authorAvatarUrl = userAvatarUrl,

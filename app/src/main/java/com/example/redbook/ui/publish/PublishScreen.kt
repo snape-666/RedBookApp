@@ -69,7 +69,7 @@ fun PublishScreen(
     editDraft: com.example.redbook.data.model.Draft? = null,
     editPost: com.example.redbook.data.model.PostToEdit? = null,
     onBack: () -> Unit,
-    onPublished: () -> Unit
+    onPublished: (savedAsDraft: Boolean) -> Unit
 ) {
     val context = LocalContext.current
     val viewModel = remember(authorUid, authorXhsId, authorName, authorAvatar, editDraft?.draftId, editPost?.postId) {
@@ -83,7 +83,7 @@ fun PublishScreen(
     }
 
     LaunchedEffect(state.saved) {
-        if (state.saved) onPublished()
+        if (state.saved) onPublished(state.savedAsDraft)
     }
 
     Column(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface).padding(top = 36.dp, bottom = 16.dp)) {

@@ -1,0 +1,3 @@
+# Taste
+
+- Explicitly invites the assistant to ask clarifying questions (repeatedly, for however many rounds are needed) before implementing a feature until it can fully understand and 100% satisfy the requirements ("你可以问我问题直到你可以百分百完成我的要求") — the assistant is expected to probe ambiguities (e.g., which model/API, exact prefix semantics, trigger behavior) with concrete pick-one options rather than guessing and implementing on assumptions; the user is happy to answer these questions to align requirements. Confidence: 0.8

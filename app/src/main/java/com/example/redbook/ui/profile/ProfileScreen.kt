@@ -71,9 +71,12 @@ import coil.request.ImageRequest
 import com.example.redbook.R
 import com.example.redbook.data.model.Note
 import com.example.redbook.data.model.UserComment
+import com.example.redbook.data.repository.AiAssistant
 import com.example.redbook.data.repository.SupabaseAuthRepository
 import com.example.redbook.ui.component.BottomBar
 import com.example.redbook.ui.component.PostCard
+import com.example.redbook.ui.component.aiMentionHighlight
+import com.example.redbook.ui.theme.getBlueFill
 import com.example.redbook.ui.theme.getOnSurfaceSecondary
 import com.example.redbook.ui.theme.getOnSurfaceTertiary
 import com.example.redbook.ui.theme.getOutline
@@ -1186,7 +1189,7 @@ private fun ProfileCommentItem(comment: UserComment, onCommentClick: (String, St
             .weight(1f)
             .padding(start = 8.dp)) {
             Text(comment.authorName, fontSize = 14.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
-            Text(displayContent, fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.padding(vertical = 2.dp))
+            Text(aiMentionHighlight(displayContent), fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.padding(vertical = 2.dp))
             // 评论图片
             val imageUrls = comment.imageUrl.split(",").filter { it.isNotBlank() }
             if (imageUrls.isNotEmpty()) {
@@ -1219,7 +1222,7 @@ private fun ProfileCommentItem(comment: UserComment, onCommentClick: (String, St
                     Text(
                         text = "@${comment.parentUser}：${comment.parentContent}",
                         fontSize = 12.sp,
-                        color = getOnSurfaceSecondary(),
+                        color = if (AiAssistant.isAiUser(comment.parentUid)) getBlueFill() else getOnSurfaceSecondary(),
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )

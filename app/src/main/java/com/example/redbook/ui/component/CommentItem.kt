@@ -37,6 +37,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.redbook.R
 import com.example.redbook.data.model.Comment
+import com.example.redbook.data.repository.AiAssistant
+import com.example.redbook.ui.theme.getBlueFill
 import com.example.redbook.ui.theme.getOnSurfaceSecondary
 import com.example.redbook.ui.theme.getOnSurfaceTertiary
 import java.text.SimpleDateFormat
@@ -50,7 +52,7 @@ fun CommentItem(
     comment: Comment,
     onAvatarClick: (String) -> Unit,
     onUserNameClick: (String) -> Unit,
-    onReplyClick: (String,String) -> Unit,
+    onReplyClick: (String, String, String, Boolean) -> Unit,
     onLikeClick: (String) -> Unit,
     onLongClick: (String) -> Unit = {},
     modifier: Modifier = Modifier,
@@ -70,7 +72,7 @@ fun CommentItem(
         )) {
         // 一级评论
         Row {
-            if (comment.avatarUrl.isNotBlank()) {
+            if (comment.avatarUrl.isNotBlank() && !AiAssistant.isAiUser(comment.userId)) {
                 AsyncImage(
                     model = ImageRequest.Builder(LocalContext.current).data(comment.avatarUrl).crossfade(true).build(),
                     contentDescription = null,
@@ -82,12 +84,15 @@ fun CommentItem(
                 )
             } else {
                 Image(
-                    painter = painterResource(id = comment.avatarRes),
+                    painter = painterResource(id = if (AiAssistant.isAiUser(comment.userId)) AiAssistant.AVATAR_RES else comment.avatarRes),
                     contentDescription = null,
                     modifier = Modifier
                         .size(32.dp)
                         .clip(CircleShape)
-                        .clickable { onAvatarClick(comment.userId) },
+                        .then(
+                            if (AiAssistant.isAiUser(comment.userId)) Modifier
+                            else Modifier.clickable { onAvatarClick(comment.userId) }
+                        ),
                     contentScale = ContentScale.Crop
                 )
             }
@@ -97,8 +102,8 @@ fun CommentItem(
                         text = comment.userName,
                         fontSize = 14.sp,
                         fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onSurface,
-                        modifier = Modifier.clickable { onUserNameClick(comment.userId) }
+                        color = if (AiAssistant.isAiUser(comment.userId)) getBlueFill() else MaterialTheme.colorScheme.onSurface,
+                        modifier = if (AiAssistant.isAiUser(comment.userId)) Modifier else Modifier.clickable { onUserNameClick(comment.userId) }
                     )
                     if (comment.isAuthor) {
                         Spacer(modifier = Modifier.width(5.dp))
@@ -108,7 +113,7 @@ fun CommentItem(
                 }
                 Text(
                     modifier = Modifier.padding(vertical = 2.dp),
-                    text = comment.content,
+                    text = aiMentionHighlight(comment.content),
                     fontSize = 14.sp,
                     color = MaterialTheme.colorScheme.onSurface
                 )
@@ -158,7 +163,7 @@ fun CommentItem(
                         color = getOnSurfaceTertiary(),
                         modifier = Modifier
                             .clickable {
-                                onReplyClick(comment.id,comment.userName)
+                                onReplyClick(comment.id, comment.id, comment.userName, AiAssistant.isAiUser(comment.userId))
                             }
                     )
                     Spacer(modifier = Modifier.width(12.dp))
@@ -196,7 +201,7 @@ fun CommentItem(
                     reply = reply,
                     onAvatarClick = onAvatarClick,
                     onUserNameClick = onUserNameClick,
-                    onReplyClick = { onReplyClick(reply.id, reply.userName) },
+                    onReplyClick = { onReplyClick(reply.id, comment.id, reply.userName, AiAssistant.isAiUser(reply.userId)) },
                     onLikeClick = { onLikeClick(reply.id) },
                     onLongClick = { onLongClick(reply.id) },
                     modifier = Modifier.padding(start = 40.dp)

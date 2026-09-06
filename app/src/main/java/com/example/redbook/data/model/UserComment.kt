@@ -6,12 +6,15 @@ data class UserComment(
     val postTitle: String,
     val content: String,
     val authorName: String,
+    val authorUid: String = "",
     val isReply: Boolean,
     val parentUser: String,
+    val parentUid: String = "",
     val parentContent: String,
     val likeCount: Int,
     val timestamp: Long,
     val ipLocation: String = "未知",
     val isLiked: Boolean = false,
-    val imageUrl: String = ""
+    val imageUrl: String = "",
+    val avatarUrl: String = ""
 )

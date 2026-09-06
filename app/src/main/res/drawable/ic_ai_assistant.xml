@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 评论区 AI 小助手专属头像：品牌蓝底圆形 + 白色机器人/助手形象 -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="120dp"
+    android:height="120dp"
+    android:viewportWidth="120"
+    android:viewportHeight="120">
+    <!-- 蓝色圆形背景 -->
+    <path
+        android:fillColor="#4C84F6"
+        android:pathData="M60,60m-60,0a60,60 0,1 1,120 0a60,60 0,1 1,-120 0" />
+    <!-- 头（圆角方形，机器人头部） -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M60,24c-15.5,0 -28,12.5 -28,28v14c0,15.5 12.5,28 28,28s28,-12.5 28,-28V52c0,-15.5 -12.5,-28 -28,-28z" />
+    <!-- 头两侧天线 -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M46,23h3v9h-3z M71,23h3v9h-3z" />
+    <!-- 天线顶端圆点 -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M47.5,20m-3,0a3,3 0,1 1,6 0a3,3 0,1 1,-6 0 M72.5,20m-3,0a3,3 0,1 1,6 0a3,3 0,1 1,-6 0" />
+    <!-- 眼睛 -->
+    <path
+        android:fillColor="#4C84F6"
+        android:pathData="M47,60m-4.5,0a4.5,4.5 0,1 1,9 0a4.5,4.5 0,1 1,-9 0 M73,60m-4.5,0a4.5,4.5 0,1 1,9 0a4.5,4.5 0,1 1,-9 0" />
+    <!-- 微笑嘴 -->
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#4C84F6"
+        android:strokeLineCap="round"
+        android:strokeWidth="4"
+        android:pathData="M51,74c4,4 14,4 18,0" />
+</vector>
