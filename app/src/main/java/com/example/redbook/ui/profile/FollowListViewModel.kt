@@ -105,7 +105,13 @@ class FollowListViewModel(
     /** 关注/取消关注（同步云端） */
     fun toggleFollow(uid: String, following: Boolean) {
         if (viewerUid.isBlank() || uid.isBlank() || uid == viewerUid) return
-        updateLocal(uid) { it.copy(followedByMe = following) }
+        if (mode == FollowListMode.FOLLOWING && !following) {
+            // 关注列表：取消关注后该项直接移除（不再出现在“我关注的人”里）
+            _items.value = _items.value.filterNot { it.uid == uid }
+        } else {
+            // 粉丝列表：取消互关后保留该用户，但按钮回到“回关”
+            updateLocal(uid) { it.copy(followedByMe = following) }
+        }
         viewModelScope.launch {
             try { repository.follow(viewerUid, uid, following) } catch (_: Exception) { }
         }

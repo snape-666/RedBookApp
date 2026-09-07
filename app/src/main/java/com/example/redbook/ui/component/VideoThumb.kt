@@ -1,7 +1,6 @@
 package com.example.redbook.ui.component
 
 import android.graphics.Bitmap
-import android.media.MediaMetadataRetriever
 import androidx.compose.foundation.Image
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -9,6 +8,7 @@ import androidx.compose.runtime.produceState
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -19,22 +19,10 @@ fun VideoThumb(
     modifier: Modifier = Modifier,
     placeholder: Int
 ) {
+    val appContext = LocalContext.current.applicationContext
+    // 走 VideoThumbCache：内存 LRU + 磁盘缓存，滚动回来/二次进入无需重新联网取帧
     val thumb = produceState<Bitmap?>(initialValue = null, videoUrl) {
-        value = withContext(Dispatchers.IO) {
-            val retriever = MediaMetadataRetriever()
-            try {
-                if (videoUrl.startsWith("http")) {
-                    retriever.setDataSource(videoUrl, HashMap<String, String>())
-                } else {
-                    retriever.setDataSource(videoUrl)
-                }
-                retriever.frameAtTime
-            } catch (e: Exception) {
-                null
-            } finally {
-                try { retriever.release() } catch (e: Exception) { }
-            }
-        }
+        value = withContext(Dispatchers.IO) { VideoThumbCache.get(appContext, videoUrl) }
     }
     val bitmap = thumb.value
     if (bitmap != null) {

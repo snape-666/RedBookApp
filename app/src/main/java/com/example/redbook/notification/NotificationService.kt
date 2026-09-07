@@ -59,18 +59,15 @@ class NotificationService : Service() {
         }
         startAsForeground()
 
-        if (uid != targetUid) {
-            // 账号切换(如 A 退出登 B):换 uid 重建连接,并补发离线期间该账号的未读
-            uid = targetUid
-            repository?.disconnect()
-            repository = RealtimeRepository(application)
-            repository?.connect(uid, listener)
-            scope?.launch { catchUpOffline(uid) }
-        } else if (repository == null) {
-            // 进程被杀后 START_STICKY 重启:重建连接 + 补发漏掉的通知
-            repository = RealtimeRepository(application)
-            repository?.connect(uid, listener)
-            scope?.launch { catchUpOffline(uid) }
+        // 每次启动都重建连接：避免 repository 非空但底层 WebSocket 已死（后台被杀/网络闪断）时不再重连
+        val uidChanged = uid != targetUid
+        uid = targetUid
+        repository?.disconnect()
+        repository = RealtimeRepository(application)
+        repository?.connect(uid, listener)
+        scope?.launch { catchUpOffline(uid) }
+        if (uidChanged) {
+            android.util.Log.d("NotificationService", "rebuild connection for uid=$uid")
         }
         return START_STICKY
     }

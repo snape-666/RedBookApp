@@ -1,7 +1,6 @@
 package com.example.redbook.ui.video
 
 import android.net.Uri
-import android.widget.VideoView
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
@@ -51,6 +50,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
@@ -64,6 +64,10 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.media3.common.Player
+import androidx.media3.common.VideoSize
+import androidx.media3.ui.AspectRatioFrameLayout
+import androidx.media3.ui.PlayerView
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import com.example.redbook.R
@@ -162,6 +166,8 @@ fun VideoFeedScreen(
             val pagerState = rememberPagerState(pageCount = { videos.size })
             VerticalPager(
                 state = pagerState,
+                // 预加载相邻页：上/下一页进入组合即开始缓冲，滑动时秒开
+                beyondViewportPageCount = 1,
                 modifier = Modifier.fillMaxSize()
             ) { page ->
                 val video = videos[page]
@@ -213,7 +219,9 @@ private fun FeedVideoPage(
     val myName = userName.ifBlank { "我" }
     var curMs by remember { mutableIntStateOf(0) }
     var durMs by remember { mutableIntStateOf(0) }
-    var vv by remember { mutableStateOf<VideoView?>(null) }
+    val player = rememberVideoPlayer(video.videoUrl)
+    // 视频宽高比（0<ratio<1 为竖屏）：竖屏 cover 铺满视频区域，横屏保持等比自适应
+    var videoAspect by remember { mutableStateOf(0f) }
     var paused by remember { mutableStateOf(false) }
     var liked by remember { mutableStateOf(false) }
     var faved by remember { mutableStateOf(false) }
@@ -256,29 +264,33 @@ private fun FeedVideoPage(
         }
     }
 
-    // 播放/暂停：仅在当前页激活时播放
+    // 播放/暂停：仅在当前页激活时播放（player 进入页面即 prepare 缓冲，切到时秒开）
     LaunchedEffect(isActive, video.videoUrl) {
         if (isActive) {
             paused = false
             delay(50)
-            vv?.start()
+            player?.play()
         } else {
-            vv?.pause()
+            player?.pause()
         }
     }
 
-    LaunchedEffect(vv, isActive) {
+    LaunchedEffect(player, isActive) {
         while (isActive) {
             delay(100)
-            vv?.let { curMs = it.currentPosition }
+            player?.let {
+                curMs = it.currentPosition.toInt()
+                val d = it.duration
+                if (d > 0) durMs = d.toInt()
+            }
         }
     }
 
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner, isActive) {
         val obs = LifecycleEventObserver { _, e ->
-            if (e == Lifecycle.Event.ON_RESUME && isActive) vv?.start()
-            if (e == Lifecycle.Event.ON_PAUSE) vv?.pause()
+            if (e == Lifecycle.Event.ON_RESUME && isActive) player?.play()
+            if (e == Lifecycle.Event.ON_PAUSE) player?.pause()
         }
         lifecycleOwner.lifecycle.addObserver(obs)
         onDispose { lifecycleOwner.lifecycle.removeObserver(obs) }
@@ -299,18 +311,42 @@ private fun FeedVideoPage(
                         indication = null
                     ) {
                         paused = !paused
-                        if (paused) vv?.pause() else vv?.start()
+                        if (paused) player?.pause() else player?.play()
                     },
                 contentAlignment = Alignment.Center
             ) {
-                AndroidView(factory = { ctx -> VideoView(ctx).also { vv = it }.apply {
-                    try { if (video.videoUrl.startsWith("/")) setVideoPath(video.videoUrl) else setVideoURI(Uri.parse(video.videoUrl)) }
-                    catch (_: Exception) { setVideoURI(Uri.parse(video.videoUrl)) }
-                    setOnPreparedListener { mp -> durMs = mp.duration; mp.isLooping = false }
-                    setOnCompletionListener { android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({ start() }, 1000) }
-                    setOnErrorListener { _, _, _ -> false }
-                    if (isActive) start()
-                }}, Modifier.fillMaxWidth().wrapContentHeight())
+                AndroidView(
+                    factory = { ctx ->
+                        PlayerView(ctx).apply {
+                            useController = false
+                            this.player = player
+                            // 竖屏视频：宽度占满、高度居中裁剪填满视频区域；横屏/方形：等比自适应不裁剪
+                            fun applyVideoSize(videoSize: VideoSize) {
+                                if (videoSize.width > 0 && videoSize.height > 0) {
+                                    videoAspect = videoSize.width.toFloat() / videoSize.height
+                                    resizeMode = if (videoSize.width < videoSize.height) {
+                                        AspectRatioFrameLayout.RESIZE_MODE_ZOOM
+                                    } else {
+                                        AspectRatioFrameLayout.RESIZE_MODE_FIT
+                                    }
+                                }
+                            }
+                            // prepare 可能已在监听器注册前上报尺寸，先立即同步应用一次
+                            applyVideoSize(player?.videoSize ?: VideoSize.UNKNOWN)
+                            player?.addListener(object : Player.Listener {
+                                override fun onVideoSizeChanged(videoSize: VideoSize) {
+                                    applyVideoSize(videoSize)
+                                }
+                            })
+                        }
+                    },
+                    modifier = if (videoAspect > 0f && videoAspect < 1f) {
+                        // 占满进度条上方视频区域，裁剪溢出，绝不允许压到底部栏
+                        Modifier.fillMaxSize().clipToBounds()
+                    } else {
+                        Modifier.fillMaxWidth().wrapContentHeight()
+                    }
+                )
                 if (durMs == 0 && !paused) {
                     CircularProgressIndicator(color = Color.White)
                 }

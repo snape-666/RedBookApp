@@ -17,4 +17,8 @@ local.properties
 supabase.properties
 *.jks
 app/release/
+# 敏感配置：Firebase 配置含 API key，禁止提交
+google-services.json
+app/google-services.json
+**/google-services.json
 

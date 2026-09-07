@@ -2,7 +2,6 @@ package com.example.redbook.ui.video
 
 import android.annotation.SuppressLint
 import android.net.Uri
-import android.widget.VideoView
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
@@ -51,6 +50,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
@@ -65,6 +65,10 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
+import androidx.media3.common.Player
+import androidx.media3.common.VideoSize
+import androidx.media3.ui.AspectRatioFrameLayout
+import androidx.media3.ui.PlayerView
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import com.example.redbook.R
@@ -121,7 +125,9 @@ fun VideoDetailScreen(
     val myName = userName.ifBlank { "我" }
     var curMs by remember { mutableIntStateOf(0) }
     var durMs by remember { mutableIntStateOf(0) }
-    var vv by remember { mutableStateOf<VideoView?>(null) }
+    val player = rememberVideoPlayer(videoUrl)
+    // 视频宽高比（0<ratio<1 为竖屏）：竖屏 cover 铺满视频区域，横屏保持等比自适应
+    var videoAspect by remember { mutableStateOf(0f) }
     var paused by remember { mutableStateOf(false) }
     var followed by remember { mutableStateOf(isFollowed) }
     var authorUid by remember { mutableStateOf("") }
@@ -161,7 +167,17 @@ fun VideoDetailScreen(
         if (!imeVisible) kbVisible = false
     }
 
-    LaunchedEffect(vv) { while (true) { delay(50); vv?.let { curMs = it.currentPosition } } }
+    LaunchedEffect(player) { player?.play() }
+    LaunchedEffect(player) {
+        while (true) {
+            delay(50)
+            player?.let {
+                curMs = it.currentPosition.toInt()
+                val d = it.duration
+                if (d > 0) durMs = d.toInt()
+            }
+        }
+    }
     LaunchedEffect(videoId, userUid, refreshKey) {
         if (videoId.isNotBlank() && userUid.isNotBlank()) {
             try {
@@ -212,7 +228,7 @@ fun VideoDetailScreen(
     DisposableEffect(lifecycleOwner, videoId, userUid) {
         val obs = LifecycleEventObserver { _, e ->
             if (e == Lifecycle.Event.ON_RESUME) {
-                vv?.start()
+                player?.play()
                 // 回到页面时重新同步关注状态（可能在其他页面已关注/取关）
                 if (videoId.isNotBlank() && userUid.isNotBlank()) {
                     scope.launch {
@@ -246,17 +262,42 @@ fun VideoDetailScreen(
                     .weight(1f)
                     .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {
                         paused = !paused
-                        if (paused) vv?.pause() else vv?.start()
+                        if (paused) player?.pause() else player?.play()
                     },
                 Alignment.Center
             ) {
-                AndroidView(factory = { ctx -> VideoView(ctx).also { vv = it }.apply {
-                    try { if (videoUrl.startsWith("/")) setVideoPath(videoUrl) else setVideoURI(Uri.parse(videoUrl)) }
-                    catch (_: Exception) { setVideoURI(Uri.parse(videoUrl)) }
-                    setOnPreparedListener { mp -> durMs = mp.duration; mp.isLooping = false }
-                    setOnCompletionListener { android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({ start() }, 1000) }
-                    setOnErrorListener { _, _, _ -> false }; start()
-                }}, Modifier.fillMaxWidth().wrapContentHeight())
+                AndroidView(
+                    factory = { ctx ->
+                        PlayerView(ctx).apply {
+                            useController = false
+                            this.player = player
+                            // 竖屏视频：宽度占满、高度居中裁剪填满视频区域；横屏/方形：等比自适应不裁剪
+                            fun applyVideoSize(videoSize: VideoSize) {
+                                if (videoSize.width > 0 && videoSize.height > 0) {
+                                    videoAspect = videoSize.width.toFloat() / videoSize.height
+                                    resizeMode = if (videoSize.width < videoSize.height) {
+                                        AspectRatioFrameLayout.RESIZE_MODE_ZOOM
+                                    } else {
+                                        AspectRatioFrameLayout.RESIZE_MODE_FIT
+                                    }
+                                }
+                            }
+                            // prepare 可能已在监听器注册前上报尺寸，先立即同步应用一次
+                            applyVideoSize(player?.videoSize ?: VideoSize.UNKNOWN)
+                            player?.addListener(object : Player.Listener {
+                                override fun onVideoSizeChanged(videoSize: VideoSize) {
+                                    applyVideoSize(videoSize)
+                                }
+                            })
+                        }
+                    },
+                    modifier = if (videoAspect > 0f && videoAspect < 1f) {
+                        // 占满进度条上方视频区域，裁剪溢出，绝不允许压到底部栏
+                        Modifier.fillMaxSize().clipToBounds()
+                    } else {
+                        Modifier.fillMaxWidth().wrapContentHeight()
+                    }
+                )
                 if (durMs == 0 && !paused) {
                     CircularProgressIndicator(color = Color.White)
                 }

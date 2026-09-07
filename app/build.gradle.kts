@@ -80,6 +80,10 @@ dependencies {
     implementation(libs.okhttp)
     //  Kotlinx Coroutines Android(评论 AI 小助手网络请求线程池)
     implementation(libs.kotlinx.coroutines.android)
+    //  Media3 ExoPlayer（视频播放：磁盘缓存 + 预加载，替代系统 VideoView）
+    implementation(libs.media3.exoplayer)
+    implementation(libs.media3.datasource)
+    implementation(libs.media3.ui)
     //  Test
     testImplementation(libs.junit)
     androidTestImplementation(platform(libs.androidx.compose.bom))
