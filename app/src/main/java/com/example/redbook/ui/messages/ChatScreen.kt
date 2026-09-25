@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
@@ -155,13 +156,6 @@ fun ChatScreen(
     var highlightMessageId by remember { mutableStateOf("") }
     var locatedMessageId by remember { mutableStateOf("") }
 
-    // 常规进入（非搜索定位）：消息加载完后滚动到底部
-    LaunchedEffect(messages.size, locatedMessageId, scrollToMessageId) {
-        if (messages.isNotEmpty() && locatedMessageId.isBlank() && scrollToMessageId.isBlank()) {
-            listState.animateScrollToItem(messages.size - 1)
-        }
-    }
-
     // 从聊天记录搜索进入：定位到指定消息并做 0.5s 高亮涟漪
     LaunchedEffect(messages.size, scrollToMessageId) {
         if (scrollToMessageId.isNotBlank() && messages.isNotEmpty()) {
@@ -169,7 +163,8 @@ fun ChatScreen(
             if (idx >= 0) {
                 locatedMessageId = scrollToMessageId
                 highlightMessageId = scrollToMessageId
-                listState.animateScrollToItem(idx)
+                // reverseLayout 下 LazyColumn 下标是反的：时间正序 idx → 反转下标
+                listState.animateScrollToItem(messages.size - 1 - idx)
                 kotlinx.coroutines.delay(500)
                 highlightMessageId = ""
             }
@@ -256,6 +251,7 @@ fun ChatScreen(
 
         LazyColumn(
             state = listState,
+            reverseLayout = true,
             modifier = Modifier
                 .weight(1f)
                 .fillMaxWidth()
@@ -264,7 +260,9 @@ fun ChatScreen(
                     detectTapGestures { focusManager.clearFocus() }
                 }
         ) {
-            itemsIndexed(messages) { index, msg ->
+            items(messages.size) { reversedIndex ->
+                val index = messages.size - 1 - reversedIndex
+                val msg = messages[index]
                 val showTime = index == 0 ||
                     msg.time - messages[index - 1].time > 5 * 60 * 1000L
                 if (showTime) {
@@ -370,12 +368,9 @@ fun ChatScreen(
                                 text = text,
                                 mediaUris = media,
                                 onStart = { sending = true },
-                                onDone = { mediaUrl, sent ->
-                                    // 更新为远程 URL（若上传/发送成功）
-                                    val idx = messages.indexOfFirst { it.time == time && it.isMine }
-                                    if (idx >= 0) {
-                                        messages[idx] = messages[idx].copy(mediaUrl = mediaUrl.ifBlank { media.joinToString(",") { it.toString() } })
-                                    }
+                                onDone = { _, _ ->
+                                    // 云端已存远程 URL（重进会用）；本地继续显示 content:// 图，
+                                    // 不替换 mediaUrl，避免图片重载引起的闪烁
                                     sending = false
                                 }
                             )

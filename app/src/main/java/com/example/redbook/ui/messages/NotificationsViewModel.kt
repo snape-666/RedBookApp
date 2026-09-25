@@ -116,6 +116,11 @@ class NotificationsViewModel(
             _loading.value = false
         }
     }
+
+    /** 清空当前通知列表（顶部“清空”按钮确认后调用） */
+    fun clear() {
+        _items.value = emptyList()
+    }
 }
 
 class NotificationsViewModelFactory(

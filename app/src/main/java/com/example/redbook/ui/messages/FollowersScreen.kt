@@ -69,6 +69,7 @@ fun FollowersScreen(
     // ---- 通知点击定位:加载完成后滚动到对应行并 0.5s 高亮 ----
     val listState = rememberLazyListState()
     var highlightUid by remember { mutableStateOf("") }
+    var showClearDialog by remember { mutableStateOf(false) }
     LaunchedEffect(followers, highlightActorUid) {
         if (highlightActorUid.isNotBlank()) {
             val idx = followers.indexOfFirst { it.uid == highlightActorUid }
@@ -117,7 +118,17 @@ fun FollowersScreen(
                     color = MaterialTheme.colorScheme.onSurface
                 )
             }
-            Spacer(modifier = Modifier.size(24.dp))
+            Text(
+                text = "清空",
+                fontSize = 14.sp,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null
+                    ) { showClearDialog = true }
+                    .padding(4.dp)
+            )
         }
 
         Spacer(modifier = Modifier.fillMaxWidth().height(0.5.dp).background(getOutline()))
@@ -138,6 +149,48 @@ fun FollowersScreen(
                         onSendMessage = { onSendMessage(item.uid, item.userName, item.avatarUrl) },
                         onUserClick = { onUserClick(item.uid) }
                     )
+                }
+            }
+        }
+    }
+
+    if (showClearDialog) {
+        androidx.compose.ui.window.Dialog(onDismissRequest = { showClearDialog = false }) {
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(MaterialTheme.colorScheme.surface)
+            ) {
+                Column(
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 24.dp, vertical = 20.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text("是否清空新增关注", fontWeight = FontWeight.Bold, fontSize = 18.sp, color = MaterialTheme.colorScheme.onSurface)
+                }
+                Box(Modifier.fillMaxWidth().height(0.5.dp).background(getOutline().copy(alpha = 0.5f)))
+                Row(
+                    Modifier.fillMaxWidth().height(48.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(
+                        Modifier.weight(1f).height(48.dp).clickable { showClearDialog = false },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text("取消", color = getOnSurfaceSecondary())
+                    }
+                    Box(Modifier.width(0.5.dp).height(48.dp).background(getOutline().copy(alpha = 0.5f)))
+                    Box(
+                        Modifier.weight(1f).height(48.dp).clickable {
+                            showClearDialog = false
+                            viewModel.clear()
+                        },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text("确认", color = MaterialTheme.colorScheme.primary)
+                    }
                 }
             }
         }

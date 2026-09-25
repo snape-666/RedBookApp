@@ -66,6 +66,11 @@ class FollowersViewModel(application: Application, private val userUid: String) 
             try { repository.follow(userUid, uid, followed) } catch (_: Exception) { }
         }
     }
+
+    /** 清空当前关注列表（顶部“清空”按钮确认后调用） */
+    fun clear() {
+        _followers.value = emptyList()
+    }
 }
 
 class FollowersViewModelFactory(private val application: Application, private val uid: String) : ViewModelProvider.Factory {

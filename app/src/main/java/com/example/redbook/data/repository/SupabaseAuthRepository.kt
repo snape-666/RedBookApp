@@ -820,15 +820,15 @@ class SupabaseAuthRepository(private val app: Application) {
 
     // 用户的评论和回复
     suspend fun getUserComments(userUid: String, userXhsId: String): JSONArray {
-        var arr = JSONArray()
-        if (userXhsId.isNotBlank()) {
-            val resp = queryRest("comments", "select=*&author_xhs_id=eq.$userXhsId&order=created_at.desc")
-            arr = resp.optJSONArray("users") ?: resp.optJSONArray("comments") ?: JSONArray()
-        }
-        if (arr.length() == 0 && userUid.isNotBlank()) {
-            val resp = queryRest("comments", "select=*&author_uid=eq.$userUid&order=created_at.desc")
-            arr = resp.optJSONArray("users") ?: resp.optJSONArray("comments") ?: JSONArray()
-        }
+        // 视频流发评论时 author_xhs_id 传的是空串，只用 xhs_id 查会漏掉这些评论；
+        // 改为 uid 与 xhs_id 取并集查询（uid 稳定、始终有值），再统一按时间倒序返回。
+        val filters = mutableListOf<String>()
+        if (userUid.isNotBlank()) filters.add("author_uid.eq.$userUid")
+        if (userXhsId.isNotBlank()) filters.add("author_xhs_id.eq.$userXhsId")
+        if (filters.isEmpty()) return JSONArray()
+        val filterExpr = if (filters.size == 1) filters[0] else "or=(${filters.joinToString(",")})"
+        val resp = queryRest("comments", "select=*&$filterExpr&order=created_at.desc")
+        val arr = resp.optJSONArray("users") ?: resp.optJSONArray("comments") ?: JSONArray()
         // 先建内存 map，避免 N+1 查询
         val map = mutableMapOf<String, Triple<String, String, String>>()
         for (i in 0 until arr.length()) {
