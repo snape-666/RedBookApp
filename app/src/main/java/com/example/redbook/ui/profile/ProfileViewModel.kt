@@ -246,7 +246,8 @@ class ProfileViewModel(
                 likeCount = c.optInt("like_count", 0),
                 timestamp = c.optLong("created_at", 0),
                 ipLocation = c.optString("ip_location", "").ifBlank { "未知" },
-                imageUrl = c.optString("image_url", "")
+                imageUrl = c.optString("image_url", ""),
+                avatarUrl = c.optString("author_avatar", "")
             )
         }
     }

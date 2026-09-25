@@ -84,7 +84,7 @@ fun AddFriendScreen(
             .background(MaterialTheme.colorScheme.surface)
             .padding(horizontal = 10.dp)
     ) {
-        Spacer(modifier = Modifier.height(24.dp))
+        Spacer(modifier = Modifier.height(36.dp))
         MessageTopSearchBar(
             query = query,
             onQueryChange = { query = it },

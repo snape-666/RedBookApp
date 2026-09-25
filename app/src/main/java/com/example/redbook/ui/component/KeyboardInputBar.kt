@@ -72,6 +72,12 @@ fun KeyboardInputBar(
         focusRequester.requestFocus()
     }
 
+    // 选图返回后重新聚焦：选图会临时让输入框失去焦点、键盘收起，
+    // 这里在图片列表变化（新增/移除图片）时把焦点拉回来，用户可继续输入
+    LaunchedEffect(selectedImages) {
+        focusRequester.requestFocus()
+    }
+
     // 回复前缀：形如 “回复 xxx：” 或 “回复 @xxx：”
     val replyPrefixRegex = Regex("^回复\\s*(@\\S+|[^\\s：]+)\\s*[：:]")
     val prefixEnd = replyPrefixRegex.find(text)?.range?.last?.plus(1) ?: -1

@@ -533,6 +533,26 @@ fun AppScreen(
         }
     }
 
+    // 从"我的评论/对方评论"点进原帖：视频笔记走视频页，图文笔记走详情页，
+    // 并带上评论 id 定位到对应评论（视频详情/图文详情都支持 scrollToCommentId）
+    fun openComment(postId: String, commentId: String) {
+        scrollToCommentId = commentId
+        recordBrowse(postId)
+        scope.launch {
+            val imageUrl = try { browseRepo.getPost(postId)?.optString("image_url", "") ?: "" } catch (e: Exception) { "" }
+            if (imageUrl.startsWith("video:")) {
+                selectedVideoId = postId
+                selectedVideoUrl = imageUrl.removePrefix("video:")
+                videoEditMode = false
+                navigateTo(Screen.Video)
+            } else {
+                selectedPostId = postId
+                detailEditMode = false
+                navigateTo(Screen.Detail)
+            }
+        }
+    }
+
     // 账户间桥梁：与某用户建立会话并进入聊天页（有备注名时优先用备注名展示）
     fun openChatWith(peerUid: String, peerName: String, peerAvatar: String) {
         if (peerUid.isBlank() || peerUid == userUid) return
@@ -723,12 +743,7 @@ fun AppScreen(
                     recordBrowse(videoId)
                     navigateTo(Screen.Video)
                 },
-                onCommentClick = { postId, commentId ->
-                    selectedPostId = postId
-                    scrollToCommentId = commentId
-                    recordBrowse(postId)
-                    navigateTo(Screen.Detail)
-                },
+                onCommentClick = { postId, commentId -> openComment(postId, commentId) },
                 onFollowingClick = {
                     followListMode = com.example.redbook.ui.profile.FollowListMode.FOLLOWING
                     followListProfileUid = viewProfileUid  // 对方主页的关注列表
@@ -788,12 +803,7 @@ fun AppScreen(
                     recordBrowse(videoId)
                     navigateTo(Screen.Video)
                 },
-                onCommentClick = { postId, commentId ->
-                    selectedPostId = postId
-                    scrollToCommentId = commentId
-                    recordBrowse(postId)
-                    navigateTo(Screen.Detail)
-                },
+                onCommentClick = { postId, commentId -> openComment(postId, commentId) },
                 onPublish = { navigateTo(Screen.Publish) },
                 onDraftClick = { navigateTo(Screen.Draft) },
                 onBrowseClick = { navigateTo(Screen.Browse) },

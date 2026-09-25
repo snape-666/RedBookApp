@@ -34,8 +34,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
@@ -103,7 +101,7 @@ fun MessageSearchScreen(
             .padding(horizontal = 10.dp)
     ) {
         // 搜索 row 距顶部 24dp；结果列表底部留 16dp
-        Spacer(modifier = Modifier.height(24.dp))
+        Spacer(modifier = Modifier.height(36.dp))
         MessageTopSearchBar(
             query = query,
             onQueryChange = { query = it },

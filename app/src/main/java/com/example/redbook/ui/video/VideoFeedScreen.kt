@@ -96,6 +96,10 @@ private data class FeedVideo(
 // 评论回复目标：(被回复id, 所属一级评论id, 对方名字, 是否回复小助手)
 private data class FeedReplyTarget(val targetId: String, val parentCommentId: String, val name: String, val toAi: Boolean)
 
+// 上传评论里的图片，返回逗号拼接的 URL 串；无图返回空串
+private suspend fun uploadCommentImages(repository: SupabaseAuthRepository, context: android.content.Context, uris: List<android.net.Uri>): String =
+    uris.mapNotNull { repository.uploadImage(it, context) }.joinToString(",")
+
 private val feedComments = mutableMapOf<String, MutableList<Comment>>()
 
 @Composable
@@ -243,6 +247,8 @@ private fun FeedVideoPage(
 
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.GetMultipleContents()) { u ->
         u.forEach { if (it !in selUris) selUris.add(it) }
+        // 选图返回后重新展开输入栏并聚焦，避免键盘因相册切前台而收起
+        kbVisible = true
     }
 
     val imeVisible = WindowInsets.isImeVisible
@@ -581,7 +587,7 @@ private fun FeedVideoPage(
                                             scope.launch {
                                                 try {
                                                     val ip = com.example.redbook.data.repository.IpLocationProvider.resolveProvince(appContext) ?: ""
-                                                    repository.insertReply("r${System.currentTimeMillis()}", video.videoId, rt.parentCommentId, displayContent, myUid, myName, userAvatarUrl, "", video.title, "", ip)
+                                                    repository.insertReply("r${System.currentTimeMillis()}", video.videoId, rt.parentCommentId, displayContent, myUid, myName, userAvatarUrl, "", video.title, uploadCommentImages(repository, appContext, imgs), ip)
                                                     val aiCtx = parent.replies.filter { AiAssistant.isAiUser(it.userId) }.maxByOrNull { it.timestamp }
                                                     val aiQuestion = "@${AiAssistant.NAME}: " + (aiCtx?.let { "（小助手上一轮回答：${it.content}）" } ?: "") + ct
                                                     val aiResult = AiAssistant.askAndReply(appContext as android.app.Application, video.videoId, rt.parentCommentId, aiQuestion, postTitle = video.title, postVideoUrl = video.videoUrl)
@@ -599,7 +605,7 @@ private fun FeedVideoPage(
                                             scope.launch {
                                                 try {
                                                     val ip = com.example.redbook.data.repository.IpLocationProvider.resolveProvince(appContext) ?: ""
-                                                    repository.insertReply("r${System.currentTimeMillis()}", video.videoId, rt.parentCommentId, ct, myUid, myName, userAvatarUrl, "", video.title, "", ip)
+                                                    repository.insertReply("r${System.currentTimeMillis()}", video.videoId, rt.parentCommentId, ct, myUid, myName, userAvatarUrl, "", video.title, uploadCommentImages(repository, appContext, imgs), ip)
                                                 } catch (_: Exception) { }
                                             }
                                         }
@@ -620,7 +626,7 @@ private fun FeedVideoPage(
                                         scope.launch {
                                             try {
                                                 val ip = com.example.redbook.data.repository.IpLocationProvider.resolveProvince(appContext) ?: ""
-                                                repository.insertComment(myId, video.videoId, ct, myUid, myName, userAvatarUrl, "", video.title, "", ip)
+                                                repository.insertComment(myId, video.videoId, ct, myUid, myName, userAvatarUrl, "", video.title, uploadCommentImages(repository, appContext, imgs), ip)
                                                 val aiResult = AiAssistant.askAndReply(appContext as android.app.Application, video.videoId, myId, t, postTitle = video.title, postVideoUrl = video.videoUrl)
                                                 val i2 = cmts.indexOfFirst { it.id == myId }
                                                 if (i2 >= 0) {
@@ -635,7 +641,7 @@ private fun FeedVideoPage(
                                         scope.launch {
                                             try {
                                                 val ip = com.example.redbook.data.repository.IpLocationProvider.resolveProvince(appContext) ?: ""
-                                                repository.insertComment("c${System.currentTimeMillis()}", video.videoId, ct, myUid, myName, userAvatarUrl, "", video.title, "", ip)
+                                                repository.insertComment("c${System.currentTimeMillis()}", video.videoId, ct, myUid, myName, userAvatarUrl, "", video.title, uploadCommentImages(repository, appContext, imgs), ip)
                                             } catch (_: Exception) { }
                                         }
                                     }
@@ -760,6 +766,7 @@ private suspend fun loadFeedComments(
                 userName = c.optString("author_name", ""),
                 avatarRes = R.drawable.test,
                 avatarUrl = c.optString("author_avatar", ""),
+                images = c.optString("image_url", "").split(",").filter { it.isNotBlank() }.map { Uri.parse(it) },
                 content = c.optString("content", ""),
                 timestamp = c.optLong("created_at", 0),
                 ipLocation = c.optString("ip_location", "未知"),
@@ -779,6 +786,7 @@ private suspend fun loadFeedComments(
                         userName = r.userName,
                         avatarRes = r.avatarRes,
                         avatarUrl = r.avatarUrl,
+                        images = r.images,
                         content = r.content,
                         timestamp = r.timestamp,
                         ipLocation = r.ipLocation,

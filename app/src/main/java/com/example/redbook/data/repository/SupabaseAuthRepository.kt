@@ -845,6 +845,7 @@ class SupabaseAuthRepository(private val app: Application) {
             obj.put("content", c.optString("content"))
             obj.put("author_name", c.optString("author_name"))
             obj.put("author_uid", c.optString("author_uid"))
+            obj.put("author_avatar", c.optString("author_avatar", ""))
             obj.put("created_at", c.optLong("created_at"))
             obj.put("like_count", c.optInt("like_count"))
             obj.put("post_title", c.optString("post_title", ""))

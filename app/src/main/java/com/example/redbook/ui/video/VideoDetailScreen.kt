@@ -90,6 +90,10 @@ import kotlinx.coroutines.launch
 // 评论回复目标：(被回复id, 所属一级评论id, 对方名字, 是否回复小助手)
 private data class DetailReplyTarget(val targetId: String, val parentCommentId: String, val name: String, val toAi: Boolean)
 
+// 上传评论里的图片，返回逗号拼接的 URL 串；无图返回空串
+private suspend fun uploadCommentImages(repository: SupabaseAuthRepository, context: android.content.Context, uris: List<android.net.Uri>): String =
+    uris.mapNotNull { repository.uploadImage(it, context) }.joinToString(",")
+
 
 private val videoComments = mutableMapOf<String, MutableList<Comment>>()
 
@@ -162,6 +166,8 @@ fun VideoDetailScreen(
 
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.GetMultipleContents()) { u ->
         u.forEach { if (it !in selUris) selUris.add(it) }
+        // 选图返回后重新展开输入栏并聚焦，避免键盘因相册切前台而收起
+        kbVisible = true
     }
 
     // 监听真实键盘状态：键盘收起时同步收起评论输入栏
@@ -220,6 +226,8 @@ fun VideoDetailScreen(
                     if (idx >= 0) {
                         showCmt = true
                         highlightCommentId = cmts[idx].id
+                        // 评论区浮层要先组合出来，LazyColumn 才存在；等一帧再滚动定位
+                        kotlinx.coroutines.delay(200)
                         cmtListState.scrollToItem(idx)
                         kotlinx.coroutines.delay(500)
                         highlightCommentId = ""
@@ -589,7 +597,7 @@ fun VideoDetailScreen(
                                             scope.launch {
                                                 try {
                                                     val ip = com.example.redbook.data.repository.IpLocationProvider.resolveProvince(context.applicationContext) ?: ""
-                                                    repository.insertReply("r${System.currentTimeMillis()}", videoId, rt.parentCommentId, displayContent, myUid, myName, userAvatarUrl, userXhsId, title, "", ip)
+                                                    repository.insertReply("r${System.currentTimeMillis()}", videoId, rt.parentCommentId, displayContent, myUid, myName, userAvatarUrl, userXhsId, title, uploadCommentImages(repository, context, imgs), ip)
                                                     val aiCtx = parent.replies.filter { AiAssistant.isAiUser(it.userId) }.maxByOrNull { it.timestamp }
                                                     val aiQuestion = "@${AiAssistant.NAME}: " + (aiCtx?.let { "（小助手上一轮回答：${it.content}）" } ?: "") + ct
                                                     val aiResult = AiAssistant.askAndReply(context.applicationContext as android.app.Application, videoId, rt.parentCommentId, aiQuestion, postTitle = title, postVideoUrl = videoUrl)
@@ -607,7 +615,7 @@ fun VideoDetailScreen(
                                             scope.launch {
                                                 try {
                                                     val ip = com.example.redbook.data.repository.IpLocationProvider.resolveProvince(context.applicationContext) ?: ""
-                                                    repository.insertReply("r${System.currentTimeMillis()}", videoId, rt.parentCommentId, ct, myUid, myName, userAvatarUrl, userXhsId, title, "", ip)
+                                                    repository.insertReply("r${System.currentTimeMillis()}", videoId, rt.parentCommentId, ct, myUid, myName, userAvatarUrl, userXhsId, title, uploadCommentImages(repository, context, imgs), ip)
                                                 } catch (_: Exception) { }
                                             }
                                         }
@@ -626,7 +634,7 @@ fun VideoDetailScreen(
                                         scope.launch {
                                             try {
                                                 val ip = com.example.redbook.data.repository.IpLocationProvider.resolveProvince(context.applicationContext) ?: ""
-                                                repository.insertComment(myId, videoId, ct, myUid, myName, userAvatarUrl, userXhsId, title, "", ip)
+                                                repository.insertComment(myId, videoId, ct, myUid, myName, userAvatarUrl, userXhsId, title, uploadCommentImages(repository, context, imgs), ip)
                                                 val aiResult = AiAssistant.askAndReply(context.applicationContext as android.app.Application, videoId, myId, t, postTitle = title, postVideoUrl = videoUrl)
                                                 val i2 = cmts.indexOfFirst { it.id == myId }
                                                 if (i2 >= 0) {
@@ -642,7 +650,7 @@ fun VideoDetailScreen(
                                         scope.launch {
                                             try {
                                                 val ip = com.example.redbook.data.repository.IpLocationProvider.resolveProvince(context.applicationContext) ?: ""
-                                                repository.insertComment("c${System.currentTimeMillis()}", videoId, ct, myUid, myName, userAvatarUrl, userXhsId, title, "", ip)
+                                                repository.insertComment("c${System.currentTimeMillis()}", videoId, ct, myUid, myName, userAvatarUrl, userXhsId, title, uploadCommentImages(repository, context, imgs), ip)
                                             } catch (_: Exception) { }
                                         }
                                     }
@@ -859,6 +867,7 @@ private suspend fun loadVideoComments(
                 userName = c.optString("author_name", ""),
                 avatarRes = R.drawable.test,
                 avatarUrl = c.optString("author_avatar", ""),
+                images = c.optString("image_url", "").split(",").filter { it.isNotBlank() }.map { Uri.parse(it) },
                 content = c.optString("content", ""),
                 timestamp = c.optLong("created_at", 0),
                 ipLocation = c.optString("ip_location", "未知"),
@@ -878,6 +887,7 @@ private suspend fun loadVideoComments(
                         userName = r.userName,
                         avatarRes = r.avatarRes,
                         avatarUrl = r.avatarUrl,
+                        images = r.images,
                         content = r.content,
                         timestamp = r.timestamp,
                         ipLocation = r.ipLocation,

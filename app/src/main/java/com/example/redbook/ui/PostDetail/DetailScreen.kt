@@ -154,6 +154,9 @@ fun DetailScreen(
         contract = ActivityResultContracts.GetMultipleContents()
     ) { uris ->
         uris.forEach { uri -> viewModel.addSelectedImage(uri) }
+        // 选图返回后重新展开输入栏并聚焦，避免键盘因相册切前台而收起
+        viewModel.setKeyboardVisible(true)
+        focusRequester.requestFocus()
     }
 
     Box(Modifier.fillMaxSize()) {

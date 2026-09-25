@@ -1298,14 +1298,23 @@ private fun ProfileCommentItem(comment: UserComment, onCommentClick: (String, St
             onLongClick = { onLongClick(comment.commentId) }
         )
         .padding(horizontal = 16.dp, vertical = 8.dp)) {
-        Image(
-            painter = painterResource(R.drawable.test),
-            contentDescription = null,
-            modifier = Modifier
-                .size(32.dp)
-                .clip(CircleShape),
-            contentScale = ContentScale.Crop
-        )
+        if (comment.avatarUrl.isNotBlank()) {
+            AsyncImage(
+                model = ImageRequest.Builder(LocalContext.current).data(comment.avatarUrl).crossfade(true).build(),
+                contentDescription = null,
+                modifier = Modifier.size(32.dp).clip(CircleShape),
+                contentScale = ContentScale.Crop
+            )
+        } else {
+            Image(
+                painter = painterResource(R.drawable.test),
+                contentDescription = null,
+                modifier = Modifier
+                    .size(32.dp)
+                    .clip(CircleShape),
+                contentScale = ContentScale.Crop
+            )
+        }
         Column(Modifier
             .weight(1f)
             .padding(start = 8.dp)) {
