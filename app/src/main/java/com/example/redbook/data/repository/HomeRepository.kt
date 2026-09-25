@@ -4,36 +4,47 @@ import com.example.redbook.R
 import com.example.redbook.data.model.Note
 import org.json.JSONArray
 
+/**
+ * 冷启动预热缓存。
+ *
+ * 冷启动时第一条请求要在全新连接上做 DNS+TCP+TLS，海外链路抖动大，容易超时或被重置，
+ * 表现为"第一次进 App 首页报网络异常，手动刷新才出来"。启动页先按 uid 拉一次首页数据
+ * 放进这里，进入首页直接取用，省掉那次很可能失败的首请求。只消费一次，切账号即失效。
+ */
+object HomeFeedCache {
+    @Volatile private var uid: String = ""
+    @Volatile private var notes: List<Note>? = null
+
+    fun put(uid: String, notes: List<Note>) {
+        this.uid = uid
+        this.notes = notes
+    }
+
+    /** 取出并清空；uid 与当前账号不一致(切换账号)时返回 null */
+    fun take(uid: String): List<Note>? {
+        if (this.uid != uid) return null
+        val cached = notes
+        notes = null
+        return cached
+    }
+}
+
 class HomeRepository(val supabase: SupabaseAuthRepository) {
 
     suspend fun getNotes(userUid: String = ""): List<Note> {
-        return try {
-            val posts = supabase.filterVisiblePosts(supabase.getPosts(), userUid)
-            val likedIds = try { supabase.getLikedPostIds(userUid) } catch (e: Exception) { emptySet() }
-            if (posts.length() == 0) {
-                seedMockPosts()
-                val seeded = try { supabase.filterVisiblePosts(supabase.getPosts(), userUid) } catch (e: Exception) { org.json.JSONArray() }
-                val parsed = try { parsePosts(seeded, likedIds) } catch (e: Exception) { mockNotes() }
-                return applyRemarks(parsed, userUid)
-            }
-            applyRemarks(parsePosts(posts, likedIds), userUid)
-        } catch (e: Exception) {
-            mockNotes()
-        }
+        val posts = supabase.filterVisiblePosts(supabase.getPosts(), userUid)
+        val likedIds = try { supabase.getLikedPostIds(userUid) } catch (e: Exception) { emptySet() }
+        return applyRemarks(parsePosts(posts, likedIds), userUid)
     }
 
     /** 只返回我关注的人发布的帖子 */
     suspend fun getFollowingNotes(userUid: String): List<Note> {
         if (userUid.isBlank()) return emptyList()
-        return try {
-            val followingUids = supabase.getFollowingUids(userUid)
-            val posts = supabase.filterVisiblePosts(supabase.getPosts(), userUid)
-            val likedIds = try { supabase.getLikedPostIds(userUid) } catch (e: Exception) { emptySet() }
-            val notes = parsePosts(posts, likedIds).filter { it.authorUid in followingUids }
-            applyRemarks(notes, userUid)
-        } catch (e: Exception) {
-            emptyList()
-        }
+        val followingUids = supabase.getFollowingUids(userUid)
+        val posts = supabase.filterVisiblePosts(supabase.getPosts(), userUid)
+        val likedIds = try { supabase.getLikedPostIds(userUid) } catch (e: Exception) { emptySet() }
+        val notes = parsePosts(posts, likedIds).filter { it.authorUid in followingUids }
+        return applyRemarks(notes, userUid)
     }
 
     /** 将作者名替换为我对该作者的备注（有备注优先），authorUid 为空的 mock 数据跳过 */
@@ -70,49 +81,4 @@ class HomeRepository(val supabase: SupabaseAuthRepository) {
         }
     }
 
-    private suspend fun seedMockPosts() {
-        try {
-            for (i in 0 until 20) {
-                supabase.insertPost(
-                    postId = "post_$i",
-                    title = "这是第 ${i + 1} 篇超级好看的小红书风格笔记",
-                    content = "这是第 ${i + 1} 篇帖子的详细内容，非常精彩值得阅读。",
-                    authorUid = "user_${i % 5}",
-                    authorName = "用户${i + 1}",
-                    authorAvatar = ""
-                )
-            }
-        } catch (_: Exception) { }
-    }
-
-    private fun mockNotes(): List<Note> {
-        return List(20) { index ->
-            Note(
-                id = "post_$index",
-                imageRes = if (index % 2 == 0) R.drawable.test else R.drawable.test2,
-                title = "这是第 ${index + 1} 篇超级好看的小红书风格笔记，内容非常精彩！",
-                avatarRes = R.drawable.test,
-                userName = "用户${index + 1}",
-                likeCount = (100..9999).random()
-            )
-        }
-    }
-
-    suspend fun getVideoNotes(): List<Note> {
-        return try {
-            val videos = supabase.getVideos()
-            (0 until videos.length()).map { i ->
-                val v = videos.getJSONObject(i)
-                Note(
-                    id = v.optString("video_id", ""),
-                    title = v.optString("title", ""),
-                    imageRes = R.drawable.test,
-                    imageUrl = "video:${v.optString("video_url", "")}",
-                    avatarRes = R.drawable.test,
-                    userName = v.optString("author_name", ""),
-                    likeCount = 0
-                )
-            }
-        } catch (e: Exception) { emptyList() }
-    }
 }

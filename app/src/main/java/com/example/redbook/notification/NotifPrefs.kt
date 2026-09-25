@@ -7,6 +7,7 @@ import com.example.redbook.data.model.NotificationSettings
  * 通知设置本地存储(SharedPreferences)。
  * 键以 uid 前缀隔离,避免多账号串台;version 与云端合并时用于取新。
  */
+//通知开关的持久化
 object NotifPrefs {
 
     private const val PREFS_NAME = "notification_settings"

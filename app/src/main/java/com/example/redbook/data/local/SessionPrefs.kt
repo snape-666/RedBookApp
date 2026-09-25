@@ -40,6 +40,27 @@ object SessionPrefs {
             .apply()
     }
 
+    /**
+     * 改资料后同步本地会话缓存。
+     * 否则冷启动还是会用 SessionPrefs 里的旧昵称/头像，与新写入云端的内容不一致。
+     */
+    fun updateProfile(
+        context: Context,
+        nickname: String,
+        gender: String,
+        birthday: String,
+        avatarUrl: String,
+        backgroundUrl: String
+    ) {
+        prefs(context).edit()
+            .putString(KEY_NICKNAME, nickname)
+            .putString(KEY_GENDER, gender)
+            .putString(KEY_BIRTHDAY, birthday)
+            .putString(KEY_AVATAR_URL, avatarUrl)
+            .putString(KEY_BACKGROUND_URL, backgroundUrl)
+            .apply()
+    }
+
     /** 是否有已保存的登录会话 */
     fun isLoggedIn(context: Context): Boolean =
         prefs(context).getString(KEY_UID, "").orEmpty().isNotBlank()

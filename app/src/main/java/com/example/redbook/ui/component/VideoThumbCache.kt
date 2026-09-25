@@ -16,7 +16,9 @@ import java.security.MessageDigest
  * - 取帧后统一降到 720px 宽，减小内存与磁盘占用
  */
 object VideoThumbCache {
+    //上限20MB
     private const val MEM_MAX_BYTES = 20 * 1024 * 1024
+    //目标宽度720px
     private const val TARGET_WIDTH = 720
 
     private val memCache = object : LruCache<String, Bitmap>(MEM_MAX_BYTES) {
@@ -45,14 +47,17 @@ object VideoThumbCache {
         return scaled
     }
 
+    //从视频取第一帧
     private fun extract(url: String): Bitmap {
         val retriever = MediaMetadataRetriever()
         try {
-            if (url.startsWith("http")) {
-                retriever.setDataSource(url, HashMap<String, String>())
-            } else {
-                retriever.setDataSource(url)
+            when {
+                url.startsWith("http") -> retriever.setDataSource(url, HashMap<String, String>())
+                // 本地 file:// 路径需去掉 scheme，MediaMetadataRetriever 只认绝对路径
+                url.startsWith("file://") -> retriever.setDataSource(url.removePrefix("file://"))
+                else -> retriever.setDataSource(url)
             }
+            //取关键帧
             return retriever.frameAtTime
                 ?: throw IllegalStateException("no frame extracted")
         } finally {
@@ -60,6 +65,7 @@ object VideoThumbCache {
         }
     }
 
+    //按比例缩放照片宽度
     private fun scaleToWidth(src: Bitmap): Bitmap {
         if (src.width <= TARGET_WIDTH) return src
         val h = (src.height.toLong() * TARGET_WIDTH / src.width).toInt()
@@ -67,12 +73,12 @@ object VideoThumbCache {
         if (scaled !== src) src.recycle()
         return scaled
     }
-
+//磁盘缓存
     private fun coverFile(context: Context, url: String): File {
         val dir = File(context.cacheDir, "video_covers")
         return File(dir, "${md5(url)}.jpg")
     }
-
+//给图片URL生成文件名
     private fun md5(s: String): String =
         MessageDigest.getInstance("MD5").digest(s.toByteArray())
             .joinToString("") { "%02x".format(it) }

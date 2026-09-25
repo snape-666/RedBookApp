@@ -2,12 +2,14 @@ package com.example.redbook.ui.video
 
 import android.content.Context
 import android.net.Uri
+import androidx.annotation.OptIn
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.platform.LocalContext
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
+import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.datasource.cache.CacheDataSource
@@ -24,6 +26,8 @@ import java.io.File
  * - CacheDataSource 透明代理缓存，起播后边播边写盘
  * - 更积极的缓冲策略：缓冲约 1.2s 即可起播，减少转圈等待
  */
+//缓存api注解
+@UnstableApi
 object Media3PlayerFactory {
     private const val CACHE_MAX_BYTES = 512L * 1024 * 1024
 
@@ -33,6 +37,7 @@ object Media3PlayerFactory {
     @Volatile
     private var mediaSourceFactory: DefaultMediaSourceFactory? = null
 
+    //缓存初始化
     private fun ensure(context: Context) {
         if (cache != null && mediaSourceFactory != null) return
         synchronized(this) {
@@ -74,8 +79,10 @@ object Media3PlayerFactory {
  * - 组合销毁时自动 release()，磁盘缓存保留供下次秒开
  * - 本地路径（以 / 开头）自动转成 file Uri
  */
+@OptIn(UnstableApi::class)
 @Composable
 fun rememberVideoPlayer(url: String): ExoPlayer? {
+    //创建播放器
     val context = LocalContext.current.applicationContext
     val player = remember(url, context) {
         runCatching {
@@ -87,6 +94,7 @@ fun rememberVideoPlayer(url: String): ExoPlayer? {
             }
         }.getOrNull()
     }
+    //绑定生命周期
     DisposableEffect(player) {
         onDispose { player?.release() }
     }

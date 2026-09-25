@@ -114,6 +114,8 @@ class PublishViewModel(
         viewModelScope.launch {
             _uiState.value = state.copy(isSaving = true, savedAsDraft = true)
             try {
+                // 草稿媒体统一上传到云端（Supabase Storage），换设备/重装后仍能加载；
+                // 仅在上传失败时退回本地 filesDir 缓存（此时只有本机能显示）。
                 val imageUrl = try {
                     if (isVideoMode) {
                         val uri = state.images.first()
@@ -121,9 +123,9 @@ class PublishViewModel(
                             // 编辑已发布视频帖保存草稿：原视频已是远端地址，直接保留（带 video: 前缀）
                             "video:${uri.toString().removePrefix("video:")}"
                         } else {
-                            repository.uploadImage(uri, getApplication())
-                                // 新视频保存草稿：uploadImage 已带 video: 前缀
-                                ?: ""
+                            val remote = repository.uploadImage(uri, getApplication())
+                            if (!remote.isNullOrBlank()) remote
+                            else cacheImage(uri)?.let { "video:$it" } ?: ""
                         }
                     } else {
                         val parts = mutableListOf<String>()
@@ -132,8 +134,9 @@ class PublishViewModel(
                                 // 编辑已发布图片帖保存草稿：原图已是远端地址，直接保留
                                 parts.add(img.toString())
                             } else {
-                                val path = cacheImage(img)
-                                if (path != null) parts.add(path)
+                                val remote = repository.uploadImage(img, getApplication())
+                                if (!remote.isNullOrBlank()) parts.add(remote)
+                                else cacheImage(img)?.let { parts.add(it) }
                             }
                         }
                         parts.joinToString(",")
@@ -264,9 +267,15 @@ class PublishViewModel(
         try {
             val cr = getApplication<android.app.Application>().contentResolver
             val mime = cr.getType(uri) ?: "image/jpeg"
-            val ext = when { mime.contains("png") -> "png"; mime.contains("webp") -> "webp"; mime.contains("gif") -> "gif"; else -> "jpg" }
+            val ext = when {
+                mime.contains("video") || mime.contains("mp4") -> "mp4"
+                mime.contains("png") -> "png"
+                mime.contains("webp") -> "webp"
+                mime.contains("gif") -> "gif"
+                else -> "jpg"
+            }
             val input = cr.openInputStream(uri) ?: return@withContext null
-            val file = java.io.File(getApplication<android.app.Application>().filesDir, "img_${System.currentTimeMillis()}.$ext")
+            val file = java.io.File(getApplication<android.app.Application>().filesDir, "img_${System.nanoTime()}.$ext")
             file.outputStream().use { input.copyTo(it) }
             input.close()
             "file://${file.absolutePath}"

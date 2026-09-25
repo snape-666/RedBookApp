@@ -31,9 +31,11 @@ class DetailViewModel(
     val uiState: StateFlow<DetailUiState> = _uiState.asStateFlow()
 
 
+    //评论输入框的文本
     private val _commentText = MutableStateFlow("")
     val commentText: StateFlow<String> = _commentText.asStateFlow()
 
+    //评论选择的图片
     private val _selectedImages = MutableStateFlow<List<Uri>>(emptyList())
     val selectedImages: StateFlow<List<Uri>> = _selectedImages.asStateFlow()
 
@@ -43,14 +45,13 @@ class DetailViewModel(
     private val _replyTarget = MutableStateFlow<ReplyTarget?>(null)
     val replyTarget: StateFlow<ReplyTarget?> = _replyTarget.asStateFlow()
 
+    //当前正在回复的目标
     data class ReplyTarget(
         val commentId: String,
         val parentCommentId: String,
         val userName: String,
         val toAi: Boolean = false
     )
-
-    init { }
 
     fun setReplyTarget(target: ReplyTarget?) {
         _replyTarget.value = target
@@ -86,7 +87,11 @@ class DetailViewModel(
                         authorAvatarUrl = p.optString("author_avatar", ""),
                         visibility = p.optString("visibility", "public")
                     )
+
+                    //拉取评论
                     val cloudComments = repository.getComments(post.postId)
+                    // 我点赞过的评论 id，用于回填评论/回复的 isLiked（否则重进页面点赞状态丢失）
+                    val likedCommentIds = try { repository.getLikedCommentIds(userUid) } catch (_: Exception) { emptySet<String>() }
                     val raw = (0 until cloudComments.length()).map { i ->
                         val c = cloudComments.getJSONObject(i)
                         val parentId = c.optString("parent_id", "")
@@ -103,7 +108,7 @@ class DetailViewModel(
                             timestamp = c.optLong("created_at", 0),
                             ipLocation = c.optString("ip_location", "未知"),
                             likeCount = c.optInt("like_count", 0),
-                            isLiked = false,
+                            isLiked = likedCommentIds.contains(c.optString("comment_id", "")),
                             isAuthor = c.optString("author_uid") == post.authorId,
                             replies = emptyList()
                         )
@@ -111,8 +116,10 @@ class DetailViewModel(
                     // 头像兜底：author_avatar 为空的按 author_uid 批量查 users 表（AI 小助手除外，固定用资源头像）
                     val missingAvatarUids = raw.map { it.second.userId }
                         .filter { it.isNotBlank() && !AiAssistant.isAiUser(it) }
-                        .toSet()
+                        .toSet()//去重
+                    //批量查询uid的头像
                     val avatarMap = try { repository.getAvatarsByUids(missingAvatarUids) } catch (_: Exception) { emptyMap() }
+                    //给每条评论补头像
                     val raw2 = raw.map { (parentId, comment) ->
                         val fallback = avatarMap[comment.userId].orEmpty()
                         parentId to (if (comment.avatarUrl.isBlank() && fallback.isNotBlank()) comment.copy(avatarUrl = fallback) else comment)
@@ -133,7 +140,7 @@ class DetailViewModel(
                                     timestamp = r.timestamp,
                                     ipLocation = r.ipLocation,
                                     likeCount = r.likeCount,
-                                    isLiked = r.isLiked,
+                                    isLiked = likedCommentIds.contains(r.id),
                                     isAuthor = r.isAuthor
                                 )
                             }
@@ -183,6 +190,7 @@ class DetailViewModel(
                         authorName = displayName(post.authorId, post.authorName),
                         ipLocation = effPostIp
                     )
+                    //更新评论和回复的显示名与IP
                     val remarksComments = comments.map { c ->
                         c.copy(
                             userName = displayName(c.userId, c.userName),
@@ -272,6 +280,7 @@ class DetailViewModel(
         }
     }
 
+    //切换交互状态
     fun togglePostLike() {
         val currentState = _uiState.value
         if (currentState is DetailUiState.Success) {
@@ -282,7 +291,7 @@ class DetailViewModel(
             viewModelScope.launch {
                 try {
                     repository.recordLike(userUid, post.postId, newLiked)
-                    repository.updatePostLike(post.postId, if (newLiked) 1 else -1)
+                    repository.updatePostLike(post.postId)
                 } catch (e: Exception) { android.util.Log.e("RedBook", "recordLike err: ${e.message}") }
             }
         }
@@ -298,7 +307,7 @@ class DetailViewModel(
             viewModelScope.launch {
                 try {
                     repository.recordFavorite(userUid, post.postId, newFavorited)
-                    repository.updatePostFav(post.postId, if (newFavorited) 1 else -1)
+                    repository.updatePostFav(post.postId)
                 } catch (e: Exception) { android.util.Log.e("RedBook", "recordFavorite err: ${e.message}") }
             }
         }
@@ -338,25 +347,46 @@ class DetailViewModel(
     fun toggleCommentLike(commentId: String) {
         val currentState = _uiState.value
         if (currentState is DetailUiState.Success) {
+            var found = false
+            var newLiked = false
             val updatedComments = currentState.comments.map { comment ->
                 // 检查一级评论
                 if (comment.id == commentId) {
-                    val newLiked = !comment.isLiked
-                    val newCount = if (newLiked) comment.likeCount + 1 else comment.likeCount - 1
-                    comment.copy(isLiked = newLiked, likeCount = newCount)
+                    found = true
+                    val liked = !comment.isLiked
+                    newLiked = liked
+                    val newCount = (if (liked) comment.likeCount + 1 else comment.likeCount - 1).coerceAtLeast(0)
+                    comment.copy(isLiked = liked, likeCount = newCount)
                 } else {
                     // 检查回复
                     val updatedReplies = comment.replies.map { reply ->
                         if (reply.id == commentId) {
-                            val newLiked = !reply.isLiked
-                            val newCount = if (newLiked) reply.likeCount + 1 else reply.likeCount - 1
-                            reply.copy(isLiked = newLiked, likeCount = newCount)
+                            found = true
+                            val liked = !reply.isLiked
+                            newLiked = liked
+                            val newCount = (if (liked) reply.likeCount + 1 else reply.likeCount - 1).coerceAtLeast(0)
+                            reply.copy(isLiked = liked, likeCount = newCount)
                         } else reply
                     }
                     comment.copy(replies = updatedReplies)
                 }
             }
             _uiState.value = currentState.copy(comments = updatedComments)
+            // 持久化：点赞记录（本机+云）与 like_count 分别独立提交，互不阻断
+            if (found && userUid.isNotBlank()) {
+                viewModelScope.launch {
+                    try {
+                        repository.recordCommentLike(userUid, commentId, newLiked)
+                    } catch (e: Exception) {
+                        android.util.Log.e("RedBook", "recordCommentLike err: ${e.message}")
+                    }
+                    try {
+                        repository.updateCommentLike(commentId)
+                    } catch (e: Exception) {
+                        android.util.Log.e("RedBook", "updateCommentLike err: ${e.message}")
+                    }
+                }
+            }
         }
     }
 

@@ -1,6 +1,5 @@
 package com.example.redbook.ui.profile
 
-import android.media.MediaMetadataRetriever
 import android.net.Uri
 import android.widget.Toast
 import androidx.compose.foundation.Image
@@ -54,7 +53,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLocale
@@ -76,6 +74,7 @@ import com.example.redbook.data.repository.AiAssistant
 import com.example.redbook.data.repository.SupabaseAuthRepository
 import com.example.redbook.ui.component.BottomBar
 import com.example.redbook.ui.component.PostCard
+import com.example.redbook.ui.component.VideoThumb
 import com.example.redbook.ui.component.aiMentionHighlight
 import com.example.redbook.ui.theme.getBlueFill
 import com.example.redbook.ui.theme.getOnSurfaceSecondary
@@ -1240,22 +1239,12 @@ private fun DraftBox(draftImage: String, draftCount: Int, onDraftClick: () -> Un
         .clickable { onDraftClick() }) {
         when {
             isVideo -> {
-                val videoPath = firstUrl.removePrefix("video:")
-                val thumb = remember(videoPath) {
-                    val retriever = MediaMetadataRetriever()
-                    try {
-                        retriever.setDataSource(videoPath)
-                        retriever.frameAtTime
-                    } catch (e: Exception) {
-                        null
-                    } finally {
-                        try { retriever.release() } catch (e: Exception) { }
-                    }
-                }
-                if (thumb != null) {
-                    Image(bitmap = thumb.asImageBitmap(), contentDescription = null,
-                        modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
-                }
+                // 复用 VideoThumb：后台线程取帧 + 内存/磁盘缓存，避免主线程同步取帧导致卡顿与重复加载
+                VideoThumb(
+                    videoUrl = firstUrl.removePrefix("video:"),
+                    modifier = Modifier.fillMaxSize(),
+                    placeholder = R.drawable.test
+                )
             }
             firstUrl.isNotBlank() -> {
                 AsyncImage(

@@ -54,7 +54,8 @@ fun CommentItem(
     onUserNameClick: (String) -> Unit,
     onReplyClick: (String, String, String, Boolean) -> Unit,
     onLikeClick: (String) -> Unit,
-    onLongClick: (String) -> Unit = {},
+    // 回传 (评论/回复 id, 作者 uid)：调用方据此判断能不能删——只有作者本人才弹删除确认
+    onLongClick: (commentId: String, authorUid: String) -> Unit = { _, _ -> },
     modifier: Modifier = Modifier,
     highlight: Boolean = false
 ) {
@@ -68,7 +69,7 @@ fun CommentItem(
         .padding(horizontal = 16.dp, vertical = 8.dp)
         .combinedClickable(
             onClick = {},
-            onLongClick = { onLongClick(comment.id) }
+            onLongClick = { onLongClick(comment.id, comment.userId) }
         )) {
         // 一级评论
         Row {
@@ -203,7 +204,7 @@ fun CommentItem(
                     onUserNameClick = onUserNameClick,
                     onReplyClick = { onReplyClick(reply.id, comment.id, reply.userName, AiAssistant.isAiUser(reply.userId)) },
                     onLikeClick = { onLikeClick(reply.id) },
-                    onLongClick = { onLongClick(reply.id) },
+                    onLongClick = { onLongClick(reply.id, reply.userId) },
                     modifier = Modifier.padding(start = 40.dp)
                 )
             }

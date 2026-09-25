@@ -3,14 +3,9 @@ plugins {
     alias(libs.plugins.kotlin.compose)
 }
 
-val propsFile = rootProject.file("supabase.properties")
-val props = mutableMapOf<String, String>()
-if (propsFile.exists()) {
-    propsFile.readLines().forEach { line ->
-        val parts = line.split("=", limit = 2)
-        if (parts.size == 2) props[parts[0].trim()] = parts[1].trim()
-    }
-}
+// 注：原先这里会读取 supabase.properties 并把第三方密钥注入 BuildConfig。
+// 那些密钥（邮件服务 / DeepSeek / 豆包）已全部迁到 Supabase Edge Functions 的 Secret，
+// 不再进入 APK，因此这段读取逻辑与其对应的 buildConfigField 一并移除。
 
 android {
     namespace = "com.example.redbook"
@@ -23,13 +18,6 @@ android {
         versionCode = 1
         versionName = "1.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
-
-        buildConfigField("String", "SUPABASE_SERVICE_ROLE", "\"${props["SUPABASE_SERVICE_ROLE"] ?: ""}\"")
-        buildConfigField("String", "RESEND_API_KEY", "\"${props["RESEND_API_KEY"] ?: ""}\"")
-        buildConfigField("String", "DEEPSEEK_API_KEY", "\"${props["DEEPSEEK_API_KEY"] ?: ""}\"")
-        buildConfigField("String", "VISION_API_KEY", "\"${props["VISION_API_KEY"] ?: ""}\"")
-        buildConfigField("String", "VISION_BASE_URL", "\"${props["VISION_BASE_URL"] ?: ""}\"")
-        buildConfigField("String", "VISION_MODEL", "\"${props["VISION_MODEL"] ?: ""}\"")
     }
 
     buildTypes {

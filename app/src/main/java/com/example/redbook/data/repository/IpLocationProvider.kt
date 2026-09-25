@@ -63,12 +63,16 @@ object IpLocationProvider {
     private suspend fun provinceByLocation(context: Context): String? {
         return withContext(Dispatchers.IO) {
             try {
+                //检查定位权限
                 if (!hasLocationPermission(context)) return@withContext null
                 val lm = context.getSystemService(Context.LOCATION_SERVICE) as? LocationManager ?: return@withContext null
+               //定位开关检查
                 if (!lm.isProviderEnabled(LocationManager.GPS_PROVIDER) &&
                     !lm.isProviderEnabled(LocationManager.NETWORK_PROVIDER)) return@withContext null
                 val loc: Location? = try {
+                    //先看GPS
                     lm.getLastKnownLocation(LocationManager.GPS_PROVIDER)
+                        //再看网络定位
                         ?: lm.getLastKnownLocation(LocationManager.NETWORK_PROVIDER)
                         ?: requestSingleFix(lm)
                 } catch (_: Exception) { null }

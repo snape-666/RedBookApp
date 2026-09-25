@@ -8,7 +8,11 @@ import com.android.volley.Request.Method.POST
 import com.android.volley.VolleyError
 import com.android.volley.toolbox.StringRequest
 import com.android.volley.toolbox.Volley
+import com.example.redbook.data.local.AuthSession
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
@@ -31,9 +35,13 @@ import java.util.concurrent.TimeUnit
  */
 class RealtimeRepository(private val app: Application) {
 
-    private val requestQueue by lazy { Volley.newRequestQueue(app) }
-    private val timeoutMs = 15_000L
+    //Volley队列
+    // 传输层换成 OkHttp，与另外两个队列共用同一个实例（共享连接池）
+    private val requestQueue by lazy { Volley.newRequestQueue(app, OkHttpStack.shared) }
+    // 要容得下 withSupabaseRetry 的最坏情况(10 秒超时 + 1 次重试)，否则重试还没跑完就被本地掐断
+    private val timeoutMs = 25_000L
 
+    //OkHttp客户端,用于WebSocket
     private val httpClient by lazy {
         OkHttpClient.Builder()
             .connectTimeout(10, TimeUnit.SECONDS)
@@ -111,6 +119,7 @@ class RealtimeRepository(private val app: Application) {
         }
     }
 
+    //标记所有未读为已读
     suspend fun markNotificationsRead(uid: String, types: List<String>? = null) {
         if (uid.isBlank()) return
         val body = JSONObject().apply { put("is_read", true) }
@@ -331,6 +340,7 @@ class RealtimeRepository(private val app: Application) {
         }
     }
 
+    //把未读消息标记为已读
     suspend fun markConversationRead(conversationId: String, uid: String) {
         patchRest("messages", "conversation_id=eq.$conversationId&receiver_uid=eq.$uid&is_read=eq.false", JSONObject().apply { put("is_read", true) })
     }
@@ -422,8 +432,11 @@ class RealtimeRepository(private val app: Application) {
     private var webSocket: WebSocket? = null
     private var currentUid: String = ""
     @Volatile private var closing = false
+    @Volatile private var connecting = false
+    @Volatile private var reconnectScheduled = false
     private var refCounter = 0
     private val listeners = java.util.concurrent.CopyOnWriteArrayList<RealtimeListener>()
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     /** 建立/保持全局连接并注册一个监听器（同 uid 下复用同一连接） */
     fun connect(uid: String, listener: RealtimeListener) {
@@ -439,15 +452,49 @@ class RealtimeRepository(private val app: Application) {
             return
         }
         listeners.add(listener)
-        if (webSocket == null && !closing) {
+        // 已有连接、正在握手、或已排好重连时都不再发起，避免并存两条 WebSocket
+        if (webSocket == null && !closing && !connecting && !reconnectScheduled) {
             closing = false
             establishConnection()
         }
     }
 
+    /**
+     * 握手前先确认令牌可用：令牌过期时服务端会直接拒绝订阅，
+     * 若不先续期就会变成"连上→被拒→重连→再被拒"的死循环。
+     */
     private fun establishConnection() {
-        if (currentUid.isBlank()) return
+        if (currentUid.isBlank() || closing || connecting) return
+        connecting = true
         val uid = currentUid
+        scope.launch {
+            try {
+                if (AuthSession.isExpired(app)) {
+                    when (SupabaseAuthHttp.refresh(app, AuthSession.access(app))) {
+                        SupabaseAuthHttp.RefreshResult.SessionExpired -> {
+                            android.util.Log.e("RedBookAuth", "realtime: session expired, skip connect")
+                            AuthSession.onSessionExpired?.invoke()
+                            return@launch
+                        }
+                        // 只是这次没续上，不踢下线；但别频繁重试 —— 每次重连都要先去续期，
+                        // 每 3 秒撞一次会和界面上的请求抢同一把刷新锁、也拖慢恢复
+                        SupabaseAuthHttp.RefreshResult.TransientFailure -> {
+                            android.util.Log.e("RedBookAuth", "realtime: refresh failed, retry later")
+                            scheduleReconnect(10_000L)
+                            return@launch
+                        }
+                        SupabaseAuthHttp.RefreshResult.Refreshed -> Unit
+                    }
+                }
+                openSocket(uid)
+            } finally {
+                connecting = false
+            }
+        }
+    }
+
+    private fun openSocket(uid: String) {
+        if (closing || webSocket != null) return
         val wsUrl = "${SupabaseConfig.url.replace("https://", "wss://")}/realtime/v1/websocket?apikey=${SupabaseConfig.anonKey}&vsn=1.0.0"
         val request = Request.Builder().url(wsUrl).build()
         try {
@@ -461,18 +508,33 @@ class RealtimeRepository(private val app: Application) {
                 override fun onMessage(webSocket: WebSocket, text: String) {
                     try {
                         val msg = JSONObject(text)
-                        if (msg.optString("event") == "postgres_changes") {
-                            val payload = msg.optJSONObject("payload")
-                            val record = payload?.optJSONObject("record") ?: return
-                            when (payload.optString("table", "")) {
-                                "notifications" -> {
-                                    // 自己产生的通知不回推给自己
-                                    if (record.optString("actor_uid") != uid) {
-                                        listeners.forEach { it.onNotification(record) }
+                        when (msg.optString("event")) {
+                            "postgres_changes" -> {
+                                val payload = msg.optJSONObject("payload")
+                                val record = payload?.optJSONObject("record") ?: return
+                                when (payload.optString("table", "")) {
+                                    "notifications" -> {
+                                        // 自己产生的通知不回推给自己
+                                        if (record.optString("actor_uid") != uid) {
+                                            listeners.forEach { it.onNotification(record) }
+                                        }
+                                    }
+                                    "messages" -> {
+                                        listeners.forEach { it.onMessage(record) }
                                     }
                                 }
-                                "messages" -> {
-                                    listeners.forEach { it.onMessage(record) }
+                            }
+                            // 令牌过期/被撤销时服务端只关掉 channel，WebSocket 本身还活着，
+                            // 此时不会有 onClosed/onFailure，必须靠这里主动重连，
+                            // 否则订阅已经失效却再也收不到任何事件。
+                            "system" -> {
+                                val payload = msg.optJSONObject("payload")
+                                if (payload != null && payload.optString("status") == "error") {
+                                    android.util.Log.e(
+                                        "RedBookAuth",
+                                        "realtime system error: ${payload.optString("message")}"
+                                    )
+                                    scheduleReconnect()
                                 }
                             }
                         }
@@ -501,22 +563,32 @@ class RealtimeRepository(private val app: Application) {
 
     private var reconnectRunnable: Runnable? = null
 
-    private fun scheduleReconnect() {
+    /** [delayMs] 默认 3 秒；续期暂时失败时给长一点，别每 3 秒就去撞一次刷新接口 */
+    private fun scheduleReconnect(delayMs: Long = 3_000L) {
         if (listeners.isEmpty()) return
+        // 同一轮重连只排队一次：closeSocket() 会触发 onClosed，
+        // 若不挡住会递归地再排一次，永远重连不上
+        if (reconnectScheduled) return
+        reconnectScheduled = true
         listeners.forEach { it.onStatus(false) }
+        // 关掉可能仍存活的旧连接(channel 被服务端关闭时 socket 往往还在)
+        closeSocket()
         val handler = android.os.Handler(android.os.Looper.getMainLooper())
         reconnectRunnable?.let { handler.removeCallbacks(it) }
         val r = Runnable {
+            reconnectScheduled = false
             if (!closing && currentUid.isNotBlank()) {
                 establishConnection()
             }
         }
         reconnectRunnable = r
-        handler.postDelayed(r, 3000)
+        handler.postDelayed(r, delayMs)
     }
 
     fun disconnect() {
         closing = true
+        reconnectScheduled = false
+        connecting = false
         reconnectRunnable?.let {
             android.os.Handler(android.os.Looper.getMainLooper()).removeCallbacks(it)
         }
@@ -567,6 +639,10 @@ class RealtimeRepository(private val app: Application) {
 
     private fun sendJoin(topic: String, payload: JSONObject) {
         try {
+            // RLS 开启后，Realtime 会用连接上的 JWT 逐条校验订阅者权限；
+            // 不传 access_token 时服务端退回 apikey(anon 角色)，将收不到任何事件。
+            val token = AuthSession.access(app)
+            if (token.isNotBlank()) payload.put("access_token", token)
             val body = JSONObject().apply {
                 put("topic", topic)
                 put("event", "phx_join")
@@ -582,21 +658,20 @@ class RealtimeRepository(private val app: Application) {
     private suspend fun queryRest(table: String, query: String): JSONObject {
         return withContext(Dispatchers.IO) {
             val result = withTimeoutOrNull(timeoutMs) {
-                suspendCancellableCoroutine { cont ->
-                    val request = object : StringRequest(
-                        GET, "${SupabaseConfig.url}/rest/v1/$table?$query",
-                        { response ->
-                            try { cont.resume(JSONObject().apply { put("users", JSONArray(response)) }) }
-                            catch (e: Exception) { cont.resumeWithException(e) }
-                        },
-                        { error -> cont.resumeWithException(Exception(extractVolleyError(error))) }
-                    ) {
-                        override fun getHeaders() = mapOf(
-                            "apikey" to SupabaseConfig.anonKey,
-                            "Content-Type" to "application/json"
-                        )
+                SupabaseAuthHttp.withAuth(app) {
+                    suspendCancellableCoroutine { cont ->
+                        val request = object : StringRequest(
+                            GET, "${SupabaseConfig.url}/rest/v1/$table?$query",
+                            { response ->
+                                try { cont.resume(JSONObject().apply { put("users", JSONArray(response)) }) }
+                                catch (e: Exception) { cont.resumeWithException(e) }
+                            },
+                            { error -> cont.resumeWithException(Exception(extractVolleyError(error))) }
+                        ) {
+                            override fun getHeaders() = SupabaseAuthHttp.headers(app)
+                        }
+                        requestQueue.add(request.withSupabaseRetry())
                     }
-                    requestQueue.add(request)
                 }
             }
             result ?: throw Exception("网络连接超时")
@@ -607,19 +682,18 @@ class RealtimeRepository(private val app: Application) {
         val bodyStr = body.toString()
         withContext(Dispatchers.IO) {
             val result = withTimeoutOrNull(timeoutMs) {
-                suspendCancellableCoroutine<String> { cont ->
-                    val request = object : StringRequest(POST, "${SupabaseConfig.url}$path",
-                        { cont.resume(it) },
-                        { error -> cont.resumeWithException(Exception(extractVolleyError(error))) }
-                    ) {
-                        override fun getBody(): ByteArray = bodyStr.toByteArray()
-                        override fun getBodyContentType(): String = "application/json"
-                        override fun getHeaders() = mapOf(
-                            "apikey" to SupabaseConfig.anonKey,
-                            "Prefer" to "return=minimal"
-                        )
+                SupabaseAuthHttp.withAuth(app) {
+                    suspendCancellableCoroutine<String> { cont ->
+                        val request = object : StringRequest(POST, "${SupabaseConfig.url}$path",
+                            { cont.resume(it) },
+                            { error -> cont.resumeWithException(Exception(extractVolleyError(error))) }
+                        ) {
+                            override fun getBody(): ByteArray = bodyStr.toByteArray()
+                            override fun getBodyContentType(): String = "application/json"
+                            override fun getHeaders() = SupabaseAuthHttp.headers(app, write = true)
+                        }
+                        requestQueue.add(request.withSupabaseRetry())
                     }
-                    requestQueue.add(request)
                 }
             }
             result ?: throw Exception("网络连接超时")
@@ -630,19 +704,18 @@ class RealtimeRepository(private val app: Application) {
         val bodyStr = body.toString()
         withContext(Dispatchers.IO) {
             val result = withTimeoutOrNull(timeoutMs) {
-                suspendCancellableCoroutine<String> { cont ->
-                    val request = object : StringRequest(PATCH, "${SupabaseConfig.url}/rest/v1/$table?$filter",
-                        { cont.resume(it) },
-                        { error -> cont.resumeWithException(Exception(extractVolleyError(error))) }
-                    ) {
-                        override fun getBody(): ByteArray = bodyStr.toByteArray()
-                        override fun getBodyContentType(): String = "application/json"
-                        override fun getHeaders() = mapOf(
-                            "apikey" to SupabaseConfig.anonKey,
-                            "Prefer" to "return=minimal"
-                        )
+                SupabaseAuthHttp.withAuth(app) {
+                    suspendCancellableCoroutine<String> { cont ->
+                        val request = object : StringRequest(PATCH, "${SupabaseConfig.url}/rest/v1/$table?$filter",
+                            { cont.resume(it) },
+                            { error -> cont.resumeWithException(Exception(extractVolleyError(error))) }
+                        ) {
+                            override fun getBody(): ByteArray = bodyStr.toByteArray()
+                            override fun getBodyContentType(): String = "application/json"
+                            override fun getHeaders() = SupabaseAuthHttp.headers(app, write = true)
+                        }
+                        requestQueue.add(request.withSupabaseRetry())
                     }
-                    requestQueue.add(request)
                 }
             }
             result ?: throw Exception("网络连接超时")

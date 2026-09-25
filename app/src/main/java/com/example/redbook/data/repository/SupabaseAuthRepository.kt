@@ -4,10 +4,9 @@ import android.app.Application
 import com.android.volley.DefaultRetryPolicy
 import com.android.volley.Request.Method.*
 import com.android.volley.VolleyError
-import com.android.volley.toolbox.JsonObjectRequest
 import com.android.volley.toolbox.StringRequest
 import com.android.volley.toolbox.Volley
-import com.example.redbook.BuildConfig
+import com.example.redbook.data.local.AuthSession
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
@@ -16,13 +15,12 @@ import org.json.JSONArray
 import org.json.JSONObject
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
-import kotlin.random.Random
 
 object SupabaseConfig {
     val url = "https://wsxygiskzjkezoakejri.supabase.co"
+
+    /** 可公开的 publishable key：设计上就允许出现在客户端，与 RLS 配合使用 */
     val anonKey = "sb_publishable_WedwYJNF5dqYrX5ERlSXTA_VTJkWkJL"
-    val serviceRole get() = BuildConfig.SUPABASE_SERVICE_ROLE
-    val resendKey get() = BuildConfig.RESEND_API_KEY
 }
 
 class SupabaseAuthRepository(private val app: Application) {
@@ -37,21 +35,70 @@ class SupabaseAuthRepository(private val app: Application) {
         var currentUserAvatar: String = ""
     }
 
-    private val requestQueue by lazy { Volley.newRequestQueue(app) }
+    // 传输层换成 OkHttp（HTTP/2 多路复用 + 连接复用），见 OkHttpStack
+    private val requestQueue by lazy { Volley.newRequestQueue(app, OkHttpStack.shared) }
     private val timeoutMs = 15_000L
+
+    /** 上传图片最长边上限（像素），超过则缩放；用于控制文件体积、加快列表加载 */
+    private val maxImageDimension = 1080
 
     /** 通知仓库（写入互动通知事件） */
     private val realtimeRepository by lazy { RealtimeRepository(app) }
+
+    // ---------------- 鉴权 ----------------
+    // 所有数据请求都必须带上用户的 access_token：Supabase RLS 靠它解析 auth.uid()，
+    // 不带 JWT 的请求会以 anon 角色发出，在开启 RLS 后读会被过滤成空、写直接被拒。
+    // 具体实现与续期逻辑集中在 SupabaseAuthHttp，供本类与 RealtimeRepository 共用
+    // (refresh_token 单次有效，续期只能有一处实现，否则会互相作废)。
+
+    /** 统一请求头（读操作） */
+    private fun authHeaders(): Map<String, String> = SupabaseAuthHttp.headers(app)
+
+    /** 统一请求头（写操作，不需要回传内容） */
+    private fun authWriteHeaders(): Map<String, String> = SupabaseAuthHttp.headers(app, write = true)
+
+    /** 带自动续期的请求包装：命中 401 时续期并重试一次 */
+    private suspend fun <T> withAuth(block: suspend () -> T): T =
+        SupabaseAuthHttp.withAuth(app, block)
+
+    /** 调用 PostgREST RPC(/rest/v1/rpc/<fn>)，用于需要服务端权限的写操作 */
+    private suspend fun supabaseRpc(fn: String, params: JSONObject): JSONObject {
+        val bodyString = params.toString()
+        return withAuth {
+            suspendCancellableCoroutine { cont ->
+                val request = object : StringRequest(
+                    POST, "${SupabaseConfig.url}/rest/v1/rpc/$fn",
+                    { response ->
+                        try {
+                            cont.resume(if (response.isBlank()) JSONObject() else JSONObject(response))
+                        } catch (e: Exception) {
+                            cont.resume(JSONObject())
+                        }
+                    },
+                    { error -> cont.resumeWithException(Exception(extractVolleyError(error))) }
+                ) {
+                    override fun getBody(): ByteArray = bodyString.toByteArray()
+                    override fun getBodyContentType(): String = "application/json"
+                    // 注意：这里不能带 Prefer: return=minimal，
+                    // 否则 PostgREST 会返回空响应体，函数返回的 jsonb 就取不到了
+                    override fun getHeaders() = authHeaders()
+                }
+                requestQueue.add(request.withSupabaseRetry())
+            }
+        }
+    }
 
     suspend fun register(email: String, password: String, account: String, nickname: String?): Result<String> {
         return withContext(Dispatchers.IO) {
             try {
                 val result = withTimeoutOrNull(timeoutMs) {
-                    val existing = queryRest("users", "select=account&account=eq.$account&limit=1")
-                    if (existing.optJSONArray("users")?.length() ?: 0 > 0)
+                    // 未登录时读不到 users 表(RLS)，账号查重与小红书号生成都走服务端函数
+                    val existing = supabaseRpc("account_exists", JSONObject().apply { put("p_account", account) })
+                    if (existing.optBoolean("exists", false))
                         throw AppException("该账号名已被占用")
 
-                    val xhsId = generateUniqueXhsId()
+                    val xhsId = supabaseRpc("next_xhs_id", JSONObject()).optString("xhs_id", "")
+                    //构造注册请求体,json格式
                     val body = JSONObject().apply {
                         put("email", email)
                         put("password", password)
@@ -61,8 +108,11 @@ class SupabaseAuthRepository(private val app: Application) {
                             put("xhs_id", xhsId)
                         })
                     }
+                    //调用Supbase Auth注册接口
                     val response = supabasePost("/auth/v1/signup", body)
                     val uid = response.getJSONObject("user").getString("id")
+                    // 注册响应若带会话(邮箱确认已关闭)，先落库，后续写 users 表才有 JWT 可用
+                    AuthSession.save(app, response)
                     // 插入 users 表（失败不阻断注册，登录时会补全）
                     try { insertUserMapping(uid, account, email, nickname ?: account) } catch (_: Exception) { }
                     // 存储 xhs_id 和 nickname 到 users 表（失败不阻断注册）
@@ -87,17 +137,37 @@ class SupabaseAuthRepository(private val app: Application) {
         return withContext(Dispatchers.IO) {
             try {
                 val result = withTimeoutOrNull(timeoutMs) {
-                    val email = if (input.contains("@")) input else {
-                        val res = queryRest("users", "select=email&account=eq.$input&limit=1")
-                        val users = res.optJSONArray("users")
-                        if (users == null || users.length() == 0) throw AppException("账号不存在")
-                        users.getJSONObject(0).getString("email")
-                    }
-                    val body = JSONObject().apply {
-                        put("email", email)
+                    val isAccountLogin = !input.contains("@")
+                    // 「账号名 → 邮箱」在服务端完成，邮箱不会回到客户端
+                    // （原先的 resolve_login_email 匿名可调且回传邮箱，等于任何人都能
+                    //   拿账号名换出别人的邮箱，已删除）
+                    val res = SupabaseAuthHttp.edgeFunction(app, "login", JSONObject().apply {
+                        put("input", input)
                         put("password", password)
+                    })
+                    if (!res.optBoolean("ok", false)) {
+                        throw AppException(
+                            when (res.optString("reason", "")) {
+                                "account_not_found" -> "账号不存在"
+                                "too_many_requests" -> "操作太频繁，请稍后再试"
+                                else -> "账号或密码错误"
+                            }
+                        )
                     }
-                    val userData = parseUserData(supabasePost("/auth/v1/token?grant_type=password", body)).getOrNull()
+                    val authResponse = res.getJSONObject("session")
+                    // 保存 access_token / refresh_token：后续所有请求都靠它通过 RLS
+                    AuthSession.save(app, authResponse)
+                    val userData = parseUserData(authResponse).getOrNull()
+                    // 注册时若没能写入 users 行(例如 signup 未返回会话)，此处补建
+                    if (userData != null) {
+                        try {
+                            ensureUserRow(
+                                userData.uid,
+                                if (isAccountLogin) input else "",
+                                userData.email
+                            )
+                        } catch (_: Exception) { }
+                    }
                     if (userData == null) {
                         Result.failure(Exception("登录失败"))
                     } else {
@@ -131,63 +201,37 @@ class SupabaseAuthRepository(private val app: Application) {
             }
         }
     }
-
-    suspend fun requestResetCode(email: String): Result<String> {
+    /**
+     * 发送重置验证码。
+     *
+     * 验证码由服务端生成并通过邮件服务直接发给账号邮箱，客户端全程拿不到 ——
+     * 这样任何人都无法「自己指定一个码再立刻用它改密」。
+     * 因此本方法不再返回验证码，只表示"已发出"。
+     */
+    suspend fun requestResetCode(email: String): Result<Unit> {
         return withContext(Dispatchers.IO) {
             try {
                 val result = withTimeoutOrNull(timeoutMs) {
-                    val res = queryRest("users", "select=uid&email=eq.$email&limit=1")
-                    val users = res.optJSONArray("users")
-                    if (users == null || users.length() == 0) throw AppException("该邮箱未注册")
-                    val uid = users.getJSONObject(0).getString("uid")
-
-                    val code = String.format("%06d", Random.nextInt(1000000))
-                    val expiry = System.currentTimeMillis() + 5 * 60 * 1000
-
-                    patchUserRow(uid, JSONObject().apply {
-                        put("reset_code", code)
-                        put("reset_code_expiry", expiry)
+                    val res = SupabaseAuthHttp.edgeFunction(app, "reset-password", JSONObject().apply {
+                        put("action", "request")
+                        put("email", email)
                     })
-
-                    if (SupabaseConfig.resendKey.isNotBlank()) {
-                        sendResendEmail(email, code)
+                    if (!res.optBoolean("ok", false)) {
+                        val reason = res.optString("reason", "")
+                        // 服务端把邮件服务商的拒绝原因放在 detail 里(如发件邮箱未验证)，打到日志便于定位
+                        val detail = res.optString("detail", "")
+                        if (detail.isNotBlank()) {
+                            android.util.Log.e("RedBookAuth", "reset email rejected: $reason $detail")
+                        }
+                        throw AppException(
+                            when (reason) {
+                                "not_registered" -> "该邮箱未注册"
+                                "too_soon" -> "验证码已发送，请 1 分钟后再试"
+                                "email_failed" -> "验证码邮件发送失败，请稍后重试"
+                                else -> "发送失败，请稍后重试"
+                            }
+                        )
                     }
-
-                    Result.success(code)
-                }
-                result ?: Result.failure(Exception("网络连接超时"))
-            } catch (e: AppException) {
-                Result.failure(Exception(e.message))
-            } catch (e: Exception) {
-                Result.failure(Exception(parseError(e)))
-            }
-        }
-    }
-
-    suspend fun verifyCodeAndReset(email: String, code: String, newPassword: String): Result<Unit> {
-        return withContext(Dispatchers.IO) {
-            try {
-                if (SupabaseConfig.serviceRole.isBlank()) throw AppException("请先配置 serviceRole")
-                val result = withTimeoutOrNull(timeoutMs) {
-                    val res = queryRest("users", "select=uid,reset_code,reset_code_expiry&email=eq.$email&limit=1")
-                    val users = res.optJSONArray("users")
-                    if (users == null || users.length() == 0) throw AppException("该邮箱未注册")
-
-                    val row = users.getJSONObject(0)
-                    val storedCode = row.optString("reset_code", "")
-                    val expiry = row.optLong("reset_code_expiry", 0)
-                    val uid = row.getString("uid")
-
-                    if (storedCode.isEmpty() || storedCode != code) throw AppException("验证码错误")
-                    if (System.currentTimeMillis() > expiry) throw AppException("验证码已过期")
-
-                    val body = JSONObject().apply { put("password", newPassword) }
-                    supabaseAdminPut("/auth/v1/admin/users/$uid", body)
-
-                    patchUserRow(uid, JSONObject().apply {
-                        put("reset_code", "")
-                        put("reset_code_expiry", 0)
-                    })
                     Result.success(Unit)
                 }
                 result ?: Result.failure(Exception("网络连接超时"))
@@ -198,82 +242,94 @@ class SupabaseAuthRepository(private val app: Application) {
             }
         }
     }
-
-    private suspend fun generateUniqueXhsId(): String {
-        var id: String
-        do {
-            id = (1..9).map { Random.nextInt(10) }.joinToString("")
-        } while (xhsIdExists(id))
-        return id
+   //校验验证码并重置密码(校验与改密全部在服务端完成)
+    suspend fun verifyCodeAndReset(email: String, code: String, newPassword: String): Result<Unit> {
+        return withContext(Dispatchers.IO) {
+            try {
+                val result = withTimeoutOrNull(timeoutMs) {
+                    val res = SupabaseAuthHttp.edgeFunction(app, "reset-password", JSONObject().apply {
+                        put("action", "confirm")
+                        put("email", email)
+                        put("code", code)
+                        put("newPassword", newPassword)
+                    })
+                    if (!res.optBoolean("ok", false)) {
+                        val reason = res.optString("reason", "")
+                        throw AppException(
+                            when (reason) {
+                                "not_registered" -> "该邮箱未注册"
+                                "no_request" -> "请先获取验证码"
+                                "expired" -> "验证码已过期"
+                                "too_many_attempts" -> "错误次数过多，请重新获取验证码"
+                                "weak_password" -> "密码长度至少需要6位"
+                                else -> "验证码错误"
+                            }
+                        )
+                    }
+                    Result.success(Unit)
+                }
+                result ?: Result.failure(Exception("网络连接超时"))
+            } catch (e: AppException) {
+                Result.failure(Exception(e.message))
+            } catch (e: Exception) {
+                Result.failure(Exception(parseError(e)))
+            }
+        }
+    }
+    /** 登录后确认 users 表里存在自己的行；缺失则补建(RLS 策略要求 uid = auth.uid()) */
+    private suspend fun ensureUserRow(uid: String, account: String, email: String) {
+        if (uid.isBlank()) return
+        val resp = queryRest("users", "select=uid&uid=eq.$uid&limit=1")
+        if ((resp.optJSONArray("users")?.length() ?: 0) > 0) return
+        val body = JSONObject().apply {
+            put("uid", uid)
+            if (email.isNotBlank()) put("email", email)
+            if (account.isNotBlank()) put("account", account)
+            put("nickname", account)
+        }
+        upsertRest("/rest/v1/users?on_conflict=uid", body)
+        android.util.Log.d("RedBook", "ensureUserRow created row for $uid")
     }
 
-    private suspend fun xhsIdExists(xhsId: String): Boolean {
-        return try {
-            val resp = queryRest("users", "select=xhs_id&xhs_id=eq.$xhsId&limit=1")
-            (resp.optJSONArray("users")?.length() ?: 0) > 0
-        } catch (e: Exception) { false }
-    }
-
+    //更新user表中的数据(指定uid
     private suspend fun patchUserRow(uid: String, body: JSONObject) {
         val bodyString = body.toString()
-        suspendCancellableCoroutine<String> { cont ->
-            val request = object : StringRequest(
-                PATCH, "${SupabaseConfig.url}/rest/v1/users?uid=eq.$uid",
-                { cont.resume(it) },
-                { error -> cont.resumeWithException(Exception(extractVolleyError(error))) }
-            ) {
-                override fun getBody(): ByteArray = bodyString.toByteArray()
-                override fun getBodyContentType(): String = "application/json"
-                override fun getHeaders(): Map<String, String> = mapOf(
-                    "apikey" to SupabaseConfig.anonKey,
-                    "Prefer" to "return=minimal"
-                )
+        withAuth {
+            suspendCancellableCoroutine<String> { cont ->
+                val request = object : StringRequest(
+                    PATCH, "${SupabaseConfig.url}/rest/v1/users?uid=eq.$uid",
+                    { cont.resume(it) },
+                    { error -> cont.resumeWithException(Exception(extractVolleyError(error))) }
+                ) {
+                    override fun getBody(): ByteArray = bodyString.toByteArray()
+                    override fun getBodyContentType(): String = "application/json"
+                    override fun getHeaders(): Map<String, String> = authWriteHeaders()
+                }
+                requestQueue.add(request.withSupabaseRetry())
             }
-            requestQueue.add(request)
         }
     }
 
     /** 通用 PATCH：更新指定表满足 filter 的行 */
     private suspend fun patchRest(table: String, filter: String, body: JSONObject) {
         val bodyString = body.toString()
-        suspendCancellableCoroutine<String> { cont ->
-            val request = object : StringRequest(
-                PATCH, "${SupabaseConfig.url}/rest/v1/$table?$filter",
-                { cont.resume(it) },
-                { error -> cont.resumeWithException(Exception(extractVolleyError(error))) }
-            ) {
-                override fun getBody(): ByteArray = bodyString.toByteArray()
-                override fun getBodyContentType(): String = "application/json"
-                override fun getHeaders(): Map<String, String> = mapOf(
-                    "apikey" to SupabaseConfig.anonKey,
-                    "Prefer" to "return=minimal"
-                )
+        withAuth {
+            suspendCancellableCoroutine<String> { cont ->
+                val request = object : StringRequest(
+                    PATCH, "${SupabaseConfig.url}/rest/v1/$table?$filter",
+                    { cont.resume(it) },
+                    { error -> cont.resumeWithException(Exception(extractVolleyError(error))) }
+                ) {
+                    override fun getBody(): ByteArray = bodyString.toByteArray()
+                    override fun getBodyContentType(): String = "application/json"
+                    override fun getHeaders(): Map<String, String> = authWriteHeaders()
+                }
+                requestQueue.add(request.withSupabaseRetry())
             }
-            requestQueue.add(request)
         }
     }
-
-    private suspend fun sendResendEmail(to: String, code: String) {
-        suspendCancellableCoroutine<JSONObject> { cont ->
-            val body = JSONObject().apply {
-                put("from", "RedBook <onboarding@resend.dev>")
-                put("to", JSONArray().apply { put(to) })
-                put("subject", "密码重置验证码")
-                put("html", "<p>您的验证码是: <b>$code</b>，5分钟内有效</p>")
-            }
-            val request = object : JsonObjectRequest(
-                POST, "https://api.resend.com/emails", body,
-                { cont.resume(it) },
-                { error -> cont.resumeWithException(Exception(extractVolleyError(error))) }
-            ) {
-                override fun getHeaders() = mapOf(
-                    "Authorization" to "Bearer ${SupabaseConfig.resendKey}",
-                    "Content-Type" to "application/json"
-                )
-            }
-            requestQueue.add(request)
-        }
-    }
+    // 邮件发送已移到 Edge Function(reset-password)：
+    // 既避免把邮件服务密钥编译进 APK，也让验证码从生成到投递全程不经过客户端。
 
     private class AppException(message: String) : Exception(message)
 
@@ -290,55 +346,25 @@ class SupabaseAuthRepository(private val app: Application) {
         ))
     }
 
-    private suspend fun supabasePost(path: String, body: JSONObject): JSONObject {
-        return suspendCancellableCoroutine { cont ->
-            val request = object : JsonObjectRequest(
-                POST, "${SupabaseConfig.url}$path", body,
-                { cont.resume(it) },
-                { error -> cont.resumeWithException(Exception(extractVolleyError(error))) }
-            ) {
-                override fun getHeaders() = mapOf(
-                    "apikey" to SupabaseConfig.anonKey,
-                    "Content-Type" to "application/json"
-                )
-            }
-            requestQueue.add(request)
-        }
-    }
-
-    private suspend fun supabaseAdminPut(path: String, body: JSONObject) {
-        suspendCancellableCoroutine<JSONObject> { cont ->
-            val request = object : JsonObjectRequest(
-                PUT, "${SupabaseConfig.url}$path", body,
-                { cont.resume(it) },
-                { error -> cont.resumeWithException(Exception(extractVolleyError(error))) }
-            ) {
-                override fun getHeaders() = mapOf(
-                    "apikey" to SupabaseConfig.serviceRole,
-                    "Authorization" to "Bearer ${SupabaseConfig.serviceRole}",
-                    "Content-Type" to "application/json"
-                )
-            }
-            requestQueue.add(request)
-        }
-    }
+    /** 认证端点(/auth/v1/signup、/auth/v1/token)专用：只带 apikey，不带用户 JWT */
+    private suspend fun supabasePost(path: String, body: JSONObject): JSONObject =
+        SupabaseAuthHttp.authPost(app, path, body)
 
     private suspend fun queryRest(table: String, query: String): JSONObject {
-        return suspendCancellableCoroutine { cont ->
-            val request = object : StringRequest(
-                GET, "${SupabaseConfig.url}/rest/v1/$table?$query",
-                { response ->
-                    try { cont.resume(JSONObject().apply { put("users", JSONArray(response)) }) }
-                    catch (e: Exception) { cont.resumeWithException(e) }
-                },
-                { error -> cont.resumeWithException(Exception(extractVolleyError(error))) }
-            ) {
-                override fun getHeaders() = mapOf(
-                    "apikey" to SupabaseConfig.anonKey,
-                    "Content-Type" to "application/json"
-                )
+        return withAuth {
+            suspendCancellableCoroutine { cont ->
+                val request = object : StringRequest(
+                    GET, "${SupabaseConfig.url}/rest/v1/$table?$query",
+                    { response ->
+                        try { cont.resume(JSONObject().apply { put("users", JSONArray(response)) }) }
+                        catch (e: Exception) { cont.resumeWithException(e) }
+                    },
+                    { error -> cont.resumeWithException(Exception(extractVolleyError(error))) }
+                ) {
+                    override fun getHeaders() = authHeaders()
+                }
+                requestQueue.add(request.withSupabaseRetry())
             }
-            requestQueue.add(request)
         }
     }
 
@@ -347,30 +373,40 @@ class SupabaseAuthRepository(private val app: Application) {
             put("uid", uid); put("account", account); put("email", email)
             if (nickname.isNotBlank()) put("nickname", nickname)
         }.toString()
-        suspendCancellableCoroutine<String> { cont ->
-            val request = object : StringRequest(
-                POST, "${SupabaseConfig.url}/rest/v1/users",
-                { cont.resume(it) },
-                { error -> cont.resumeWithException(Exception(extractVolleyError(error))) }
-            ) {
-                override fun getBody(): ByteArray = body.toByteArray()
-                override fun getBodyContentType(): String = "application/json"
-                override fun getHeaders() = mapOf(
-                    "apikey" to SupabaseConfig.anonKey,
-                    "Prefer" to "return=minimal"
-                )
+        withAuth {
+            suspendCancellableCoroutine<String> { cont ->
+                val request = object : StringRequest(
+                    POST, "${SupabaseConfig.url}/rest/v1/users",
+                    { cont.resume(it) },
+                    { error -> cont.resumeWithException(Exception(extractVolleyError(error))) }
+                ) {
+                    override fun getBody(): ByteArray = body.toByteArray()
+                    override fun getBodyContentType(): String = "application/json"
+                    override fun getHeaders() = authWriteHeaders()
+                }
+                requestQueue.add(request.withSupabaseRetry())
             }
-            requestQueue.add(request)
         }
     }
 
     private fun extractVolleyError(error: VolleyError): String {
         val code = error.networkResponse?.statusCode ?: 0
         val data = error.networkResponse?.data
-        val body = if (data != null) {
-            try { JSONObject(String(data, Charsets.UTF_8)).optString("msg", String(data, Charsets.UTF_8)) }
-            catch (e: Exception) { String(data, Charsets.UTF_8) }
+        val raw = if (data != null) String(data, Charsets.UTF_8) else ""
+        val body = if (raw.isNotBlank()) {
+            try {
+                val json = JSONObject(raw)
+                // PostgREST 用 message，GoTrue 用 msg / error_description
+                json.optString("message")
+                    .ifBlank { json.optString("msg") }
+                    .ifBlank { json.optString("error_description") }
+                    .ifBlank { raw }
+            } catch (e: Exception) { raw }
         } else error.message ?: "未知错误"
+        // RLS / 鉴权类失败单独打点，便于 adb logcat -s RedBookAuth 定位是哪个表被拦
+        if (code == 401 || code == 403 || raw.contains("row-level security", ignoreCase = true)) {
+            android.util.Log.e("RedBookAuth", "HTTP $code $body")
+        }
         return "$code: $body"
     }
 
@@ -385,22 +421,6 @@ class SupabaseAuthRepository(private val app: Application) {
             msg.contains("429") -> "操作太频繁，请稍后再试"
             else -> msg.ifBlank { "操作失败，请重试" }
         }
-    }
-
-    suspend fun insertPost(postId: String, title: String, content: String,
-                           authorUid: String, authorName: String, authorAvatar: String,
-                           ipLocation: String = "") {
-        val body = JSONObject().apply {
-            put("post_id", postId)
-            put("title", title)
-            put("content", content)
-            put("author_uid", authorUid)
-            put("author_name", authorName)
-            put("author_avatar", authorAvatar)
-            if (ipLocation.isNotBlank()) put("ip_location", ipLocation)
-            put("created_at", System.currentTimeMillis())
-        }
-        supabasePostBody("/rest/v1/posts", body)
     }
 
     suspend fun uploadImage(uri: android.net.Uri, app: android.content.Context): String? {
@@ -425,15 +445,91 @@ class SupabaseAuthRepository(private val app: Application) {
                     inputStream.use { it.readBytes() }
                 }
                 val isVideo = mime.contains("video")
-                val ext = when { isVideo -> "mp4"; mime.contains("png") -> "png"; mime.contains("webp") -> "webp"; else -> "jpg" }
+                // 图片上传前先缩放压缩，避免几 MB 的原图导致帖子/草稿列表加载缓慢
+                val (uploadBytes, uploadMime) = if (isVideo) bytes to mime else compressImage(bytes, mime)
+                val ext = when { isVideo -> "mp4"; uploadMime.contains("png") -> "png"; uploadMime.contains("webp") -> "webp"; else -> "jpg" }
                 val prefix = if (isVideo) "video:" else ""
-                val fileName = "img_${System.nanoTime()}.$ext"
-                uploadToStorage("post-images", fileName, bytes, mime)
+                // 按 uid 分目录：storage 写入策略要求对象路径首段等于 auth.uid()，
+                // 这样任何账号都无法覆盖或删除别人的文件
+                val ownerUid = com.example.redbook.data.local.SessionPrefs.load(app)?.uid.orEmpty()
+                val dir = if (ownerUid.isNotBlank()) "$ownerUid/" else ""
+                val fileName = "${dir}img_${System.nanoTime()}.$ext"
+                uploadToStorage("post-images", fileName, uploadBytes, uploadMime)
                 "$prefix${SupabaseConfig.url}/storage/v1/object/public/post-images/$fileName"
             } catch (e: Exception) { 
                 android.util.Log.e("RedBook", "uploadImage error: $uri -> ${e.message}")
                 null 
             }
+        }
+    }
+
+    /**
+     * 上传前压缩图片：按采样率解码（避免 OOM）→ 依据 EXIF 方向纠正旋转 → 最长边缩放到
+     * [maxImageDimension] → 重新编码为 JPEG（含透明通道或原 PNG 用 PNG）。
+     * gif 动图不处理；任何异常或压缩后反而更大时回退原始字节，保证上传不被压缩逻辑阻断。
+     */
+    private fun compressImage(bytes: ByteArray, mime: String): Pair<ByteArray, String> {
+        if (mime.contains("gif")) return bytes to mime
+        return try {
+            val bounds = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+            if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return bytes to mime
+
+            // 采样后仍不小于目标尺寸，尽量贴近 maxImageDimension 再精确缩放
+            var sampleSize = 1
+            while (bounds.outWidth / (sampleSize * 2) >= maxImageDimension ||
+                bounds.outHeight / (sampleSize * 2) >= maxImageDimension
+            ) sampleSize *= 2
+
+            val opts = android.graphics.BitmapFactory.Options().apply { inSampleSize = sampleSize }
+            var bitmap = android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size, opts)
+                ?: return bytes to mime
+
+            val orientation = try {
+                android.media.ExifInterface(java.io.ByteArrayInputStream(bytes))
+                    .getAttributeInt(android.media.ExifInterface.TAG_ORIENTATION, android.media.ExifInterface.ORIENTATION_NORMAL)
+            } catch (e: Exception) { android.media.ExifInterface.ORIENTATION_NORMAL }
+            val matrix = android.graphics.Matrix()
+            when (orientation) {
+                android.media.ExifInterface.ORIENTATION_ROTATE_90 -> matrix.postRotate(90f)
+                android.media.ExifInterface.ORIENTATION_ROTATE_180 -> matrix.postRotate(180f)
+                android.media.ExifInterface.ORIENTATION_ROTATE_270 -> matrix.postRotate(270f)
+                android.media.ExifInterface.ORIENTATION_FLIP_HORIZONTAL -> matrix.postScale(-1f, 1f)
+                android.media.ExifInterface.ORIENTATION_FLIP_VERTICAL -> matrix.postScale(1f, -1f)
+            }
+            if (!matrix.isIdentity) {
+                val rotated = android.graphics.Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
+                if (rotated != bitmap) bitmap.recycle()
+                bitmap = rotated
+            }
+
+            val maxSide = maxOf(bitmap.width, bitmap.height)
+            if (maxSide > maxImageDimension) {
+                val scale = maxImageDimension.toFloat() / maxSide
+                val scaled = android.graphics.Bitmap.createScaledBitmap(
+                    bitmap,
+                    (bitmap.width * scale).toInt().coerceAtLeast(1),
+                    (bitmap.height * scale).toInt().coerceAtLeast(1),
+                    true
+                )
+                if (scaled != bitmap) bitmap.recycle()
+                bitmap = scaled
+            }
+
+            val out = java.io.ByteArrayOutputStream()
+            val usePng = mime.contains("png") || bitmap.hasAlpha()
+            val format = if (usePng) android.graphics.Bitmap.CompressFormat.PNG else android.graphics.Bitmap.CompressFormat.JPEG
+            bitmap.compress(format, 85, out)
+            bitmap.recycle()
+            val result = out.toByteArray()
+            if (result.isNotEmpty() && result.size < bytes.size) {
+                result to (if (usePng) "image/png" else "image/jpeg")
+            } else {
+                bytes to mime
+            }
+        } catch (e: Exception) {
+            android.util.Log.e("RedBook", "compressImage failed: ${e.message}")
+            bytes to mime
         }
     }
 
@@ -450,22 +546,25 @@ class SupabaseAuthRepository(private val app: Application) {
         }
     }
 
+    /** 上传到 Storage：写入策略要求携带用户 JWT，且对象路径首段为 auth.uid() */
     private suspend fun uploadToStorage(bucket: String, fileName: String, bytes: ByteArray, mime: String) {
-        suspendCancellableCoroutine<String> { cont ->
-            val request = object : StringRequest(
-                POST, "${SupabaseConfig.url}/storage/v1/object/$bucket/$fileName",
-                { cont.resume(it) },
-                { error -> cont.resumeWithException(Exception(extractVolleyError(error))) }
-            ) {
-                override fun getBody(): ByteArray = bytes
-                override fun getBodyContentType(): String = mime
-                override fun getHeaders(): Map<String, String> = mapOf(
-                    "apikey" to SupabaseConfig.anonKey,
-                    "Authorization" to "Bearer ${SupabaseConfig.anonKey}"
-                )
+        withAuth {
+            suspendCancellableCoroutine<String> { cont ->
+                val request = object : StringRequest(
+                    POST, "${SupabaseConfig.url}/storage/v1/object/$bucket/$fileName",
+                    { cont.resume(it) },
+                    { error -> cont.resumeWithException(Exception(extractVolleyError(error))) }
+                ) {
+                    override fun getBody(): ByteArray = bytes
+                    override fun getBodyContentType(): String = mime
+                    override fun getHeaders(): Map<String, String> = mapOf(
+                        "apikey" to SupabaseConfig.anonKey,
+                        "Authorization" to "Bearer ${AuthSession.access(app)}"
+                    )
+                }
+                request.retryPolicy = DefaultRetryPolicy(60000, 2, 1f)
+                requestQueue.add(request)
             }
-            request.retryPolicy = DefaultRetryPolicy(60000, 2, 1f)
-            requestQueue.add(request)
         }
     }
 
@@ -570,42 +669,38 @@ class SupabaseAuthRepository(private val app: Application) {
 
     private suspend fun patchDraftRow(draftId: String, body: JSONObject) {
         val bodyStr = body.toString()
-        suspendCancellableCoroutine<String> { cont ->
-            val request = object : StringRequest(PATCH, "${SupabaseConfig.url}/rest/v1/drafts?draft_id=eq.$draftId",
-                { cont.resume(it) },
-                { error -> cont.resumeWithException(Exception(extractVolleyError(error))) }
-            ) {
-                override fun getBody() = bodyStr.toByteArray()
-                override fun getBodyContentType() = "application/json"
-                override fun getHeaders() = mapOf(
-                    "apikey" to SupabaseConfig.anonKey, "Prefer" to "return=minimal"
-                )
+        withAuth {
+            suspendCancellableCoroutine<String> { cont ->
+                val request = object : StringRequest(PATCH, "${SupabaseConfig.url}/rest/v1/drafts?draft_id=eq.$draftId",
+                    { cont.resume(it) },
+                    { error -> cont.resumeWithException(Exception(extractVolleyError(error))) }
+                ) {
+                    override fun getBody() = bodyStr.toByteArray()
+                    override fun getBodyContentType() = "application/json"
+                    override fun getHeaders() = authWriteHeaders()
+                }
+                requestQueue.add(request.withSupabaseRetry())
             }
-            requestQueue.add(request)
         }
     }
 
     private suspend fun supabaseDelete(path: String) {
-        suspendCancellableCoroutine<String> { cont ->
-            val request = object : StringRequest(DELETE, "${SupabaseConfig.url}$path",
-                { cont.resume(it) },
-                { error -> cont.resumeWithException(Exception(extractVolleyError(error))) }
-            ) {
-                override fun getHeaders() = mapOf(
-                    "apikey" to SupabaseConfig.anonKey, "Prefer" to "return=minimal"
-                )
+        withAuth {
+            suspendCancellableCoroutine<String> { cont ->
+                val request = object : StringRequest(DELETE, "${SupabaseConfig.url}$path",
+                    { cont.resume(it) },
+                    { error -> cont.resumeWithException(Exception(extractVolleyError(error))) }
+                ) {
+                    override fun getHeaders() = authWriteHeaders()
+                }
+                requestQueue.add(request.withSupabaseRetry())
             }
-            requestQueue.add(request)
         }
     }
 
+    /** 浏览量 +1：帖子可能不是自己的，RLS 不允许直接 PATCH；服务端固定加一，不接受指定增量 */
     suspend fun incrementViewCount(postId: String) {
-        val resp = queryRest("posts", "select=view_count&post_id=eq.$postId&limit=1")
-        val arr = resp.optJSONArray("users") ?: resp.optJSONArray("posts") ?: return
-        if (arr.length() == 0) return
-        val count = arr.getJSONObject(0).optInt("view_count", 0) + 1
-        val body = JSONObject().apply { put("view_count", count) }
-        patchUserRowByPostId(postId, body)
+        supabaseRpc("increment_post_view", JSONObject().apply { put("p_post_id", postId) })
     }
 
     suspend fun getPosts(): JSONArray {
@@ -616,32 +711,6 @@ class SupabaseAuthRepository(private val app: Application) {
     suspend fun getPostsByViews(): JSONArray {
         val resp = queryRest("posts", "select=*&order=view_count.desc&limit=6")
         return resp.optJSONArray("users") ?: resp.optJSONArray("posts") ?: JSONArray()
-    }
-
-    suspend fun getVideos(): JSONArray {
-        val resp = queryRest("video_notes", "select=*&order=created_at.desc")
-        return resp.optJSONArray("users") ?: resp.optJSONArray("video_notes") ?: JSONArray()
-    }
-
-    suspend fun getVideo(videoId: String): JSONObject? {
-        val resp = queryRest("video_notes", "select=*&video_id=eq.$videoId&limit=1")
-        val arr = resp.optJSONArray("users") ?: resp.optJSONArray("video_notes") ?: return null
-        return if (arr.length() > 0) arr.getJSONObject(0) else null
-    }
-
-    suspend fun publishVideo(videoId: String, title: String, videoUrl: String,
-                             authorUid: String, authorName: String, authorXhsId: String, authorAvatar: String = "") {
-        val body = JSONObject().apply {
-            put("video_id", videoId)
-            put("title", title)
-            put("video_url", videoUrl)
-            put("author_uid", authorUid)
-            put("author_name", authorName)
-            put("author_xhs_id", authorXhsId)
-            put("author_avatar", authorAvatar)
-            put("created_at", System.currentTimeMillis())
-        }
-        supabasePostBody("/rest/v1/video_notes", body)
     }
 
     suspend fun getPost(postId: String): JSONObject? {
@@ -805,16 +874,17 @@ class SupabaseAuthRepository(private val app: Application) {
     }
 
     // 用户的草稿
+    // 历史草稿的 author_xhs_id 可能未回填（与当前 xhs_id 不一致），只用 xhs_id 查会漏掉旧草稿；
+    // 因此改为 uid 与 xhs_id 取并集查询（uid 稳定），再统一按更新时间倒序返回。
     suspend fun getUserDrafts(userUid: String, userXhsId: String): JSONArray {
-        var arr = JSONArray()
-        if (userXhsId.isNotBlank()) {
-            val resp = queryRest("drafts", "select=*&author_xhs_id=eq.$userXhsId&order=updated_at.desc")
-            arr = resp.optJSONArray("users") ?: resp.optJSONArray("drafts") ?: JSONArray()
-        }
-        if (arr.length() == 0 && userUid.isNotBlank()) {
-            val resp = queryRest("drafts", "select=*&author_uid=eq.$userUid&order=updated_at.desc")
-            arr = resp.optJSONArray("users") ?: resp.optJSONArray("drafts") ?: JSONArray()
-        }
+        val filters = mutableListOf<String>()
+        if (userUid.isNotBlank()) filters.add("author_uid.eq.$userUid")
+        if (userXhsId.isNotBlank()) filters.add("author_xhs_id.eq.$userXhsId")
+        if (filters.isEmpty()) return JSONArray()
+
+        val filterExpr = if (filters.size == 1) filters[0] else "or=(${filters.joinToString(",")})"
+        val resp = queryRest("drafts", "select=*&$filterExpr&order=updated_at.desc")
+        val arr = resp.optJSONArray("users") ?: resp.optJSONArray("drafts") ?: JSONArray()
         android.util.Log.d("RedBook", "getUserDrafts uid=$userUid xhs=$userXhsId count=${arr.length()}")
         return arr
     }
@@ -1104,20 +1174,20 @@ class SupabaseAuthRepository(private val app: Application) {
     /** POST upsert：Prefer resolution=merge-duplicates，插入或更新冲突行 */
     private suspend fun upsertRest(path: String, body: JSONObject) {
         val bodyString = body.toString()
-        suspendCancellableCoroutine<String> { cont ->
-            val request = object : StringRequest(
-                POST, "${SupabaseConfig.url}$path",
-                { cont.resume(it) },
-                { error -> cont.resumeWithException(Exception(extractVolleyError(error))) }
-            ) {
-                override fun getBody(): ByteArray = bodyString.toByteArray()
-                override fun getBodyContentType(): String = "application/json"
-                override fun getHeaders(): Map<String, String> = mapOf(
-                    "apikey" to SupabaseConfig.anonKey,
-                    "Prefer" to "resolution=merge-duplicates,return=minimal"
-                )
+        withAuth {
+            suspendCancellableCoroutine<String> { cont ->
+                val request = object : StringRequest(
+                    POST, "${SupabaseConfig.url}$path",
+                    { cont.resume(it) },
+                    { error -> cont.resumeWithException(Exception(extractVolleyError(error))) }
+                ) {
+                    override fun getBody(): ByteArray = bodyString.toByteArray()
+                    override fun getBodyContentType(): String = "application/json"
+                    override fun getHeaders(): Map<String, String> =
+                        authHeaders() + ("Prefer" to "resolution=merge-duplicates,return=minimal")
+                }
+                requestQueue.add(request.withSupabaseRetry())
             }
-            requestQueue.add(request)
         }
     }
 
@@ -1157,11 +1227,6 @@ class SupabaseAuthRepository(private val app: Application) {
             val postsArr = postsResp.optJSONArray("users") ?: postsResp.optJSONArray("posts") ?: JSONArray()
             for (i in 0 until postsArr.length()) total += postsArr.getJSONObject(i).optInt("like_count", 0)
         } catch (_: Exception) { }
-        try {
-            val vResp = queryRest("video_notes", "select=like_count&author_uid=eq.$userUid")
-            val vArr = vResp.optJSONArray("users") ?: vResp.optJSONArray("video_notes") ?: JSONArray()
-            for (i in 0 until vArr.length()) total += vArr.getJSONObject(i).optInt("like_count", 0)
-        } catch (_: Exception) { }
         return total
     }
 
@@ -1173,11 +1238,6 @@ class SupabaseAuthRepository(private val app: Application) {
             val postsResp = queryRest("posts", "select=favorite_count&author_uid=eq.$userUid")
             val postsArr = postsResp.optJSONArray("users") ?: postsResp.optJSONArray("posts") ?: JSONArray()
             for (i in 0 until postsArr.length()) total += postsArr.getJSONObject(i).optInt("favorite_count", 0)
-        } catch (_: Exception) { }
-        try {
-            val vResp = queryRest("video_notes", "select=favorite_count&author_uid=eq.$userUid")
-            val vArr = vResp.optJSONArray("users") ?: vResp.optJSONArray("video_notes") ?: JSONArray()
-            for (i in 0 until vArr.length()) total += vArr.getJSONObject(i).optInt("favorite_count", 0)
         } catch (_: Exception) { }
         return total
     }
@@ -1267,80 +1327,142 @@ class SupabaseAuthRepository(private val app: Application) {
         birthday?.let { body.put("birthday", it) }
         if (body.length() == 0) return
         patchUserRow(uid, body)
+        // 通知等场景用的是全局的当前昵称/头像，改完立刻跟上，避免之后发出的通知仍是旧名字
+        nickname?.takeIf { it.isNotBlank() }?.let { currentUserName = it }
+        avatarUrl?.let { currentUserAvatar = it }
+        // 把最新署名回填进历史帖子/评论，避免"改名或换头像后新旧内容不一致"
+        syncAuthorSnapshot(uid, nickname, avatarUrl)
     }
 
-    suspend fun updatePostLike(postId: String, delta: Int) {
-        val resp = queryRest("posts", "select=like_count&post_id=eq.$postId&limit=1")
-        val arr = resp.optJSONArray("users") ?: resp.optJSONArray("posts") ?: return
-        if (arr.length() == 0) return
-        val count = arr.getJSONObject(0).optInt("like_count", 0) + delta
-        patchUserRowByPostId(postId, JSONObject().apply { put("like_count", count.coerceAtLeast(0)) })
+    /**
+     * 把最新的昵称/头像回填到自己历史帖子与评论的冗余列。
+     *
+     * posts / comments 写入时各自冗余了一份 author_name / author_avatar(避免读时 JOIN)：
+     * 改名或换头像不会自动影响这些旧快照，于是出现"前后发布的帖子头像用户名不统一"。
+     * 这里按 author_uid 批量改写成 users 表里的最新值，让所有读取路径(首页/详情/视频/
+     * 搜索/收藏/主页)拿到的署名一致。RLS 的 posts_update_own / comments_update_own
+     * 策略允许改自己的行，故可直接在客户端完成。
+     *
+     * 单表失败不影响保存资料本身，也不影响另一张表。
+     */
+    private suspend fun syncAuthorSnapshot(uid: String, nickname: String?, avatarUrl: String?) {
+        if (uid.isBlank()) return
+        val body = JSONObject()
+        nickname?.takeIf { it.isNotBlank() }?.let { body.put("author_name", it) }
+        avatarUrl?.let { body.put("author_avatar", it) }
+        if (body.length() == 0) return
+        val filter = "author_uid=eq.$uid"
+        for (table in listOf("posts", "comments")) {
+            try {
+                patchRest(table, filter, body)
+            } catch (e: Exception) {
+                android.util.Log.w("RedBook", "syncAuthorSnapshot($table) failed: ${e.message}")
+            }
+        }
     }
 
-    suspend fun updatePostFav(postId: String, delta: Int) {
-        val resp = queryRest("posts", "select=favorite_count&post_id=eq.$postId&limit=1")
-        val arr = resp.optJSONArray("users") ?: resp.optJSONArray("posts") ?: return
-        if (arr.length() == 0) return
-        val count = arr.getJSONObject(0).optInt("favorite_count", 0) + delta
-        patchUserRowByPostId(postId, JSONObject().apply { put("favorite_count", count.coerceAtLeast(0)) })
+    /**
+     * 重算帖子的点赞数与收藏数。
+     *
+     * 计数完全由 likes / favorites 关系表的行数推导，客户端无法指定增量：
+     * 一个人对一个帖子只能留下一条关系记录，所以刷不出虚假数字。
+     * 重算是幂等的，历史上若有偏差，下一次交互即自动纠正。
+     */
+    suspend fun updatePostLike(postId: String) {
+        supabaseRpc("sync_post_counts", JSONObject().apply { put("p_post_id", postId) })
     }
 
-    suspend fun updateCommentLike(commentId: String, delta: Int) {
-        val resp = queryRest("comments", "select=like_count&comment_id=eq.$commentId&limit=1")
-        val arr = resp.optJSONArray("users") ?: resp.optJSONArray("comments") ?: return
-        if (arr.length() == 0) return
-        val count = arr.getJSONObject(0).optInt("like_count", 0) + delta
-        patchCommentRow(commentId, JSONObject().apply { put("like_count", count.coerceAtLeast(0)) })
+    /** 收藏状态变化后重算（同一个服务端函数一次算出点赞与收藏两个数） */
+    suspend fun updatePostFav(postId: String) {
+        supabaseRpc("sync_post_counts", JSONObject().apply { put("p_post_id", postId) })
     }
 
+    /** 评论点赞数重算：依据 comment_likes 关系表 */
+    suspend fun updateCommentLike(commentId: String) {
+        supabaseRpc("sync_comment_like_count", JSONObject().apply { put("p_comment_id", commentId) })
+    }
+
+    // ---- 评论点赞本机缓存 ----
+    // 云端 comment_likes 表未建/不可用时用它兜底，保证同一设备"退出重进"仍记住点赞态；
+    // 云表可用时取并集，跨设备也能恢复。
+    private fun commentLikePrefs() = app.getSharedPreferences("comment_likes_local", android.content.Context.MODE_PRIVATE)
+    private fun commentLikePrefKey(userUid: String) = "u_$userUid"
+
+    private fun localLikedCommentIds(userUid: String): Set<String> =
+        if (userUid.isBlank()) emptySet()
+        else commentLikePrefs().getStringSet(commentLikePrefKey(userUid), emptySet())?.toSet() ?: emptySet()
+
+    private fun saveLocalCommentLike(userUid: String, commentId: String, liked: Boolean) {
+        if (userUid.isBlank() || commentId.isBlank()) return
+        val set = localLikedCommentIds(userUid).toMutableSet()
+        if (liked) set.add(commentId) else set.remove(commentId)
+        commentLikePrefs().edit().putStringSet(commentLikePrefKey(userUid), set).apply()
+    }
+
+    // 记录评论(含回复)点赞/取消：先写本机缓存（立即生效），再尽力同步到 comment_likes 云表
+    suspend fun recordCommentLike(userUid: String, commentId: String, liked: Boolean) {
+        saveLocalCommentLike(userUid, commentId, liked)
+        try {
+            if (liked) {
+                val body = JSONObject().apply {
+                    put("like_id", "cl_${userUid}_$commentId")
+                    put("user_uid", userUid)
+                    put("user_xhs_id", "")
+                    put("comment_id", commentId)
+                    put("created_at", System.currentTimeMillis())
+                }
+                supabasePostBody("/rest/v1/comment_likes", body)
+            } else {
+                supabaseDelete("/rest/v1/comment_likes?user_uid=eq.$userUid&comment_id=eq.$commentId")
+            }
+        } catch (_: Exception) {
+            // 云表不可用则忽略，本机缓存已保证体验
+        }
+    }
+
+    // 我点赞过的评论 id 集合 = 本机缓存 ∪ 云端（加载评论时用于回填 isLiked）
+    suspend fun getLikedCommentIds(userUid: String): Set<String> {
+        if (userUid.isBlank()) return emptySet()
+        val local = localLikedCommentIds(userUid)
+        val cloud = try {
+            val resp = queryRest("comment_likes", "select=comment_id&user_uid=eq.$userUid")
+            val arr = resp.optJSONArray("users") ?: resp.optJSONArray("comment_likes") ?: JSONArray()
+            (0 until arr.length()).map { arr.getJSONObject(it).getString("comment_id") }.toSet()
+        } catch (_: Exception) { emptySet<String>() }
+        return local + cloud
+    }
+//纯写入,不关心返回值,只关心成功失败
     private suspend fun supabasePostBody(path: String, body: JSONObject) {
         val bodyStr = body.toString()
-        suspendCancellableCoroutine<String> { cont ->
-            val request = object : StringRequest(POST, "${SupabaseConfig.url}$path",
-                { cont.resume(it) },
-                { error -> cont.resumeWithException(Exception(extractVolleyError(error))) }
-            ) {
-                override fun getBody() = bodyStr.toByteArray()
-                override fun getBodyContentType() = "application/json"
-                override fun getHeaders() = mapOf(
-                    "apikey" to SupabaseConfig.anonKey, "Prefer" to "return=minimal"
-                )
+        withAuth {
+            suspendCancellableCoroutine<String> { cont ->
+                val request = object : StringRequest(POST, "${SupabaseConfig.url}$path",
+                    { cont.resume(it) },
+                    { error -> cont.resumeWithException(Exception(extractVolleyError(error))) }
+                ) {
+                    override fun getBody() = bodyStr.toByteArray()
+                    override fun getBodyContentType() = "application/json"
+                    override fun getHeaders() = authWriteHeaders()
+                }
+                requestQueue.add(request.withSupabaseRetry())
             }
-            requestQueue.add(request)
         }
     }
 
     private suspend fun patchUserRowByPostId(postId: String, body: JSONObject) {
         val bodyStr = body.toString()
-        suspendCancellableCoroutine<String> { cont ->
-            val request = object : StringRequest(PATCH, "${SupabaseConfig.url}/rest/v1/posts?post_id=eq.$postId",
-                { cont.resume(it) },
-                { error -> cont.resumeWithException(Exception(extractVolleyError(error))) }
-            ) {
-                override fun getBody() = bodyStr.toByteArray()
-                override fun getBodyContentType() = "application/json"
-                override fun getHeaders() = mapOf(
-                    "apikey" to SupabaseConfig.anonKey, "Prefer" to "return=minimal"
-                )
+        withAuth {
+            suspendCancellableCoroutine<String> { cont ->
+                val request = object : StringRequest(PATCH, "${SupabaseConfig.url}/rest/v1/posts?post_id=eq.$postId",
+                    { cont.resume(it) },
+                    { error -> cont.resumeWithException(Exception(extractVolleyError(error))) }
+                ) {
+                    override fun getBody() = bodyStr.toByteArray()
+                    override fun getBodyContentType() = "application/json"
+                    override fun getHeaders() = authWriteHeaders()
+                }
+                requestQueue.add(request.withSupabaseRetry())
             }
-            requestQueue.add(request)
-        }
-    }
-
-    private suspend fun patchCommentRow(commentId: String, body: JSONObject) {
-        val bodyStr = body.toString()
-        suspendCancellableCoroutine<String> { cont ->
-            val request = object : StringRequest(PATCH, "${SupabaseConfig.url}/rest/v1/comments?comment_id=eq.$commentId",
-                { cont.resume(it) },
-                { error -> cont.resumeWithException(Exception(extractVolleyError(error))) }
-            ) {
-                override fun getBody() = bodyStr.toByteArray()
-                override fun getBodyContentType() = "application/json"
-                override fun getHeaders() = mapOf(
-                    "apikey" to SupabaseConfig.anonKey, "Prefer" to "return=minimal"
-                )
-            }
-            requestQueue.add(request)
         }
     }
 

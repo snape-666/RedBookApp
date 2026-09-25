@@ -24,6 +24,7 @@ object NotifHelper {
     /** 互动通知 id 起点(防止与消息通知 id 冲突) */
     const val INTERACT_BASE = 2000
 
+    //创建通知渠道
     fun createChannels(context: Context) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
         val nm = context.getSystemService(NotificationManager::class.java)
@@ -47,14 +48,17 @@ object NotifHelper {
         )
     }
 
+    //检查系统通知开关
     fun areNotificationsEnabled(context: Context): Boolean =
         NotificationManagerCompat.from(context).areNotificationsEnabled()
 
+    //查通知权限
     fun hasPostPermission(context: Context): Boolean =
         Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
             ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) ==
             PackageManager.PERMISSION_GRANTED
 
+    //构建前台服务常驻通知
     fun buildServiceNotification(context: Context): android.app.Notification =
         NotificationCompat.Builder(context, CHANNEL_INTERACTIONS)
             .setContentTitle(context.getString(R.string.app_name))

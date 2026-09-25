@@ -66,6 +66,7 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.media3.common.Player
 import androidx.media3.common.VideoSize
+import androidx.media3.common.util.UnstableApi
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
 import coil.compose.AsyncImage
@@ -78,6 +79,7 @@ import com.example.redbook.data.repository.SupabaseAuthRepository
 import com.example.redbook.ui.component.CommentItem
 import com.example.redbook.ui.component.KeyboardInputBar
 import com.example.redbook.ui.theme.getOnSurfaceSecondary
+import com.example.redbook.ui.theme.getOnSurfaceTertiary
 import com.example.redbook.ui.theme.getOutline
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -109,7 +111,7 @@ fun VideoFeedScreen(
     val repository = remember { SupabaseAuthRepository(context.applicationContext as android.app.Application) }
     var videos by remember { mutableStateOf<List<FeedVideo>>(emptyList()) }
     var loading by remember { mutableStateOf(true) }
-
+//数据加载
     LaunchedEffect(Unit) {
         try {
             // 数据源：posts 表中 image_url 带 video: 前缀的视频（视频统一存 posts 表）
@@ -201,6 +203,7 @@ fun VideoFeedScreen(
     }
 }
 
+@androidx.annotation.OptIn(UnstableApi::class)
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun FeedVideoPage(
@@ -235,6 +238,8 @@ private fun FeedVideoPage(
     val focusReq = remember { FocusRequester() }
     val cmts = remember { feedComments.getOrPut(video.videoId) { mutableStateListOf() } }
     var replyTgt by remember { mutableStateOf<FeedReplyTarget?>(null) }
+    // 长按要删的评论/回复 id：只有自己发的才会被放进来
+    var deletingComment by remember { mutableStateOf<String?>(null) }
 
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.GetMultipleContents()) { u ->
         u.forEach { if (it !in selUris) selUris.add(it) }
@@ -448,7 +453,7 @@ private fun FeedVideoPage(
                                 scope.launch {
                                     try {
                                         repository.recordLike(userUid, video.videoId, liked)
-                                        repository.updatePostLike(video.videoId, if (liked) 1 else -1)
+                                        repository.updatePostLike(video.videoId)
                                     } catch (_: Exception) { }
                                 }
                             }
@@ -460,7 +465,7 @@ private fun FeedVideoPage(
                                 scope.launch {
                                     try {
                                         repository.recordFavorite(userUid, video.videoId, faved)
-                                        repository.updatePostFav(video.videoId, if (faved) 1 else -1)
+                                        repository.updatePostFav(video.videoId)
                                     } catch (_: Exception) { }
                                 }
                             }
@@ -497,9 +502,23 @@ private fun FeedVideoPage(
                                         cmtText = if (toAi) "回复 @$name：" else "回复 @$name："
                                         kbVisible = true
                                     },
-                                    onLikeClick = { cid -> toggleFeedLike(cid, cmts) },
+                                    onLikeClick = { cid ->
+                                        val nowLiked = toggleFeedLike(cid, cmts)
+                                        // 持久化评论点赞：本机缓存 + 云端关系表 + 计数（与视频详情页同一套）。
+                                        // 不写的话，退出页面再进来点赞态和数字都会丢。
+                                        if (userUid.isNotBlank()) {
+                                            scope.launch {
+                                                try { repository.recordCommentLike(userUid, cid, nowLiked) } catch (_: Exception) { }
+                                                try { repository.updateCommentLike(cid) } catch (_: Exception) { }
+                                            }
+                                        }
+                                    },
                                     onAvatarClick = { uid -> if (uid.isNotBlank() && uid != "me" && !AiAssistant.isAiUser(uid)) onUserClick(uid) },
-                                    onUserNameClick = { uid -> if (uid.isNotBlank() && uid != "me" && !AiAssistant.isAiUser(uid)) onUserClick(uid) })
+                                    onUserNameClick = { uid -> if (uid.isNotBlank() && uid != "me" && !AiAssistant.isAiUser(uid)) onUserClick(uid) },
+                                    onLongClick = { cid, authorUid ->
+                                        // 只能删自己发的：别人的评论/回复不弹删除确认
+                                        if (authorUid == myUid) deletingComment = cid
+                                    })
                             }
                         }
                         Row(Modifier.fillMaxWidth().padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -633,21 +652,90 @@ private fun FeedVideoPage(
                 )
             }
         }
-    }
-}
 
-private fun toggleFeedLike(cid: String, cmts: MutableList<Comment>) {
-    for (i in cmts.indices) {
-        val c = cmts[i]
-        if (c.id == cid) { cmts[i] = c.copy(isLiked = !c.isLiked, likeCount = c.likeCount + if (c.isLiked) -1 else 1); return }
-        for (j in c.replies.indices) {
-            if (c.replies[j].id == cid) {
-                val r = c.replies[j]
-                cmts[i] = c.copy(replies = c.replies.toMutableList().also { it[j] = r.copy(isLiked = !r.isLiked, likeCount = r.likeCount + if (r.isLiked) -1 else 1) })
-                return
+        // 删除评论/回复确认（与照片详情同一套样式；只有作者本人能走到这里）
+        // 注意：必须放在 if (kbVisible) 外面 —— 长按评论时键盘是收起的，
+        // 放在里面就等于这段代码永远不会被组合，表现为"长按毫无反应"。
+        deletingComment?.let { cid ->
+            androidx.compose.ui.window.Dialog(onDismissRequest = { deletingComment = null }) {
+                Column(
+                    Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(MaterialTheme.colorScheme.surface)
+                ) {
+                    Column(
+                        Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 24.dp, vertical = 20.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Text("删除评论", fontWeight = FontWeight.Bold, fontSize = 18.sp, color = MaterialTheme.colorScheme.onSurface)
+                        Spacer(Modifier.height(8.dp))
+                        Text("确定删除该评论吗？", fontSize = 14.sp, color = getOnSurfaceTertiary())
+                    }
+                    Box(Modifier.fillMaxWidth().height(0.5.dp).background(getOutline().copy(alpha = 0.5f)))
+                    Row(
+                        Modifier.fillMaxWidth().height(48.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Box(
+                            Modifier.weight(1f).fillMaxHeight().clickable { deletingComment = null },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text("取消", color = getOnSurfaceSecondary())
+                        }
+                        Box(Modifier.width(0.5.dp).fillMaxHeight().background(getOutline().copy(alpha = 0.5f)))
+                        Box(
+                            Modifier.weight(1f).fillMaxHeight().clickable {
+                                deletingComment = null
+                                // 本地先移除（一级评论，或它下面的某条回复），云端再删一次；
+                                // 服务端 RLS(comments_delete_own) 才是真正兜底
+                                val top = cmts.indexOfFirst { it.id == cid }
+                                if (top >= 0) {
+                                    cmts.removeAt(top)
+                                } else {
+                                    for (i in cmts.indices) {
+                                        val c = cmts[i]
+                                        if (c.replies.any { it.id == cid }) {
+                                            cmts[i] = c.copy(replies = c.replies.filterNot { it.id == cid })
+                                        }
+                                    }
+                                }
+                                scope.launch { try { repository.deleteComment(cid) } catch (_: Exception) { } }
+                            },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text("确认", color = MaterialTheme.colorScheme.primary)
+                        }
+                    }
+                }
             }
         }
     }
+}
+
+/** 本地先切点赞态并返回新状态，调用方据此写云端（与视频详情页的 toggleLike 一致） */
+private fun toggleFeedLike(cid: String, cmts: MutableList<Comment>): Boolean {
+    for (i in cmts.indices) {
+        val c = cmts[i]
+        if (c.id == cid) {
+            val liked = !c.isLiked
+            cmts[i] = c.copy(isLiked = liked, likeCount = (c.likeCount + if (liked) 1 else -1).coerceAtLeast(0))
+            return liked
+        }
+        for (j in c.replies.indices) {
+            if (c.replies[j].id == cid) {
+                val r = c.replies[j]
+                val liked = !r.isLiked
+                cmts[i] = c.copy(replies = c.replies.toMutableList().also {
+                    it[j] = r.copy(isLiked = liked, likeCount = (r.likeCount + if (liked) 1 else -1).coerceAtLeast(0))
+                })
+                return liked
+            }
+        }
+    }
+    return false
 }
 
 /** 加载云端评论到本地列表（viewerUid 视角做备注名替换） */
@@ -661,6 +749,8 @@ private suspend fun loadFeedComments(
     if (postId.isBlank()) return
     try {
         val arr = repository.getComments(postId)
+        // 我点赞过的评论 id，用于回填 isLiked —— 不回填的话退出重进点赞态就丢了
+        val likedCommentIds = try { repository.getLikedCommentIds(viewerUid) } catch (_: Exception) { emptySet<String>() }
         val raw = (0 until arr.length()).map { i ->
             val c = arr.getJSONObject(i)
             val parentId = c.optString("parent_id", "")
@@ -674,7 +764,7 @@ private suspend fun loadFeedComments(
                 timestamp = c.optLong("created_at", 0),
                 ipLocation = c.optString("ip_location", "未知"),
                 likeCount = c.optInt("like_count", 0),
-                isLiked = false,
+                isLiked = likedCommentIds.contains(c.optString("comment_id", "")),
                 isAuthor = c.optString("author_uid") == postAuthorUid,
                 replies = emptyList()
             )
@@ -693,7 +783,7 @@ private suspend fun loadFeedComments(
                         timestamp = r.timestamp,
                         ipLocation = r.ipLocation,
                         likeCount = r.likeCount,
-                        isLiked = r.isLiked,
+                        isLiked = likedCommentIds.contains(r.id),
                         isAuthor = r.isAuthor
                     )
                 }

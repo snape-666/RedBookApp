@@ -73,6 +73,7 @@ fun PostCard(
             if (isVideo) {
                 Box(modifier = Modifier.fillMaxWidth().aspectRatio(3f / 4f)) {
                     val videoPath = firstUrl.removePrefix("video:")
+                    //从视频中提取一帧作缩略图
                     VideoThumb(
                         videoUrl = videoPath,
                         modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(topStart = 10.dp, topEnd = 10.dp)),

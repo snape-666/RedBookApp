@@ -23,6 +23,7 @@ data class PendingNotif(
         get() = type.isBlank() || actorUid.isBlank()
 }
 
+//跳转路由
 object NotifClickRouter {
 
     const val ACTION_NOTIF_TAP = "com.example.redbook.action.NOTIF_TAP"

@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -15,6 +16,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -78,7 +80,7 @@ fun HomeScreen(
                 if (index == 0) viewModel.fetchFollowingNotes()
                 else viewModel.fetchNotes()
             },
-            onActionClick = onNavigateToSearch,
+            onActionClick = onNavigateToSearch,//跳转搜索页面
             actionIconRes = R.drawable.search
         )
 
@@ -99,37 +101,46 @@ fun HomeScreen(
 
             is HomeUiState.Success -> {
                 val notes = (uiState as HomeUiState.Success).notes
+                //下拉刷新
                 PullToRefreshBox(
                     isRefreshing = uiState is HomeUiState.Loading,
                     onRefresh = { viewModel.fetchNotes() },
                     modifier = Modifier.fillMaxSize()
                 ) {
-                LazyVerticalStaggeredGrid(
-                    columns = StaggeredGridCells.Fixed(2),
-                    contentPadding = PaddingValues(8.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalItemSpacing = 8.dp,
-                    modifier = Modifier.fillMaxSize()
-
-                ) {
-                    items(notes, key = { it.id }) { note ->
-                        PostCard(
-                            imageRes = note.imageRes,
-                            title = note.title,
-                            avatarRes = note.avatarRes,
-                            userName = note.userName,
-                            isLiked = note.isLiked,
-                            likeCount = formatCount(note.likeCount),
-                            onCardClick = {
-                                if (note.imageUrl.startsWith("video:")) onNavigateToVideo(note.id, note.imageUrl.removePrefix("video:"))
-                                else onNavigateToDetail(note.id)
-                            },
-                            imageUrl = note.imageUrl,
-                            avatarUrl = note.avatarUrl,
-                            onLikeClick = { viewModel.toggleLike(note.id) }
-                        )
+                    if (notes.isEmpty()) {
+                        Box(
+                            modifier = Modifier.fillMaxSize(),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text("暂无内容，下拉刷新试试")
+                        }
+                    } else {
+                        LazyVerticalStaggeredGrid(
+                            columns = StaggeredGridCells.Fixed(2),
+                            contentPadding = PaddingValues(8.dp),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalItemSpacing = 8.dp,
+                            modifier = Modifier.fillMaxSize()
+                        ) {
+                            items(notes, key = { it.id }) { note ->
+                                PostCard(
+                                    imageRes = note.imageRes,
+                                    title = note.title,
+                                    avatarRes = note.avatarRes,
+                                    userName = note.userName,
+                                    isLiked = note.isLiked,
+                                    likeCount = formatCount(note.likeCount),
+                                    onCardClick = {
+                                        if (note.imageUrl.startsWith("video:")) onNavigateToVideo(note.id, note.imageUrl.removePrefix("video:"))
+                                        else onNavigateToDetail(note.id)
+                                    },
+                                    imageUrl = note.imageUrl,
+                                    avatarUrl = note.avatarUrl,
+                                    onLikeClick = { viewModel.toggleLike(note.id) }
+                                )
+                            }
+                        }
                     }
-                }
                 }
             }
 
@@ -138,7 +149,17 @@ fun HomeScreen(
                     modifier = Modifier.fillMaxSize(),
                     contentAlignment = Alignment.Center
                 ) {
-                    Text(text = (uiState as HomeUiState.Error).message)
+                    // 原来只能靠"切走再切回来"重试，这里给一个就地重试入口
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(text = (uiState as HomeUiState.Error).message)
+                        Spacer(modifier = Modifier.height(8.dp))
+                        TextButton(onClick = {
+                            if (selectedTabIndex == 0) viewModel.fetchFollowingNotes()
+                            else viewModel.fetchNotes()
+                        }) {
+                            Text("重试")
+                        }
+                    }
                 }
             }
         }

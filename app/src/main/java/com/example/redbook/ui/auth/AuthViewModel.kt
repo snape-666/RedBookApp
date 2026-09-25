@@ -130,7 +130,7 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
     fun updateResetEmail(email: String) {
         _passwordResetState.value = PasswordResetState(email = email)
     }
-
+//发送重置验证码到邮箱
     fun sendResetCode() {
         val state = _passwordResetState.value
         val emailError = Validator.getEmailError(state.email)
@@ -140,9 +140,10 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
         }
         viewModelScope.launch {
             _passwordResetState.value = state.copy(isLoading = true)
-            repository.requestResetCode(state.email).onSuccess { code ->
+            // 验证码由服务端生成并直接发到邮箱，客户端拿不到，只知道"已发出"
+            repository.requestResetCode(state.email).onSuccess {
                 _passwordResetState.value = _passwordResetState.value.copy(
-                    isLoading = false, codeSent = true, generatedCode = code
+                    isLoading = false, codeSent = true
                 )
             }.onFailure { error ->
                 _passwordResetState.value = state.copy(
@@ -154,8 +155,9 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
 
     fun doResetPassword() {
         val state = _passwordResetState.value
-        if (state.verificationCode != state.generatedCode) {
-            _passwordResetState.value = state.copy(error = "验证码错误")
+        // 只做"有没有填"的输入校验；验证码是否正确由服务端判定
+        if (state.verificationCode.isBlank()) {
+            _passwordResetState.value = state.copy(error = "请输入验证码")
             return
         }
         val passwordError = Validator.getPasswordError(state.newPassword)
@@ -281,7 +283,6 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
         val error: String? = null,
         val isLoading: Boolean = false,
         val codeSent: Boolean = false,
-        val generatedCode: String = "",
         val verificationCode: String = "",
         val newPassword: String = "",
         val passwordError: String? = null,

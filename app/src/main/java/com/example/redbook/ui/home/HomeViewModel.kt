@@ -4,6 +4,7 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.redbook.data.model.Note
+import com.example.redbook.data.repository.HomeFeedCache
 import com.example.redbook.data.repository.HomeRepository
 import com.example.redbook.data.repository.SupabaseAuthRepository
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -17,31 +18,44 @@ class HomeViewModel(application: Application, private val userUid: String = "") 
     private val _uiState = MutableStateFlow<HomeUiState>(HomeUiState.Loading)
     val uiState = _uiState.asStateFlow()
 
-    init { fetchNotes() }
+    /**
+     * 只允许最后一次请求写状态。
+     *
+     * 加载统一由首页的 LaunchedEffect(userUid) 触发，这里不再 init 一次：
+     * 两个并发请求里慢到的那次失败会把已经拿到的结果覆盖成"网络异常"，
+     * 表现出来就是错误提示闪一下又被内容顶掉。
+     */
+    private var fetchSeq = 0
 
     fun fetchNotes() {
+        // 冷启动预热数据只消费一次：命中就直接展示，省掉那条容易失败的冷连接首请求
+        HomeFeedCache.take(userUid)?.let { cached ->
+            _uiState.value = HomeUiState.Success(cached)
+            return
+        }
+        load { repository.getNotes(userUid) }
+    }
+
+    /** 关注页：只加载我关注的人发布的帖子 */
+    fun fetchFollowingNotes() = load { repository.getFollowingNotes(userUid) }
+
+    private fun load(fetch: suspend () -> List<Note>) {
+        val seq = ++fetchSeq
         viewModelScope.launch {
             _uiState.value = HomeUiState.Loading
             try {
-                val notes = repository.getNotes(userUid)
-                _uiState.value = HomeUiState.Success(notes)
+                val notes = fetch()
+                if (seq == fetchSeq) _uiState.value = HomeUiState.Success(notes)
             } catch (e: Exception) {
-                _uiState.value = HomeUiState.Error(e.message ?: "加载失败")
+                if (seq == fetchSeq) _uiState.value = HomeUiState.Error(errorMessage(e))
             }
         }
     }
 
-    /** 关注页：只加载我关注的人发布的帖子 */
-    fun fetchFollowingNotes() {
-        viewModelScope.launch {
-            _uiState.value = HomeUiState.Loading
-            try {
-                val notes = repository.getFollowingNotes(userUid)
-                _uiState.value = HomeUiState.Success(notes)
-            } catch (e: Exception) {
-                _uiState.value = HomeUiState.Error(e.message ?: "加载失败")
-            }
-        }
+    /** 网络层失败(拿不到响应体、错误码记为 0)给一句人话，不要把原始异常甩给用户 */
+    private fun errorMessage(e: Exception): String {
+        val raw = e.message.orEmpty()
+        return if (raw.isBlank() || raw.startsWith("0:")) "网络异常，请重试" else raw
     }
 
     fun toggleLike(noteId: String) {
@@ -57,7 +71,7 @@ class HomeViewModel(application: Application, private val userUid: String = "") 
                 viewModelScope.launch {
                     try {
                         repository.supabase.recordLike(userUid, noteId, newLiked)
-                        repository.supabase.updatePostLike(noteId, if (newLiked) 1 else -1)
+                        repository.supabase.updatePostLike(noteId)
                     } catch (_: Exception) { }
                 }
             }

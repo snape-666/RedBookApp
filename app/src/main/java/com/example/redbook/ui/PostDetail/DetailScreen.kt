@@ -354,8 +354,9 @@ fun DetailScreen(
                                 onLikeClick = { commentId ->
                                     viewModel.toggleCommentLike(commentId)
                                 },
-                                onLongClick = { commentId ->
-                                    deletingComment = commentId
+                                onLongClick = { commentId, authorUid ->
+                                    // 只能删自己发的：别人的评论/回复不弹删除确认
+                                    if (authorUid == userUid) deletingComment = commentId
                                 },
                                 highlight = comment.id == highlightCommentId
                             )

@@ -17,7 +17,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -56,8 +55,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalLifecycleOwner
-import androidx.compose.ui.platform.LocalLocale
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -65,6 +62,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.media3.common.Player
 import androidx.media3.common.VideoSize
 import androidx.media3.ui.AspectRatioFrameLayout
@@ -84,13 +82,14 @@ import com.example.redbook.ui.component.KeyboardInputBar
 import com.example.redbook.ui.component.PostEditAreaContent
 import com.example.redbook.ui.component.PostPermissionPanel
 import com.example.redbook.ui.theme.getOnSurfaceSecondary
+import com.example.redbook.ui.theme.getOnSurfaceTertiary
 import com.example.redbook.ui.theme.getOutline
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import java.text.SimpleDateFormat
 
 // 评论回复目标：(被回复id, 所属一级评论id, 对方名字, 是否回复小助手)
 private data class DetailReplyTarget(val targetId: String, val parentCommentId: String, val name: String, val toAi: Boolean)
+
 
 private val videoComments = mutableMapOf<String, MutableList<Comment>>()
 
@@ -133,6 +132,8 @@ fun VideoDetailScreen(
     var authorUid by remember { mutableStateOf("") }
     var realAuthorName by remember { mutableStateOf(authorName) }
     var realAuthorAvatar by remember { mutableStateOf(authorAvatarUrl) }
+    // 作者信息要等 getPost 回来才有；加载完再显示，避免先闪出占位名字/头像
+    var authorInfoLoaded by remember { mutableStateOf(false) }
     var realTitle by remember { mutableStateOf(title) }
     var visibility by remember { mutableStateOf("public") }
     var liked by remember { mutableStateOf(false) }
@@ -152,6 +153,8 @@ fun VideoDetailScreen(
     var replyTgt by remember { mutableStateOf<DetailReplyTarget?>(null) }
     val cmtListState = androidx.compose.foundation.lazy.rememberLazyListState()
     var highlightCommentId by remember { mutableStateOf("") }
+    // 长按要删的评论/回复 id：只有自己发的才会被放进来
+    var deletingComment by remember { mutableStateOf<String?>(null) }
 
     // 作者模式：底部面板状态 + 删除确认
     var authorPanel by remember(videoId) { mutableStateOf(AuthorPanel.None) }
@@ -206,6 +209,7 @@ fun VideoDetailScreen(
                         } catch (_: Exception) { }
                     }
                 }
+                authorInfoLoaded = true
                 // 加载云端评论（评论存 comments 表，post_id = videoId）
                 loadVideoComments(repository, videoId, authorUid, userUid, cmts)
                 // 从通知跳转时定位评论，高亮 0.5s
@@ -317,7 +321,8 @@ fun VideoDetailScreen(
                         .fillMaxWidth()
                         .padding(horizontal = 12.dp, vertical = 8.dp)
                 ) {
-                    // 作者
+                    // 作者（取到真实作者后再显示，避免先闪占位）
+                    if (authorInfoLoaded) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         if (realAuthorAvatar.isNotBlank()) {
                             AsyncImage(
@@ -351,6 +356,7 @@ fun VideoDetailScreen(
                         }
                         Spacer(Modifier.weight(1f))
                         if (durMs > 0) Text("${left / 60}:${String.format("%02d", left % 60)}", color = Color.White.copy(alpha = 0.7f), fontSize = 12.sp)
+                    }
                     }
                     // 标题
                     Text(realTitle.ifBlank { title }, color = Color.White, fontSize = 14.sp, modifier = Modifier.padding(vertical = 6.dp))
@@ -390,7 +396,7 @@ fun VideoDetailScreen(
                                     scope.launch {
                                         try {
                                             repository.recordLike(userUid, videoId, liked)
-                                            repository.updatePostLike(videoId, if (liked) 1 else -1)
+                                            repository.updatePostLike(videoId)
                                         } catch (_: Exception) { }
                                     }
                                 }
@@ -403,7 +409,7 @@ fun VideoDetailScreen(
                                     scope.launch {
                                         try {
                                             repository.recordFavorite(userUid, videoId, faved)
-                                            repository.updatePostFav(videoId, if (faved) 1 else -1)
+                                            repository.updatePostFav(videoId)
                                         } catch (_: Exception) { }
                                     }
                                 }
@@ -441,7 +447,7 @@ fun VideoDetailScreen(
                                     scope.launch {
                                         try {
                                             repository.recordLike(userUid, videoId, liked)
-                                            repository.updatePostLike(videoId, if (liked) 1 else -1)
+                                            repository.updatePostLike(videoId)
                                         } catch (_: Exception) { }
                                     }
                                 }
@@ -454,7 +460,7 @@ fun VideoDetailScreen(
                                     scope.launch {
                                         try {
                                             repository.recordFavorite(userUid, videoId, faved)
-                                            repository.updatePostFav(videoId, if (faved) 1 else -1)
+                                            repository.updatePostFav(videoId)
                                         } catch (_: Exception) { }
                                     }
                                 }
@@ -503,9 +509,22 @@ fun VideoDetailScreen(
                                         cmtText = "回复 @$name："
                                         kbVisible = true
                                     },
-                                    onLikeClick = { cid -> toggleLike(cid, cmts) },
+                                    onLikeClick = { cid ->
+                                        val nowLiked = toggleLike(cid, cmts)
+                                        // 持久化评论点赞（本机+云）与 like_count 分别独立提交
+                                        if (userUid.isNotBlank()) {
+                                            scope.launch {
+                                                try { repository.recordCommentLike(userUid, cid, nowLiked) } catch (_: Exception) { }
+                                                try { repository.updateCommentLike(cid) } catch (_: Exception) { }
+                                            }
+                                        }
+                                    },
                                     onAvatarClick = { uid -> if (uid.isNotBlank() && uid != "me" && !AiAssistant.isAiUser(uid)) onUserClick(uid) },
                                     onUserNameClick = { uid -> if (uid.isNotBlank() && uid != "me" && !AiAssistant.isAiUser(uid)) onUserClick(uid) },
+                                    onLongClick = { cid, authorUid ->
+                                        // 只能删自己发的：别人的评论/回复不弹删除确认
+                                        if (authorUid == myUid) deletingComment = cid
+                                    },
                                     highlight = c.id == highlightCommentId)
                             }
                         }
@@ -692,6 +711,63 @@ fun VideoDetailScreen(
             }
         }
 
+        // 删除评论/回复确认（与照片详情同一套样式；只有作者本人能走到这里）
+        deletingComment?.let { cid ->
+            androidx.compose.ui.window.Dialog(onDismissRequest = { deletingComment = null }) {
+                Column(
+                    Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(MaterialTheme.colorScheme.surface)
+                ) {
+                    Column(
+                        Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 24.dp, vertical = 20.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Text("删除评论", fontWeight = FontWeight.Bold, fontSize = 18.sp, color = MaterialTheme.colorScheme.onSurface)
+                        Spacer(Modifier.height(8.dp))
+                        Text("确定删除该评论吗？", fontSize = 14.sp, color = getOnSurfaceTertiary())
+                    }
+                    Box(Modifier.fillMaxWidth().height(0.5.dp).background(getOutline().copy(alpha = 0.5f)))
+                    Row(
+                        Modifier.fillMaxWidth().height(48.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Box(
+                            Modifier.weight(1f).fillMaxHeight().clickable { deletingComment = null },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text("取消", color = getOnSurfaceSecondary())
+                        }
+                        Box(Modifier.width(0.5.dp).fillMaxHeight().background(getOutline().copy(alpha = 0.5f)))
+                        Box(
+                            Modifier.weight(1f).fillMaxHeight().clickable {
+                                deletingComment = null
+                                // 本地先移除（一级评论，或它下面的某条回复），云端再删一次
+                                val top = cmts.indexOfFirst { it.id == cid }
+                                if (top >= 0) {
+                                    cmts.removeAt(top)
+                                } else {
+                                    for (i in cmts.indices) {
+                                        val c = cmts[i]
+                                        if (c.replies.any { it.id == cid }) {
+                                            cmts[i] = c.copy(replies = c.replies.filterNot { it.id == cid })
+                                        }
+                                    }
+                                }
+                                scope.launch { try { repository.deleteComment(cid) } catch (_: Exception) { } }
+                            },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text("确认", color = MaterialTheme.colorScheme.primary)
+                        }
+                    }
+                }
+            }
+        }
+
         // ===== 作者模式底部浮层面板（最高层，遮罩 + 顶部16圆角卡片） =====
         val isAuthorOverlay = editMode && authorUid.isNotBlank() && authorUid == userUid && authorPanel != AuthorPanel.None
         if (isAuthorOverlay) {
@@ -741,18 +817,24 @@ fun VideoDetailScreen(
     }
 }
 
-private fun toggleLike(cid: String, cmts: MutableList<Comment>) {
+private fun toggleLike(cid: String, cmts: MutableList<Comment>): Boolean {
     for (i in cmts.indices) {
         val c = cmts[i]
-        if (c.id == cid) { cmts[i] = c.copy(isLiked = !c.isLiked, likeCount = c.likeCount + if (c.isLiked) -1 else 1); return }
+        if (c.id == cid) {
+            val liked = !c.isLiked
+            cmts[i] = c.copy(isLiked = liked, likeCount = (c.likeCount + if (liked) 1 else -1).coerceAtLeast(0))
+            return liked
+        }
         for (j in c.replies.indices) {
             if (c.replies[j].id == cid) {
                 val r = c.replies[j]
-                cmts[i] = c.copy(replies = c.replies.toMutableList().also { it[j] = r.copy(isLiked = !r.isLiked, likeCount = r.likeCount + if (r.isLiked) -1 else 1) })
-                return
+                val liked = !r.isLiked
+                cmts[i] = c.copy(replies = c.replies.toMutableList().also { it[j] = r.copy(isLiked = liked, likeCount = (r.likeCount + if (liked) 1 else -1).coerceAtLeast(0)) })
+                return liked
             }
         }
     }
+    return false
 }
 
 /** 加载云端评论到本地列表（viewerUid 视角做备注名替换） */
@@ -766,6 +848,8 @@ private suspend fun loadVideoComments(
     if (postId.isBlank()) return
     try {
         val arr = repository.getComments(postId)
+        // 我点赞过的评论 id，用于回填 isLiked（否则重进视频页点赞态丢失）
+        val likedCommentIds = try { repository.getLikedCommentIds(viewerUid) } catch (_: Exception) { emptySet<String>() }
         val raw = (0 until arr.length()).map { i ->
             val c = arr.getJSONObject(i)
             val parentId = c.optString("parent_id", "")
@@ -779,7 +863,7 @@ private suspend fun loadVideoComments(
                 timestamp = c.optLong("created_at", 0),
                 ipLocation = c.optString("ip_location", "未知"),
                 likeCount = c.optInt("like_count", 0),
-                isLiked = false,
+                isLiked = likedCommentIds.contains(c.optString("comment_id", "")),
                 isAuthor = c.optString("author_uid") == postAuthorUid,
                 replies = emptyList()
             )
@@ -798,7 +882,7 @@ private suspend fun loadVideoComments(
                         timestamp = r.timestamp,
                         ipLocation = r.ipLocation,
                         likeCount = r.likeCount,
-                        isLiked = r.isLiked,
+                        isLiked = likedCommentIds.contains(r.id),
                         isAuthor = r.isAuthor
                     )
                 }

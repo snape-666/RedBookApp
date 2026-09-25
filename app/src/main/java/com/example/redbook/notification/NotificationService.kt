@@ -30,17 +30,21 @@ class NotificationService : Service() {
     }
 
     private var repository: RealtimeRepository? = null
+    //查用户资料
     private val authRepository by lazy { SupabaseAuthRepository(application) }
     private var scope: CoroutineScope? = null
     /** 会话内缓存的对方资料(昵称+头像),避免每条私信都查一次 */
+    //私信对方资料缓存,避免每条都查一次
     private val peerInfoCache = HashMap<String, PeerInfo>()
     private var uid: String = ""
-    private val seenEvents = ArrayDeque<String>()
+    private val seenEvents = ArrayDeque<String>()//双端队列,前后两端都可以插入删除
 
     private data class PeerInfo(val name: String, val avatar: String)
 
+    //启动式服务
     override fun onBind(intent: Intent?): IBinder? = null
 
+    //启动服务
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         // 优先使用 Intent 显式传入的当前登录 uid（跨设备也始终订阅该设备当前登录账号）
         val intentUid = intent?.getStringExtra(EXTRA_UID).orEmpty().trim()
@@ -57,9 +61,9 @@ class NotificationService : Service() {
         if (scope == null) {
             scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
         }
-        startAsForeground()
+        startAsForeground()//启动前台服务
 
-        // 每次启动都重建连接：避免 repository 非空但底层 WebSocket 已死（后台被杀/网络闪断）时不再重连
+        // 每次启动都重建WebSocket连接：避免 repository 非空但底层 WebSocket 已死（后台被杀/网络闪断）时不再重连
         val uidChanged = uid != targetUid
         uid = targetUid
         repository?.disconnect()
@@ -72,6 +76,7 @@ class NotificationService : Service() {
         return START_STICKY
     }
 
+    //websocket事件回调
     private val listener = object : RealtimeRepository.RealtimeListener {
         override fun onNotification(record: JSONObject) {
             handleNotificationRecord(record)
@@ -84,6 +89,7 @@ class NotificationService : Service() {
         override fun onStatus(connected: Boolean) { }
     }
 
+    //启动前台服务
     private fun startAsForeground() {
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
@@ -135,6 +141,7 @@ class NotificationService : Service() {
         val repo = repository ?: return
         if (currentUid.isBlank()) return
         val canPost = NotifHelper.areNotificationsEnabled(this)
+        //水印,记录上次已经处理到的时间点
         val watermark = NotifPrefs.loadWatermark(currentUid, this)
         val from = if (watermark > 0L) watermark else System.currentTimeMillis() - 24 * 3600_000L
         val maxTs = System.currentTimeMillis()
@@ -159,6 +166,7 @@ class NotificationService : Service() {
      * 处理一条互动通知(实时与补发共用);返回是否弹出了通知。
      * 实时弹出成功后会把水印推进到事件时间,避免重启后把它当离线事件重复补发。
      */
+    //处理互动通知
     private fun handleNotificationRecord(record: JSONObject): Boolean {
         val notifId = record.optString("notif_id", "")
         if (notifId.isBlank() || !markSeen(notifId)) return false
@@ -286,6 +294,7 @@ class NotificationService : Service() {
         return PeerInfo(name, avatar)
     }
 
+    //弹私信通知
     private fun showDmNotification(
         messageId: String,
         senderUid: String,

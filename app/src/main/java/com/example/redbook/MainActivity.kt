@@ -54,9 +54,26 @@ import com.example.redbook.ui.messages.ReceivedReactionsScreen
 import com.example.redbook.ui.messages.ReceivedCommentsScreen
 import com.example.redbook.ui.messages.FollowersScreen
 import com.example.redbook.ui.messages.ChatScreen
+import com.example.redbook.data.local.AuthSession
 import com.example.redbook.data.local.SessionPrefs
 import com.example.redbook.data.model.Draft
+import com.example.redbook.data.model.Note
+import com.example.redbook.data.repository.HomeFeedCache
+import com.example.redbook.data.repository.HomeRepository
+import com.example.redbook.data.repository.SupabaseAuthHttp
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.ui.Alignment
+
+/** 冷启动进首页前的预热重试次数 */
+private const val BOOT_FETCH_ATTEMPTS = 3
+
+/** 冷启动预热的整体上限：超过就先进首页，避免网络太差一直卡在启动页 */
+private const val BOOT_FETCH_TIMEOUT_MS = 12_000L
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -137,11 +154,16 @@ fun AppScreen(
 
     // ---- 记住登录：进程被杀/冷启动后恢复已登录会话(仅自动恢复一次) ----
     var sessionRestored by remember { mutableStateOf(false) }
+    // 启动中：先在这一层挡住，等令牌续期 + 首页数据拉取成功再进 Home，避免首屏就弹"网络异常"
+    var booting by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) {
         if (sessionRestored) return@LaunchedEffect
         sessionRestored = true
+        AuthSession.load(context)
         val saved = SessionPrefs.load(context)
         if (saved != null && currentScreen == Screen.Login) {
+            val app = context.applicationContext as android.app.Application
+            // 先把资料填上并进入"启动中"界面，避免带着过期令牌直接渲染首页
             userUid = saved.uid
             userXhsId = saved.xhsId
             userName = saved.nickname.ifBlank { saved.account }
@@ -153,8 +175,39 @@ fun AppScreen(
             userBackgroundUrl = saved.backgroundUrl
             SupabaseAuthRepository.currentUserName = userName
             SupabaseAuthRepository.currentUserAvatar = saved.avatarUrl
-            screenStack = listOf(Screen.Home)
-            currentScreen = Screen.Home
+            booting = true
+            // 冷启动时 access_token 多半已过期，先续一次。
+            // 只有服务端明确说会话失效才清掉"记住登录"、回登录页；
+            // 纯网络原因没续上就先照常进首页，后续请求自己会再续。
+            if (SupabaseAuthHttp.refreshIfExpired(app) == SupabaseAuthHttp.RefreshResult.SessionExpired) {
+                SessionPrefs.clear(context)
+                AuthSession.clear(context)
+                booting = false
+                return@LaunchedEffect
+            }
+            // 首条请求要在冷连接上做 DNS+TCP+TLS，海外链路抖动大容易失败；
+            // 这里带重试先拉一次首页数据，成功才进 Home(拉到的数据直接交给首页复用)。
+            // 整体设上限，网络太差时不至于一直卡在启动页。
+            val homeRepo = HomeRepository(SupabaseAuthRepository(app))
+            val prefetched = withTimeoutOrNull(BOOT_FETCH_TIMEOUT_MS) {
+                var notes: List<Note>? = null
+                var attempt = 0
+                while (notes == null && attempt < BOOT_FETCH_ATTEMPTS) {
+                    notes = try { homeRepo.getNotes(userUid) } catch (e: Exception) { null }
+                    if (notes == null) {
+                        attempt++
+                        if (attempt < BOOT_FETCH_ATTEMPTS) delay(500L * attempt)
+                    }
+                }
+                notes
+            }
+            prefetched?.let { HomeFeedCache.put(userUid, it) }
+            // 启动期间可能已被"通知点击"改成别的页面，是的话别抢回首页
+            if (currentScreen == Screen.Login) {
+                screenStack = listOf(Screen.Home)
+                currentScreen = Screen.Home
+            }
+            booting = false
         }
     }
 
@@ -402,6 +455,66 @@ fun AppScreen(
         onDispose { realtimeRepo.disconnect() }
     }
 
+    /**
+     * 退出登录：清理实时连接、当前账号状态与本机会话。
+     * 主动点"退出登录"与"令牌续期失败被踢"共用同一条路径。
+     */
+    fun performLogout() {
+        realtimeRepo.disconnect()
+        unreadLikesFavs = 0
+        unreadFollows = 0
+        unreadComments = 0
+        unreadMessages = 0
+        SupabaseAuthRepository.currentUserName = ""
+        SupabaseAuthRepository.currentUserAvatar = ""
+        com.example.redbook.data.repository.IpLocationProvider.cachedProvince = null
+        userUid = ""
+        userXhsId = ""
+        userName = ""
+        userAccount = ""
+        userEmail = ""
+        userGender = ""
+        userBirthday = ""
+        userAvatarUrl = ""
+        userBackgroundUrl = ""
+        myIpLocation = ""
+        chatUserName = ""
+        chatUserAvatarUrl = ""
+        chatPeerUid = ""
+        chatConversationId = ""
+        scrollToMessageId = ""
+        viewProfileUid = ""
+        userCardUid = ""
+        editingDraft = null
+        editingPost = null
+        detailEditMode = false
+        detailRefreshKey++
+        videoEditMode = false
+        videoRefreshKey++
+        pendingNotif = null
+        highlightActorUid = ""
+        loginResetKey++
+        screenStack = listOf(Screen.Login)
+        currentScreen = Screen.Login
+        try {
+            context.stopService(Intent(context, NotificationService::class.java))
+        } catch (_: Exception) { }
+        // 清除缓存 uid,防止 START_STICKY 服务在进程被杀后带旧账号重启
+        NotifPrefs.setCachedLoginUid("", context)
+        // 清除记住登录会话与令牌:下次启动回到登录页
+        SessionPrefs.clear(context)
+        AuthSession.clear(context)
+    }
+
+    // 令牌续期彻底失败(会话失效)时自动回登录页，而不是停在各页面刷不出数据的空白状态。
+    // 回调发生在后台线程，切主线程再改 Compose 状态。
+    DisposableEffect(Unit) {
+        AuthSession.onSessionExpired = {
+            android.os.Handler(android.os.Looper.getMainLooper()).post { performLogout() }
+        }
+        onDispose { AuthSession.onSessionExpired = null }
+    }
+
     fun navigateTo(screen: Screen) {
         screenStack = screenStack + screen
         currentScreen = screen
@@ -455,6 +568,17 @@ fun AppScreen(
         if (targetUid.isBlank()) return
         userCardUid = targetUid
         navigateTo(Screen.UserCard)
+    }
+
+    // 冷启动预热期间显示启动页：等令牌续期 + 首页数据拉取成功再进首页，避免首屏弹"网络异常"
+    if (booting) {
+        Box(
+            modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background),
+            contentAlignment = Alignment.Center
+        ) {
+            CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
+        }
+        return
     }
 
     when (currentScreen) {
@@ -695,51 +819,7 @@ fun AppScreen(
                     navigateTo(Screen.Messages)
                 },
                 unreadMessageCount = unreadMessages,
-                onLogout = {
-                    realtimeRepo.disconnect()
-                    unreadLikesFavs = 0
-                    unreadFollows = 0
-                    unreadComments = 0
-                    unreadMessages = 0
-                    SupabaseAuthRepository.currentUserName = ""
-                    SupabaseAuthRepository.currentUserAvatar = ""
-                    com.example.redbook.data.repository.IpLocationProvider.cachedProvince = null
-                    userUid = ""
-                    userXhsId = ""
-                    userName = ""
-                    userAccount = ""
-                    userEmail = ""
-                    userGender = ""
-                    userBirthday = ""
-                    userAvatarUrl = ""
-                    userBackgroundUrl = ""
-                    myIpLocation = ""
-                    chatUserName = ""
-                    chatUserAvatarUrl = ""
-                    chatPeerUid = ""
-                    chatConversationId = ""
-                    scrollToMessageId = ""
-                    viewProfileUid = ""
-                    userCardUid = ""
-                    editingDraft = null
-                    editingPost = null
-                    detailEditMode = false
-                    detailRefreshKey++
-                    videoEditMode = false
-                    videoRefreshKey++
-                    pendingNotif = null
-                    highlightActorUid = ""
-                    loginResetKey++
-                    screenStack = listOf(Screen.Login)
-                    currentScreen = Screen.Login
-                    try {
-                        context.stopService(Intent(context, NotificationService::class.java))
-                    } catch (_: Exception) { }
-                    // 清除缓存 uid,防止 START_STICKY 服务在进程被杀后带旧账号重启
-                    NotifPrefs.setCachedLoginUid("", context)
-                    // 清除记住登录会话:下次启动回到登录页
-                    SessionPrefs.clear(context)
-                }
+                onLogout = { performLogout() }
             )
         }
         Screen.Browse -> {
@@ -954,7 +1034,10 @@ fun AppScreen(
                     userBirthday = birthday
                     userAvatarUrl = avatarUrl
                     userBackgroundUrl = backgroundUrl
+                    SupabaseAuthRepository.currentUserName = name
                     SupabaseAuthRepository.currentUserAvatar = avatarUrl
+                    // 同步本地会话缓存，冷启动才不会读回旧昵称/头像
+                    SessionPrefs.updateProfile(context, name, gender, birthday, avatarUrl, backgroundUrl)
                 }
             )
         }
@@ -982,7 +1065,9 @@ fun AppScreen(
             VideoDetailScreen(
                 videoUrl = selectedVideoUrl.ifBlank { "test" },
                 title = "视频",
-                authorName = userName.ifBlank { "作者" },
+                // 视频作者靠 videoId 从库里取，这里不要拿"当前登录用户"垫底，
+                // 否则进页面会先闪一下自己的头像用户名，加载完才换成真正的作者
+                authorName = "",
                 authorAvatar = R.drawable.test,
                 isFollowed = false,
                 likeCount = 0, favoriteCount = 0, commentCount = 0,
@@ -991,7 +1076,7 @@ fun AppScreen(
                 userName = userName,
                 userXhsId = userXhsId,
                 userAvatarUrl = userAvatarUrl,
-                authorAvatarUrl = userAvatarUrl,
+                authorAvatarUrl = "",
                 editMode = videoEditMode,
                 refreshKey = videoRefreshKey,
                 onBack = {
