@@ -47,6 +47,12 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import android.content.pm.PackageManager
+import android.os.Build
+import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.ContextCompat
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import com.example.redbook.R
@@ -55,6 +61,7 @@ import com.example.redbook.ui.theme.getBlueFill
 import com.example.redbook.ui.theme.getOnSurfaceTertiary
 import com.example.redbook.ui.theme.getOutline
 import com.example.redbook.ui.utils.formatChatTime
+import com.example.redbook.util.ImageSaver
 import kotlinx.coroutines.launch
 import org.json.JSONObject
 
@@ -555,6 +562,41 @@ private fun ChatAvatar(avatarUrl: String, size: androidx.compose.ui.unit.Dp) {
 @Composable
 private fun MessageBubble(message: ChatMessage, modifier: Modifier = Modifier) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var pendingSaveUrl by remember { mutableStateOf("") }
+
+    // 保存图片到相册（长按图片触发）
+    fun saveImage(url: String) {
+        if (url.isBlank() || url.startsWith("content:")) return
+        scope.launch {
+            val ok = ImageSaver.save(context, url)
+            Toast.makeText(context, if (ok) "已保存到相册" else "保存失败", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    val permissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        val url = pendingSaveUrl
+        pendingSaveUrl = ""
+        if (url.isNotBlank()) {
+            if (granted) saveImage(url)
+            else Toast.makeText(context, "需要存储权限才能保存图片", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    fun requestSave(url: String) {
+        if (url.isBlank() || url.startsWith("content:")) return
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q ||
+            ContextCompat.checkSelfPermission(context, android.Manifest.permission.WRITE_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED
+        ) {
+            saveImage(url)
+        } else {
+            pendingSaveUrl = url
+            permissionLauncher.launch(android.Manifest.permission.WRITE_EXTERNAL_STORAGE)
+        }
+    }
+
     val mediaList = message.mediaUrl.split(",").filter { it.isNotBlank() }
     val hasText = message.content.isNotBlank()
     // 只有媒体无文字时：直接以图片/视频形式展示，不加气泡背景
@@ -589,7 +631,8 @@ private fun MessageBubble(message: ChatMessage, modifier: Modifier = Modifier) {
                         contentDescription = null,
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clip(RoundedCornerShape(12.dp)),
+                            .clip(RoundedCornerShape(12.dp))
+                            .pointerInput(realUrl) { detectTapGestures(onLongPress = { requestSave(realUrl) }) },
                         contentScale = ContentScale.FillWidth
                     )
                 }
@@ -639,7 +682,8 @@ private fun MessageBubble(message: ChatMessage, modifier: Modifier = Modifier) {
                     modifier = Modifier
                         .fillMaxWidth()
                         .widthIn(max = 240.dp)
-                        .clip(RoundedCornerShape(8.dp)),
+                        .clip(RoundedCornerShape(8.dp))
+                        .pointerInput(realUrl) { detectTapGestures(onLongPress = { requestSave(realUrl) }) },
                     contentScale = ContentScale.FillWidth
                 )
             }

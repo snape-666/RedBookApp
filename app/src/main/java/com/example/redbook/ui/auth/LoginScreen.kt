@@ -204,7 +204,7 @@ fun LoginScreen(
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(horizontal = 32.dp)
+                .padding(horizontal = 16.dp)
                 .verticalScroll(rememberScrollState()),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
@@ -215,7 +215,7 @@ fun LoginScreen(
 
             Box(
                 modifier = Modifier
-                    .fillMaxWidth(0.8f)
+                    .fillMaxWidth(0.9f)
                     .shadow(4.dp, RoundedCornerShape(15.dp))
                     .border(1.dp, Color.Gray.copy(alpha = 0.3f), RoundedCornerShape(15.dp))
                     .background(Color.White, RoundedCornerShape(15.dp))

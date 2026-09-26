@@ -500,6 +500,7 @@ class RealtimeRepository(private val app: Application) {
         try {
             webSocket = httpClient.newWebSocket(request, object : WebSocketListener() {
                 override fun onOpen(webSocket: WebSocket, response: Response) {
+                    android.util.Log.d("RedBookRealtime", "ws connected")
                     subscribeNotifications()
                     subscribeMessages()
                     listeners.forEach { it.onStatus(true) }
@@ -542,10 +543,12 @@ class RealtimeRepository(private val app: Application) {
                 }
 
                 override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
+                    android.util.Log.d("RedBookRealtime", "ws onClosed: $code $reason")
                     if (!closing) scheduleReconnect()
                 }
 
                 override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
+                    android.util.Log.e("RedBookRealtime", "ws onFailure: ${t.message} http=${response?.code}")
                     if (!closing) scheduleReconnect()
                 }
             })
