@@ -39,9 +39,6 @@ class SupabaseAuthRepository(private val app: Application) {
     private val requestQueue by lazy { Volley.newRequestQueue(app, OkHttpStack.shared) }
     private val timeoutMs = 15_000L
 
-    /** 上传图片最长边上限（像素），超过则缩放；用于控制文件体积、加快列表加载 */
-    private val maxImageDimension = 1080
-
     /** 通知仓库（写入互动通知事件） */
     private val realtimeRepository by lazy { RealtimeRepository(app) }
 
@@ -144,7 +141,7 @@ class SupabaseAuthRepository(private val app: Application) {
                     val res = SupabaseAuthHttp.edgeFunction(app, "login", JSONObject().apply {
                         put("input", input)
                         put("password", password)
-                    })
+                    }, retries = 2)
                     if (!res.optBoolean("ok", false)) {
                         throw AppException(
                             when (res.optString("reason", "")) {
@@ -215,7 +212,7 @@ class SupabaseAuthRepository(private val app: Application) {
                     val res = SupabaseAuthHttp.edgeFunction(app, "reset-password", JSONObject().apply {
                         put("action", "request")
                         put("email", email)
-                    })
+                    }, retries = 2)
                     if (!res.optBoolean("ok", false)) {
                         val reason = res.optString("reason", "")
                         // 服务端把邮件服务商的拒绝原因放在 detail 里(如发件邮箱未验证)，打到日志便于定位
@@ -252,7 +249,7 @@ class SupabaseAuthRepository(private val app: Application) {
                         put("email", email)
                         put("code", code)
                         put("newPassword", newPassword)
-                    })
+                    }, retries = 2)
                     if (!res.optBoolean("ok", false)) {
                         val reason = res.optString("reason", "")
                         throw AppException(
@@ -413,6 +410,8 @@ class SupabaseAuthRepository(private val app: Application) {
     private fun parseError(e: Exception): String {
         val msg = (e.message ?: "").lowercase()
         return when {
+            // 网络层失败(拿不到响应体，错误码为 0)，给一句人话，别把原始异常甩给用户
+            msg.startsWith("0:") -> "网络异常，请重试"
             msg.contains("超时") || msg.contains("timeout") -> "网络连接超时"
             msg.contains("user already registered") || (msg.contains("422") && msg.contains("registered")) -> "该邮箱已被注册"
             msg.contains("invalid login credentials") -> "账号或密码错误"
@@ -423,7 +422,7 @@ class SupabaseAuthRepository(private val app: Application) {
         }
     }
 
-    suspend fun uploadImage(uri: android.net.Uri, app: android.content.Context): String? {
+    suspend fun uploadImage(uri: android.net.Uri, app: android.content.Context, maxDimension: Int = 1080, quality: Int = 85): String? {
         return withContext(Dispatchers.IO) {
             try {
                 val cr = app.contentResolver
@@ -446,7 +445,7 @@ class SupabaseAuthRepository(private val app: Application) {
                 }
                 val isVideo = mime.contains("video")
                 // 图片上传前先缩放压缩，避免几 MB 的原图导致帖子/草稿列表加载缓慢
-                val (uploadBytes, uploadMime) = if (isVideo) bytes to mime else compressImage(bytes, mime)
+                val (uploadBytes, uploadMime) = if (isVideo) bytes to mime else compressImage(bytes, mime, maxDimension, quality)
                 val ext = when { isVideo -> "mp4"; uploadMime.contains("png") -> "png"; uploadMime.contains("webp") -> "webp"; else -> "jpg" }
                 val prefix = if (isVideo) "video:" else ""
                 // 按 uid 分目录：storage 写入策略要求对象路径首段等于 auth.uid()，
@@ -465,10 +464,10 @@ class SupabaseAuthRepository(private val app: Application) {
 
     /**
      * 上传前压缩图片：按采样率解码（避免 OOM）→ 依据 EXIF 方向纠正旋转 → 最长边缩放到
-     * [maxImageDimension] → 重新编码为 JPEG（含透明通道或原 PNG 用 PNG）。
+     * [maxDimension] → 重新编码为 JPEG（含透明通道或原 PNG 用 PNG）。
      * gif 动图不处理；任何异常或压缩后反而更大时回退原始字节，保证上传不被压缩逻辑阻断。
      */
-    private fun compressImage(bytes: ByteArray, mime: String): Pair<ByteArray, String> {
+    private fun compressImage(bytes: ByteArray, mime: String, maxDimension: Int, quality: Int): Pair<ByteArray, String> {
         if (mime.contains("gif")) return bytes to mime
         return try {
             val bounds = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
@@ -477,8 +476,8 @@ class SupabaseAuthRepository(private val app: Application) {
 
             // 采样后仍不小于目标尺寸，尽量贴近 maxImageDimension 再精确缩放
             var sampleSize = 1
-            while (bounds.outWidth / (sampleSize * 2) >= maxImageDimension ||
-                bounds.outHeight / (sampleSize * 2) >= maxImageDimension
+            while (bounds.outWidth / (sampleSize * 2) >= maxDimension ||
+                bounds.outHeight / (sampleSize * 2) >= maxDimension
             ) sampleSize *= 2
 
             val opts = android.graphics.BitmapFactory.Options().apply { inSampleSize = sampleSize }
@@ -504,8 +503,8 @@ class SupabaseAuthRepository(private val app: Application) {
             }
 
             val maxSide = maxOf(bitmap.width, bitmap.height)
-            if (maxSide > maxImageDimension) {
-                val scale = maxImageDimension.toFloat() / maxSide
+            if (maxSide > maxDimension) {
+                val scale = maxDimension.toFloat() / maxSide
                 val scaled = android.graphics.Bitmap.createScaledBitmap(
                     bitmap,
                     (bitmap.width * scale).toInt().coerceAtLeast(1),
@@ -519,7 +518,7 @@ class SupabaseAuthRepository(private val app: Application) {
             val out = java.io.ByteArrayOutputStream()
             val usePng = mime.contains("png") || bitmap.hasAlpha()
             val format = if (usePng) android.graphics.Bitmap.CompressFormat.PNG else android.graphics.Bitmap.CompressFormat.JPEG
-            bitmap.compress(format, 85, out)
+            bitmap.compress(format, quality, out)
             bitmap.recycle()
             val result = out.toByteArray()
             if (result.isNotEmpty() && result.size < bytes.size) {
@@ -895,8 +894,8 @@ class SupabaseAuthRepository(private val app: Application) {
         return resp.optJSONArray("users") ?: resp.optJSONArray("comments") ?: JSONArray()
     }
 
-    /** 批量判断哪些 comment_id 还存在（用于通知列表标记已删除评论） */
-    suspend fun getExistingCommentIds(commentIds: Set<String>): Set<String> {
+    /** 批量判断哪些 comment_id 还存在（用于通知列表标记已删除评论；失败返回 null，调用方据此不误判） */
+    suspend fun getExistingCommentIds(commentIds: Set<String>): Set<String>? {
         if (commentIds.isEmpty()) return emptySet()
         return try {
             val filters = commentIds.filter { it.isNotBlank() }.joinToString(",") { "comment_id.eq.$it" }
@@ -904,7 +903,7 @@ class SupabaseAuthRepository(private val app: Application) {
             val resp = queryRest("comments", "select=comment_id&or=($filters)")
             val arr = resp.optJSONArray("users") ?: resp.optJSONArray("comments") ?: JSONArray()
             (0 until arr.length()).map { arr.getJSONObject(it).optString("comment_id", "") }.toSet()
-        } catch (e: Exception) { emptySet() }
+        } catch (e: Exception) { null }
     }
 
     suspend fun insertComment(commentId: String, postId: String, content: String,

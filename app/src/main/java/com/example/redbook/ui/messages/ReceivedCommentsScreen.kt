@@ -209,7 +209,7 @@ fun ReceivedCommentsScreen(
                     Box(
                         Modifier.weight(1f).height(48.dp).clickable {
                             showClearDialog = false
-                            viewModel.clear()
+                            viewModel.clear(userUid)
                         },
                         contentAlignment = Alignment.Center
                     ) {
@@ -282,9 +282,14 @@ private fun CommentRow(
             Spacer(modifier = Modifier.height(2.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    text = if (item.type == "reply") "回复了你的笔记" else "评论了你的笔记",
+                    text = when {
+                        item.deleted && item.type == "reply" -> "该回复已被删除"
+                        item.deleted -> "该评论已被删除"
+                        item.type == "reply" -> "回复了你的笔记"
+                        else -> "评论了你的笔记"
+                    },
                     fontSize = 13.sp,
-                    color = getOnSurfaceSecondary(),
+                    color = if (item.deleted) getOnSurfaceTertiary().copy(alpha = 0.6f) else getOnSurfaceSecondary(),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f, fill = false)
@@ -296,12 +301,12 @@ private fun CommentRow(
                     color = getOnSurfaceTertiary()
                 )
             }
-            if (item.commentContent.isNotBlank() || item.deleted) {
+            if (item.commentContent.isNotBlank() && !item.deleted) {
                 Spacer(modifier = Modifier.height(2.dp))
                 Text(
-                    text = if (item.deleted) "该评论已删除" else "\"${item.commentContent}\"",
+                    text = "\"${item.commentContent}\"",
                     fontSize = 13.sp,
-                    color = if (item.deleted) getOnSurfaceTertiary().copy(alpha = 0.6f) else getOnSurfaceTertiary(),
+                    color = getOnSurfaceTertiary(),
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis
                 )

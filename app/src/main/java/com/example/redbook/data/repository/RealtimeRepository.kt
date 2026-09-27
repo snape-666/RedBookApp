@@ -11,7 +11,9 @@ import com.android.volley.toolbox.Volley
 import com.example.redbook.data.local.AuthSession
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
@@ -83,7 +85,7 @@ class RealtimeRepository(private val app: Application) {
     }
 
     suspend fun getNotifications(uid: String): JSONArray {
-        val resp = queryRest("notifications", "select=*&recipient_uid=eq.$uid&order=created_at.desc&limit=100")
+        val resp = queryRest("notifications", "select=*&recipient_uid=eq.$uid&is_read=eq.false&order=created_at.desc&limit=100")
         return resp.optJSONArray("users") ?: resp.optJSONArray("notifications") ?: JSONArray()
     }
 
@@ -260,6 +262,52 @@ class RealtimeRepository(private val app: Application) {
         } catch (_: Exception) { }
     }
 
+    /** 撤回消息：从数据库删除，双方都会收到 DELETE 实时事件（需表已设置 REPLICA IDENTITY FULL + DELETE 策略） */
+    suspend fun deleteMessage(messageId: String, conversationId: String = "") {
+        if (messageId.isBlank()) return
+        withContext(Dispatchers.IO) {
+            try {
+                withTimeoutOrNull(timeoutMs) {
+                    SupabaseAuthHttp.withAuth(app) {
+                        suspendCancellableCoroutine<String> { cont ->
+                            val request = object : StringRequest(
+                                DELETE, "${SupabaseConfig.url}/rest/v1/messages?message_id=eq.$messageId",
+                                { cont.resume(it) },
+                                { error -> cont.resumeWithException(Exception(extractVolleyError(error))) }
+                            ) {
+                                override fun getHeaders() = SupabaseAuthHttp.headers(app, write = true)
+                            }
+                            requestQueue.add(request.withSupabaseRetry())
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                android.util.Log.e("RedBookRealtime", "deleteMessage failed: ${e.message}")
+            }
+        }
+        // 撤回后同步会话的最后一条消息，避免会话列表还显示已撤回的内容
+        if (conversationId.isNotBlank()) refreshConversationLastMessage(conversationId)
+    }
+
+    /** 重新计算会话的最后一条消息并更新 last_message / last_time */
+    private suspend fun refreshConversationLastMessage(conversationId: String) {
+        try {
+            val resp = queryRest(
+                "messages",
+                "select=content,media_url,created_at&conversation_id=eq.$conversationId&order=created_at.desc&limit=1"
+            )
+            val arr = resp.optJSONArray("users") ?: resp.optJSONArray("messages") ?: JSONArray()
+            val lastContent = if (arr.length() > 0) arr.getJSONObject(0).optString("content", "") else ""
+            val lastMedia = if (arr.length() > 0) arr.getJSONObject(0).optString("media_url", "") else ""
+            val lastTime = if (arr.length() > 0) arr.getJSONObject(0).optLong("created_at", 0L) else 0L
+            val display = if (lastContent.isNotBlank()) lastContent else if (lastMedia.isNotBlank()) "[图片]" else ""
+            patchRest("conversations", "conversation_id=eq.$conversationId", JSONObject().apply {
+                put("last_message", display)
+                put("last_time", lastTime)
+            })
+        } catch (_: Exception) { }
+    }
+
     suspend fun getMessages(conversationId: String): JSONArray {
         val resp = queryRest("messages", "select=*&conversation_id=eq.$conversationId&order=created_at.asc&limit=200")
         return resp.optJSONArray("users") ?: resp.optJSONArray("messages") ?: JSONArray()
@@ -426,6 +474,7 @@ class RealtimeRepository(private val app: Application) {
     interface RealtimeListener {
         fun onNotification(record: JSONObject)
         fun onMessage(record: JSONObject)
+        fun onMessageDeleted(record: JSONObject) {}
         fun onStatus(connected: Boolean)
     }
 
@@ -437,6 +486,7 @@ class RealtimeRepository(private val app: Application) {
     private var refCounter = 0
     private val listeners = java.util.concurrent.CopyOnWriteArrayList<RealtimeListener>()
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private var heartbeatJob: Job? = null
 
     /** 建立/保持全局连接并注册一个监听器（同 uid 下复用同一连接） */
     fun connect(uid: String, listener: RealtimeListener) {
@@ -503,6 +553,7 @@ class RealtimeRepository(private val app: Application) {
                     android.util.Log.d("RedBookRealtime", "ws connected")
                     subscribeNotifications()
                     subscribeMessages()
+                    startHeartbeat()
                     listeners.forEach { it.onStatus(true) }
                 }
 
@@ -511,17 +562,23 @@ class RealtimeRepository(private val app: Application) {
                         val msg = JSONObject(text)
                         when (msg.optString("event")) {
                             "postgres_changes" -> {
-                                val payload = msg.optJSONObject("payload")
-                                val record = payload?.optJSONObject("record") ?: return
-                                when (payload.optString("table", "")) {
+                                val data = msg.optJSONObject("payload")?.optJSONObject("data") ?: return
+                                when (data.optString("table", "")) {
                                     "notifications" -> {
+                                        val record = data.optJSONObject("record") ?: return
                                         // 自己产生的通知不回推给自己
                                         if (record.optString("actor_uid") != uid) {
                                             listeners.forEach { it.onNotification(record) }
                                         }
                                     }
                                     "messages" -> {
-                                        listeners.forEach { it.onMessage(record) }
+                                        if (data.optString("type", "") == "DELETE") {
+                                            val old = data.optJSONObject("old_record") ?: return
+                                            listeners.forEach { it.onMessageDeleted(old) }
+                                        } else {
+                                            val record = data.optJSONObject("record") ?: return
+                                            listeners.forEach { it.onMessage(record) }
+                                        }
                                     }
                                 }
                             }
@@ -596,6 +653,8 @@ class RealtimeRepository(private val app: Application) {
             android.os.Handler(android.os.Looper.getMainLooper()).removeCallbacks(it)
         }
         reconnectRunnable = null
+        heartbeatJob?.cancel()
+        heartbeatJob = null
         closeSocket()
         listeners.clear()
         currentUid = ""
@@ -604,6 +663,26 @@ class RealtimeRepository(private val app: Application) {
     private fun closeSocket() {
         try { webSocket?.close(1000, "bye") } catch (_: Exception) { }
         webSocket = null
+    }
+
+    /** 每 25 秒发一次 Phoenix heartbeat，避免后台/息屏时服务端把空闲连接超时断开 */
+    private fun startHeartbeat() {
+        heartbeatJob?.cancel()
+        heartbeatJob = scope.launch {
+            while (true) {
+                delay(25_000)
+                try {
+                    webSocket?.send(
+                        JSONObject().apply {
+                            put("topic", "phoenix")
+                            put("event", "heartbeat")
+                            put("payload", JSONObject())
+                            put("ref", nextRef())
+                        }.toString()
+                    )
+                } catch (_: Exception) { }
+            }
+        }
     }
 
     private fun nextRef(): String = (++refCounter).toString()
@@ -630,6 +709,12 @@ class RealtimeRepository(private val app: Application) {
                 put("postgres_changes", JSONArray().apply {
                     put(JSONObject().apply {
                         put("event", "INSERT")
+                        put("schema", "public")
+                        put("table", "messages")
+                        put("filter", "receiver_uid=eq.$currentUid")
+                    })
+                    put(JSONObject().apply {
+                        put("event", "DELETE")
                         put("schema", "public")
                         put("table", "messages")
                         put("filter", "receiver_uid=eq.$currentUid")

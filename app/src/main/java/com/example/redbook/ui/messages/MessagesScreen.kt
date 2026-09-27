@@ -25,6 +25,8 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
+import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -83,6 +85,7 @@ fun MessagesScreen(
     )
     val conversations by viewModel.conversations.collectAsStateWithLifecycle()
     val loading by viewModel.loading.collectAsStateWithLifecycle()
+    val pullRefreshState = rememberPullToRefreshState()
 
     // 跟随当前账号加载会话列表
     LaunchedEffect(userUid) { viewModel.load(userUid) }
@@ -111,18 +114,42 @@ fun MessagesScreen(
                 contentAlignment = Alignment.Center
             ) { CircularProgressIndicator() }
 
-            else -> LazyColumn(
+            else -> PullToRefreshBox(
+                isRefreshing = loading,
+                onRefresh = { viewModel.load(userUid) },
                 modifier = Modifier.weight(1f),
-                contentPadding = PaddingValues(top = 5.dp)
+                state = pullRefreshState,
+                indicator = {
+                    val fraction = pullRefreshState.distanceFraction.coerceIn(0f, 1f)
+                    if (loading) {
+                        CircularProgressIndicator(
+                            color = MaterialTheme.colorScheme.primary,
+                            strokeWidth = 3.dp,
+                            modifier = Modifier.align(Alignment.TopCenter).padding(top = 10.dp).size(24.dp)
+                        )
+                    } else if (fraction > 0f) {
+                        CircularProgressIndicator(
+                            progress = { fraction },
+                            color = MaterialTheme.colorScheme.primary,
+                            strokeWidth = 3.dp,
+                            modifier = Modifier.align(Alignment.TopCenter).padding(top = 10.dp).size(24.dp)
+                        )
+                    }
+                }
             ) {
-                items(conversations, key = { it.conversationId }) { conversation ->
-                    ConversationItem(
-                        conversation = conversation,
-                        onClick = {
-                            onConversationClick(conversation.displayName, conversation.peerAvatar, conversation.peerUid)
-                        },
-                        modifier = Modifier.padding(vertical = 5.dp)
-                    )
+                LazyColumn(
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(top = 5.dp)
+                ) {
+                    items(conversations, key = { it.conversationId }) { conversation ->
+                        ConversationItem(
+                            conversation = conversation,
+                            onClick = {
+                                onConversationClick(conversation.displayName, conversation.peerAvatar, conversation.peerUid)
+                            },
+                            modifier = Modifier.padding(vertical = 5.dp)
+                        )
+                    }
                 }
             }
         }

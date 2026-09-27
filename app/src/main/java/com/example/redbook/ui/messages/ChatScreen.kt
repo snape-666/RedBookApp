@@ -25,6 +25,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -42,9 +43,11 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import android.content.pm.PackageManager
@@ -55,13 +58,19 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
+import coil.size.Size
 import com.example.redbook.R
 import com.example.redbook.data.repository.RealtimeRepository
+import com.example.redbook.data.repository.SupabaseAuthRepository
 import com.example.redbook.ui.theme.getBlueFill
 import com.example.redbook.ui.theme.getOnSurfaceTertiary
 import com.example.redbook.ui.theme.getOutline
 import com.example.redbook.ui.utils.formatChatTime
 import com.example.redbook.util.ImageSaver
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 import org.json.JSONObject
 
@@ -73,6 +82,11 @@ private data class ChatMessage(
     val messageId: String = ""
 )
 
+// 发送/撤回等网络操作不能挂在 rememberCoroutineScope 下：一退出聊天页该 scope 就被取消，
+// 图片上传到一半被中断、消息没写进数据库，重进自然就看不到。
+private val sendScope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + Dispatchers.Main)
+
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
 fun ChatScreen(
     userName: String,
@@ -90,6 +104,7 @@ fun ChatScreen(
 ) {
     val context = LocalContext.current
     val realtimeRepo = repository ?: remember { RealtimeRepository(context.applicationContext as android.app.Application) }
+    val authRepo = remember { SupabaseAuthRepository(context.applicationContext as android.app.Application) }
     val messages = remember { mutableStateListOf<ChatMessage>() }
     var inputText by remember { mutableStateOf("") }
     var loading by remember { mutableStateOf(true) }
@@ -105,6 +120,80 @@ fun ChatScreen(
         pendingMedia = (pendingMedia + uris).distinct()
     }
 
+    // 长按消息弹出菜单（保存/撤回/删除）
+    var menuMessage by remember { mutableStateOf<ChatMessage?>(null) }
+    var pendingSaveUrl by remember { mutableStateOf("") }
+
+    val savePermissionLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        val url = pendingSaveUrl
+        pendingSaveUrl = ""
+        if (url.isNotBlank()) {
+            if (granted) {
+                coroutineScope.launch {
+                    val ok = ImageSaver.save(context, url)
+                    Toast.makeText(context, if (ok) "已保存到相册" else "保存失败", Toast.LENGTH_SHORT).show()
+                }
+            } else {
+                Toast.makeText(context, "需要存储权限才能保存图片", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
+    // 本地已删除的消息 id（“删除”仅本机移除，持久化避免重进又出现）
+    val deletedPrefs = remember { context.getSharedPreferences("chat_deleted", android.content.Context.MODE_PRIVATE) }
+    fun deletedIds(): MutableSet<String> =
+        deletedPrefs.getStringSet("ids", emptySet())?.toMutableSet() ?: mutableSetOf()
+    fun markDeleted(messageId: String) {
+        if (messageId.isBlank()) return
+        val ids = deletedIds()
+        ids.add(messageId)
+        deletedPrefs.edit().putStringSet("ids", ids).apply()
+    }
+    fun removeMessageById(messageId: String): Boolean {
+        val idx = messages.indexOfFirst { it.messageId == messageId }
+        if (idx >= 0) { messages.removeAt(idx); return true }
+        return false
+    }
+
+    fun firstImageUrl(msg: ChatMessage): String? =
+        msg.mediaUrl.split(",").firstOrNull { it.isNotBlank() && !it.startsWith("video:") }
+
+    fun saveImage(msg: ChatMessage) {
+        val url = firstImageUrl(msg) ?: return
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q ||
+            ContextCompat.checkSelfPermission(context, android.Manifest.permission.WRITE_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED
+        ) {
+            coroutineScope.launch {
+                val ok = ImageSaver.save(context, url)
+                Toast.makeText(context, if (ok) "已保存到相册" else "保存失败", Toast.LENGTH_SHORT).show()
+            }
+        } else {
+            pendingSaveUrl = url
+            savePermissionLauncher.launch(android.Manifest.permission.WRITE_EXTERNAL_STORAGE)
+        }
+    }
+
+    fun recallMessage(msg: ChatMessage) {
+        if (msg.messageId.isBlank()) return
+        if (System.currentTimeMillis() - msg.time > 2 * 60 * 1000L) {
+            Toast.makeText(context, "不能撤回超过两分钟的消息", Toast.LENGTH_SHORT).show()
+            return
+        }
+        removeMessageById(msg.messageId)
+        sendScope.launch {
+            try { realtimeRepo.deleteMessage(msg.messageId, conversationId) } catch (_: Exception) { }
+        }
+        Toast.makeText(context, "已撤回", Toast.LENGTH_SHORT).show()
+    }
+
+    fun deleteMessageLocal(msg: ChatMessage) {
+        if (msg.messageId.isNotBlank()) markDeleted(msg.messageId)
+        removeMessageById(msg.messageId)
+        Toast.makeText(context, "已删除", Toast.LENGTH_SHORT).show()
+    }
+
     // 初始加载历史消息；conversationId 为空时先尝试创建
     LaunchedEffect(conversationId, currentUserUid, peerUid) {
         if (currentUserUid.isBlank() || peerUid.isBlank()) return@LaunchedEffect
@@ -116,16 +205,19 @@ fun ChatScreen(
         loading = true
         try {
             val arr = realtimeRepo.getMessages(convId)
+            val deleted = deletedIds()
             messages.clear()
             for (i in 0 until arr.length()) {
                 val m = arr.getJSONObject(i)
+                val messageId = m.optString("message_id", "")
+                if (messageId in deleted) continue
                 messages.add(
                     ChatMessage(
                         content = m.optString("content", ""),
                         time = m.optLong("created_at", 0L),
                         isMine = m.optString("sender_uid") == currentUserUid,
                         mediaUrl = m.optString("media_url", ""),
-                        messageId = m.optString("message_id", "")
+                        messageId = messageId
                     )
                 )
             }
@@ -147,8 +239,20 @@ fun ChatScreen(
                         val time = record.optLong("created_at", 0L)
                         val mediaUrl = record.optString("media_url", "")
                         val messageId = record.optString("message_id", "")
+                        if (messageId in deletedIds()) return
                         if (messages.none { it.content == content && it.time == time && !it.isMine }) {
                             messages.add(ChatMessage(content, time, false, mediaUrl, messageId))
+                        }
+                    }
+                }
+                override fun onMessageDeleted(record: JSONObject) {
+                    val convId = record.optString("conversation_id", "")
+                    val messageId = record.optString("message_id", "")
+                    if (convId == conversationId && messageId.isNotBlank()) {
+                        if (removeMessageById(messageId)) {
+                            android.os.Handler(android.os.Looper.getMainLooper()).post {
+                                Toast.makeText(context, "对方撤回了一条消息", Toast.LENGTH_SHORT).show()
+                            }
                         }
                     }
                 }
@@ -170,12 +274,18 @@ fun ChatScreen(
             if (idx >= 0) {
                 locatedMessageId = scrollToMessageId
                 highlightMessageId = scrollToMessageId
-                // reverseLayout 下 LazyColumn 下标是反的：时间正序 idx → 反转下标
-                listState.animateScrollToItem(messages.size - 1 - idx)
+                listState.animateScrollToItem(idx)
                 kotlinx.coroutines.delay(500)
                 highlightMessageId = ""
             }
             onMessageScrolled()
+        }
+    }
+
+    // 首次加载 / 新消息到来时滚动到底部；内容不足一屏时保持顶部对齐
+    LaunchedEffect(messages.size) {
+        if (messages.isNotEmpty() && scrollToMessageId.isBlank()) {
+            listState.animateScrollToItem(messages.size - 1)
         }
     }
 
@@ -258,7 +368,6 @@ fun ChatScreen(
 
         LazyColumn(
             state = listState,
-            reverseLayout = true,
             modifier = Modifier
                 .weight(1f)
                 .fillMaxWidth()
@@ -267,20 +376,22 @@ fun ChatScreen(
                     detectTapGestures { focusManager.clearFocus() }
                 }
         ) {
-            items(messages.size) { reversedIndex ->
-                val index = messages.size - 1 - reversedIndex
+            items(messages.size) { index ->
                 val msg = messages[index]
                 val showTime = index == 0 ||
                     msg.time - messages[index - 1].time > 5 * 60 * 1000L
-                if (showTime) {
-                    ChatTimeDivider(time = msg.time)
+                Column {
+                    if (showTime) {
+                        ChatTimeDivider(time = msg.time)
+                    }
+                    ChatBubble(
+                        message = msg,
+                        avatarUrl = if (msg.isMine) myAvatarUrl else avatarUrl,
+                        highlighted = msg.messageId.isNotBlank() && msg.messageId == highlightMessageId,
+                        onLongPress = { menuMessage = msg },
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                    )
                 }
-                ChatBubble(
-                    message = msg,
-                    avatarUrl = if (msg.isMine) myAvatarUrl else avatarUrl,
-                    highlighted = msg.messageId.isNotBlank() && msg.messageId == highlightMessageId,
-                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
-                )
             }
         }
 
@@ -354,24 +465,28 @@ fun ChatScreen(
                             val time = System.currentTimeMillis()
                             val text = inputText.trim()
                             val media = pendingMedia
+                            val messageId = "m_${currentUserUid}_${System.nanoTime()}"
                             // 立即用本地 URI 显示图片消息（上传完成后替换为远程 URL）
                             messages.add(
                                 ChatMessage(
                                     content = text,
                                     time = time,
                                     isMine = true,
-                                    mediaUrl = media.joinToString(",") { it.toString() }
+                                    mediaUrl = media.joinToString(",") { it.toString() },
+                                    messageId = messageId
                                 )
                             )
                             inputText = ""
                             pendingMedia = emptyList()
                             sendChatMessage(
                                 context = context,
+                                authRepo = authRepo,
                                 realtimeRepo = realtimeRepo,
-                                coroutineScope = coroutineScope,
+                                coroutineScope = sendScope,
                                 currentUserUid = currentUserUid,
                                 peerUid = peerUid,
                                 conversationId = conversationId,
+                                messageId = messageId,
                                 text = text,
                                 mediaUris = media,
                                 onStart = { sending = true },
@@ -435,15 +550,53 @@ fun ChatScreen(
             }
         }
     }
+
+    // 长按消息菜单（保存/撤回/删除）
+    val menu = menuMessage
+    if (menu != null) {
+        val canRecall = menu.isMine && menu.messageId.isNotBlank()
+        val hasImage = firstImageUrl(menu) != null
+        ModalBottomSheet(onDismissRequest = { menuMessage = null }) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 8.dp)
+            ) {
+                if (hasImage) {
+                    MenuOption("保存图片") { saveImage(menu); menuMessage = null }
+                }
+                if (canRecall) {
+                    MenuOption("撤回") { recallMessage(menu); menuMessage = null }
+                }
+                MenuOption("删除", danger = true) { deleteMessageLocal(menu); menuMessage = null }
+            }
+        }
+    }
+}
+
+@Composable
+private fun MenuOption(text: String, danger: Boolean = false, onClick: () -> Unit) {
+    Text(
+        text = text,
+        fontSize = 16.sp,
+        color = if (danger) Color(0xFFE53935) else MaterialTheme.colorScheme.onSurface,
+        textAlign = TextAlign.Center,
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(vertical = 14.dp)
+    )
 }
 
 private fun sendChatMessage(
     context: android.content.Context,
+    authRepo: SupabaseAuthRepository,
     realtimeRepo: RealtimeRepository,
     coroutineScope: kotlinx.coroutines.CoroutineScope,
     currentUserUid: String,
     peerUid: String,
     conversationId: String,
+    messageId: String,
     text: String,
     mediaUris: List<android.net.Uri>,
     onStart: () -> Unit,
@@ -456,22 +609,21 @@ private fun sendChatMessage(
     coroutineScope.launch {
         var sent = false
         try {
-            val authRepo = com.example.redbook.data.repository.SupabaseAuthRepository(context.applicationContext as android.app.Application)
-            // 上传媒体,多个以逗号拼接
-            var mediaUrl = ""
-            for (uri in mediaUris) {
-                val url = authRepo.uploadImage(uri, context.applicationContext)
-                if (url != null) {
-                    mediaUrl = if (mediaUrl.isEmpty()) url else "$mediaUrl,$url"
-                }
-            }
+            // 并行上传媒体，多个以逗号拼接；聊天图单独降到 720/80 以加快上传
+            val mediaUrl = coroutineScope {
+                mediaUris.map { uri ->
+                    async(Dispatchers.IO) {
+                        authRepo.uploadImage(uri, context.applicationContext, maxDimension = 720, quality = 80)
+                    }
+                }.awaitAll()
+            }.filterNotNull().joinToString(",")
             var convId = conversationId
             if (convId.isBlank()) {
                 convId = realtimeRepo.getOrCreateConversation(currentUserUid, peerUid)
             }
             if (convId.isNotBlank()) {
                 realtimeRepo.sendMessage(
-                    "m_${currentUserUid}_${System.nanoTime()}",
+                    messageId,
                     convId, currentUserUid, peerUid, trimmed, mediaUrl
                 )
                 sent = true
@@ -488,7 +640,8 @@ private fun ChatBubble(
     message: ChatMessage,
     avatarUrl: String,
     modifier: Modifier = Modifier,
-    highlighted: Boolean = false
+    highlighted: Boolean = false,
+    onLongPress: (ChatMessage) -> Unit = {}
 ) {
     // 定位涟漪：被定位到的消息行短暂高亮 0.5s
     val rowBg = if (highlighted) {
@@ -504,7 +657,7 @@ private fun ChatBubble(
         if (message.isMine) {
             Spacer(modifier = Modifier.weight(1f))
             Row(verticalAlignment = Alignment.Top) {
-                MessageBubble(message = message)
+                MessageBubble(message = message, onLongPress = onLongPress)
                 Spacer(modifier = Modifier.width(8.dp))
                 ChatAvatar(avatarUrl = avatarUrl, size = 32.dp)
             }
@@ -512,7 +665,7 @@ private fun ChatBubble(
             Row(verticalAlignment = Alignment.Top) {
                 ChatAvatar(avatarUrl = avatarUrl, size = 32.dp)
                 Spacer(modifier = Modifier.width(8.dp))
-                MessageBubble(message = message)
+                MessageBubble(message = message, onLongPress = onLongPress)
             }
             Spacer(modifier = Modifier.weight(1f))
         }
@@ -560,48 +713,24 @@ private fun ChatAvatar(avatarUrl: String, size: androidx.compose.ui.unit.Dp) {
 }
 
 @Composable
-private fun MessageBubble(message: ChatMessage, modifier: Modifier = Modifier) {
+private fun MessageBubble(
+    message: ChatMessage,
+    modifier: Modifier = Modifier,
+    onLongPress: (ChatMessage) -> Unit = {}
+) {
     val context = LocalContext.current
-    val scope = rememberCoroutineScope()
-    var pendingSaveUrl by remember { mutableStateOf("") }
-
-    // 保存图片到相册（长按图片触发）
-    fun saveImage(url: String) {
-        if (url.isBlank() || url.startsWith("content:")) return
-        scope.launch {
-            val ok = ImageSaver.save(context, url)
-            Toast.makeText(context, if (ok) "已保存到相册" else "保存失败", Toast.LENGTH_SHORT).show()
-        }
-    }
-
-    val permissionLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestPermission()
-    ) { granted ->
-        val url = pendingSaveUrl
-        pendingSaveUrl = ""
-        if (url.isNotBlank()) {
-            if (granted) saveImage(url)
-            else Toast.makeText(context, "需要存储权限才能保存图片", Toast.LENGTH_SHORT).show()
-        }
-    }
-
-    fun requestSave(url: String) {
-        if (url.isBlank() || url.startsWith("content:")) return
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q ||
-            ContextCompat.checkSelfPermission(context, android.Manifest.permission.WRITE_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED
-        ) {
-            saveImage(url)
-        } else {
-            pendingSaveUrl = url
-            permissionLauncher.launch(android.Manifest.permission.WRITE_EXTERNAL_STORAGE)
-        }
-    }
+    // 图片按宽度采样解码，避免整图解码导致本地图发送后半天才显示
+    val imageTargetWidth = with(LocalDensity.current) { 240.dp.toPx() }.toInt().coerceAtLeast(1)
 
     val mediaList = message.mediaUrl.split(",").filter { it.isNotBlank() }
     val hasText = message.content.isNotBlank()
     // 只有媒体无文字时：直接以图片/视频形式展示，不加气泡背景
     if (mediaList.isNotEmpty() && !hasText) {
-        Column(modifier = modifier.widthIn(max = 240.dp)) {
+        Column(
+            modifier = modifier
+                .widthIn(max = 240.dp)
+                .pointerInput(message.messageId) { detectTapGestures(onLongPress = { onLongPress(message) }) }
+        ) {
             mediaList.forEach { media ->
                 val isVideo = media.startsWith("video:") ||
                     (media.startsWith("content:") && (context.contentResolver.getType(android.net.Uri.parse(media)) ?: "").contains("video"))
@@ -626,13 +755,13 @@ private fun MessageBubble(message: ChatMessage, modifier: Modifier = Modifier) {
                     AsyncImage(
                         model = ImageRequest.Builder(LocalContext.current)
                             .data(realUrl)
-                            .crossfade(true)
+                            .size(Size(imageTargetWidth, imageTargetWidth))
+                            .placeholder(android.graphics.drawable.ColorDrawable(0x14000000))
                             .build(),
                         contentDescription = null,
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clip(RoundedCornerShape(12.dp))
-                            .pointerInput(realUrl) { detectTapGestures(onLongPress = { requestSave(realUrl) }) },
+                            .clip(RoundedCornerShape(12.dp)),
                         contentScale = ContentScale.FillWidth
                     )
                 }
@@ -649,6 +778,7 @@ private fun MessageBubble(message: ChatMessage, modifier: Modifier = Modifier) {
                 else MaterialTheme.colorScheme.surfaceVariant
             )
             .padding(horizontal = 12.dp, vertical = 8.dp)
+            .pointerInput(message.messageId) { detectTapGestures(onLongPress = { onLongPress(message) }) }
     ) {
         // 媒体(图片/视频)消息
         mediaList.forEach { media ->
@@ -676,14 +806,14 @@ private fun MessageBubble(message: ChatMessage, modifier: Modifier = Modifier) {
                 AsyncImage(
                     model = ImageRequest.Builder(LocalContext.current)
                         .data(realUrl)
-                        .crossfade(true)
+                        .size(Size(imageTargetWidth, imageTargetWidth))
+                        .placeholder(android.graphics.drawable.ColorDrawable(0x14000000))
                         .build(),
                     contentDescription = null,
                     modifier = Modifier
                         .fillMaxWidth()
                         .widthIn(max = 240.dp)
-                        .clip(RoundedCornerShape(8.dp))
-                        .pointerInput(realUrl) { detectTapGestures(onLongPress = { requestSave(realUrl) }) },
+                        .clip(RoundedCornerShape(8.dp)),
                     contentScale = ContentScale.FillWidth
                 )
             }

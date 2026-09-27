@@ -218,7 +218,7 @@ object SupabaseAuthHttp {
      * (响应头带 charset=utf-8)，所以那时又恢复正常 —— 这正是"回答是乱码、重进又好了"的原因。
      * JsonObjectRequest 缺省按 UTF-8 解码，与本文件的 authPost 一致。
      */
-    suspend fun edgeFunction(app: Application, name: String, body: JSONObject): JSONObject {
+    suspend fun edgeFunction(app: Application, name: String, body: JSONObject, retries: Int = 0): JSONObject {
         ensureInit(app)
         return withAuth(app) {
             suspendCancellableCoroutine { cont ->
@@ -234,7 +234,7 @@ object SupabaseAuthHttp {
                         "Content-Type" to "application/json"
                     )
                 }
-                request.retryPolicy = DefaultRetryPolicy(120_000, 0, 1f)
+                request.retryPolicy = DefaultRetryPolicy(120_000, retries, 1f)
                 queue.add(request)
             }
         }

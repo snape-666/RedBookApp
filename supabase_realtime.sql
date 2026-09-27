@@ -61,3 +61,7 @@ CREATE INDEX IF NOT EXISTS idx_messages_receiver_unread ON messages (receiver_ui
 ALTER PUBLICATION supabase_realtime ADD TABLE notifications;
 ALTER PUBLICATION supabase_realtime ADD TABLE conversations;
 ALTER PUBLICATION supabase_realtime ADD TABLE messages;
+
+-- 撤回（删除）消息时，需要 Realtime 把被删行的完整旧记录推给接收方，
+-- 否则 DELETE 事件只带主键、无法按 receiver_uid 过滤，对方也就收不到撤回。
+ALTER TABLE messages REPLICA IDENTITY FULL;

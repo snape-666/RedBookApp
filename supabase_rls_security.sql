@@ -189,6 +189,10 @@ create policy messages_insert_sender on public.messages
 create policy messages_update_receiver on public.messages
   for update to authenticated
   using (receiver_uid = auth.uid()::text) with check (receiver_uid = auth.uid()::text);
+-- 撤回：仅发送者能删除自己发出的消息（配合 Realtime DELETE 事件推给接收方）
+create policy messages_delete_sender on public.messages
+  for delete to authenticated
+  using (sender_uid = auth.uid()::text);
 
 
 -- 旧版视频表（如果项目里还在用）：同样规则

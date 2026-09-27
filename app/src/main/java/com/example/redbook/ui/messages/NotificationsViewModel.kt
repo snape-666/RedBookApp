@@ -103,7 +103,7 @@ class NotificationsViewModel(
                     val commentIds = itemsWithRemark.map { it.commentId }.filter { it.isNotBlank() }.toSet()
                     val existing = authRepository.getExistingCommentIds(commentIds)
                     _items.value = itemsWithRemark.map { item ->
-                        if (item.commentId.isNotBlank() && item.commentId !in existing) {
+                        if (existing != null && item.commentId.isNotBlank() && item.commentId !in existing) {
                             item.copy(deleted = true)
                         } else item
                     }
@@ -117,9 +117,19 @@ class NotificationsViewModel(
         }
     }
 
-    /** 清空当前通知列表（顶部“清空”按钮确认后调用） */
-    fun clear() {
+    /** 清空当前通知列表：本地清空 + 云端标记为已读（否则下次刷新又会回来） */
+    fun clear(userUid: String) {
         _items.value = emptyList()
+        if (userUid.isBlank()) return
+        viewModelScope.launch {
+            try {
+                val types = when (kind) {
+                    NotificationKind.LIKE_FAV -> listOf("like", "favorite")
+                    NotificationKind.COMMENT -> listOf("comment", "reply")
+                }
+                repository.markNotificationsRead(userUid, types)
+            } catch (_: Exception) { }
+        }
     }
 }
 

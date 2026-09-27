@@ -209,7 +209,7 @@ fun ReceivedReactionsScreen(
                     Box(
                         Modifier.weight(1f).height(48.dp).clickable {
                             showClearDialog = false
-                            viewModel.clear()
+                            viewModel.clear(userUid)
                         },
                         contentAlignment = Alignment.Center
                     ) {

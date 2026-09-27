@@ -301,7 +301,7 @@ fun LoginScreen(
                 Button(
                     onClick = viewModel::login,
                     modifier = Modifier
-                        .fillMaxWidth(0.8f)
+                        .fillMaxWidth(0.9f)
                         .height(48.dp),
                     colors = ButtonDefaults.buttonColors(
                         containerColor = MaterialTheme.colorScheme.primary,
@@ -324,7 +324,7 @@ fun LoginScreen(
                 Button(
                     onClick = onNavigateToRegister,
                     modifier = Modifier
-                        .fillMaxWidth(0.8f)
+                        .fillMaxWidth(0.9f)
                         .height(48.dp)
                         .border(1.5.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(16.dp)),
                     colors = ButtonDefaults.buttonColors(

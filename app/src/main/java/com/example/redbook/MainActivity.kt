@@ -5,6 +5,7 @@ import android.content.Intent
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -342,21 +343,18 @@ fun AppScreen(
         when (n.type) {
             "like", "favorite" -> {
                 unreadLikesFavs = 0
-                scope.launch { try { realtimeRepo.markNotificationsRead(userUid, listOf("like", "favorite")) } catch (_: Exception) { } }
                 highlightActorUid = n.actorUid
                 screenStack = listOf(Screen.Home, Screen.ReceivedReactions)
                 currentScreen = Screen.ReceivedReactions
             }
             "comment", "reply" -> {
                 unreadComments = 0
-                scope.launch { try { realtimeRepo.markNotificationsRead(userUid, listOf("comment", "reply")) } catch (_: Exception) { } }
                 highlightActorUid = n.actorUid
                 screenStack = listOf(Screen.Home, Screen.ReceivedComments)
                 currentScreen = Screen.ReceivedComments
             }
             "follow" -> {
                 unreadFollows = 0
-                scope.launch { try { realtimeRepo.markNotificationsRead(userUid, listOf("follow")) } catch (_: Exception) { } }
                 highlightActorUid = n.actorUid
                 screenStack = listOf(Screen.Home, Screen.Followers)
                 currentScreen = Screen.Followers
@@ -437,8 +435,11 @@ fun AppScreen(
                 unreadMessages = realtimeRepo.getUnreadConversationCount(userUid)
             } catch (_: Exception) { }
         }
+        val seenRealtimeIds = mutableSetOf<String>()
         realtimeRepo.connect(userUid, object : RealtimeRepository.RealtimeListener {
             override fun onNotification(record: org.json.JSONObject) {
+                val id = record.optString("notif_id", "")
+                if (id.isNotBlank() && !seenRealtimeIds.add("n:$id")) return
                 when (record.optString("type", "")) {
                     "like", "favorite" -> unreadLikesFavs++
                     "follow" -> unreadFollows++
@@ -446,6 +447,8 @@ fun AppScreen(
                 }
             }
             override fun onMessage(record: org.json.JSONObject) {
+                val id = record.optString("message_id", "")
+                if (id.isNotBlank() && !seenRealtimeIds.add("m:$id")) return
                 unreadMessages++
             }
             override fun onStatus(connected: Boolean) { }
@@ -527,6 +530,11 @@ fun AppScreen(
         }
     }
 
+    // 绑定系统返回键/返回手势：有可回退的页面就回退，根页面时交给系统默认行为(退出应用)
+    BackHandler(enabled = screenStack.size > 1) {
+        goBack()
+    }
+
     fun recordBrowse(postId: String) {
         if (userUid.isNotBlank() && postId.isNotBlank()) {
             scope.launch { try { browseRepo.recordBrowse(userUid, postId) } catch (_: Exception) { } }
@@ -539,7 +547,12 @@ fun AppScreen(
         scrollToCommentId = commentId
         recordBrowse(postId)
         scope.launch {
-            val imageUrl = try { browseRepo.getPost(postId)?.optString("image_url", "") ?: "" } catch (e: Exception) { "" }
+            val post = try { browseRepo.getPost(postId) } catch (e: Exception) { null }
+            if (post == null) {
+                android.widget.Toast.makeText(context, "该帖子已被删除！", android.widget.Toast.LENGTH_SHORT).show()
+                return@launch
+            }
+            val imageUrl = post.optString("image_url", "")
             if (imageUrl.startsWith("video:")) {
                 selectedVideoId = postId
                 selectedVideoUrl = imageUrl.removePrefix("video:")
@@ -868,17 +881,14 @@ fun AppScreen(
                 onPublish = { navigateTo(Screen.Publish) },
                 onLikeFavoriteClick = {
                     unreadLikesFavs = 0
-                    scope.launch { try { realtimeRepo.markNotificationsRead(userUid, listOf("like", "favorite")) } catch (_: Exception) { } }
                     navigateTo(Screen.ReceivedReactions)
                 },
                 onCommentClick = {
                     unreadComments = 0
-                    scope.launch { try { realtimeRepo.markNotificationsRead(userUid, listOf("comment", "reply")) } catch (_: Exception) { } }
                     navigateTo(Screen.ReceivedComments)
                 },
                 onFollowClick = {
                     unreadFollows = 0
-                    scope.launch { try { realtimeRepo.markNotificationsRead(userUid, listOf("follow")) } catch (_: Exception) { } }
                     navigateTo(Screen.Followers)
                 },
                 onConversationClick = { name, avatar, peerUid ->
@@ -945,17 +955,10 @@ fun AppScreen(
                 onHighlightConsumed = { highlightActorUid = "" },
                 onBack = { goBack() },
                 onPostClick = { postId ->
-                    selectedPostId = postId
-                    detailEditMode = false
-                    recordBrowse(postId)
-                    navigateTo(Screen.Detail)
+                    openComment(postId, "")
                 },
-                onVideoClick = { videoId, videoUrl ->
-                    selectedVideoId = videoId
-                    selectedVideoUrl = videoUrl
-                    videoEditMode = false
-                    recordBrowse(videoId)
-                    navigateTo(Screen.Video)
+                onVideoClick = { videoId, _ ->
+                    openComment(videoId, "")
                 },
                 onUserClick = { targetUid -> openUserProfile(targetUid) }
             )
@@ -967,19 +970,10 @@ fun AppScreen(
                 onHighlightConsumed = { highlightActorUid = "" },
                 onBack = { goBack() },
                 onPostClick = { postId, commentId ->
-                    selectedPostId = postId
-                    scrollToCommentId = commentId
-                    detailEditMode = false
-                    recordBrowse(postId)
-                    navigateTo(Screen.Detail)
+                    openComment(postId, commentId)
                 },
-                onVideoClick = { videoId, videoUrl, commentId ->
-                    selectedVideoId = videoId
-                    selectedVideoUrl = videoUrl
-                    scrollToCommentId = commentId
-                    videoEditMode = false
-                    recordBrowse(videoId)
-                    navigateTo(Screen.Video)
+                onVideoClick = { videoId, _, commentId ->
+                    openComment(videoId, commentId)
                 },
                 onUserClick = { targetUid -> openUserProfile(targetUid) }
             )

@@ -107,6 +107,14 @@ class ProfileViewModel(
                     if (!mine.isNullOrBlank()) c.copy(ipLocation = mine) else c
                 } else c
             }
+            // 过滤掉已被删除的评论（comment_id 已不在 comments 表）；查询失败时保留原样，不误删
+            val commentIds = parsedComments.map { it.commentId }.filter { it.isNotBlank() }.toSet()
+            val existingCommentIds = if (commentIds.isNotEmpty()) repository.getExistingCommentIds(commentIds) else emptySet()
+            val visibleComments = if (existingCommentIds == null) {
+                parsedComments
+            } else {
+                parsedComments.filter { it.commentId.isBlank() || it.commentId in existingCommentIds }
+            }
             // 可见性过滤：自己看自己主页(含仅自己可见)；他人看主页时隐藏仅自己可见的帖子
             val selfViewer = viewerUid.ifBlank { profileUid }
             val visiblePosts = repository.filterVisiblePosts(posts, selfViewer)
@@ -118,7 +126,7 @@ class ProfileViewModel(
                 likedPosts = applyRemarksToPosts(parsePosts(visibleLiked, likedIds)),
                 favoritedPosts = applyRemarksToPosts(parsePosts(visibleFavorited, likedIds)),
                 commentCount = comments.length(),
-                comments = parsedComments,
+                comments = visibleComments,
                 latestPostImage = parsePosts(visiblePosts, likedIds).firstOrNull()?.imageUrl ?: "",
                 latestDraftImage = latestDraftImage,
                 followCount = followCount,

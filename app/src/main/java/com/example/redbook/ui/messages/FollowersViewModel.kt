@@ -5,6 +5,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
+import com.example.redbook.data.repository.RealtimeRepository
 import com.example.redbook.data.repository.SupabaseAuthRepository
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -22,6 +23,7 @@ data class FollowerItem(
 class FollowersViewModel(application: Application, private val userUid: String) : AndroidViewModel(application) {
 
     private val repository = SupabaseAuthRepository(application)
+    private val realtimeRepository = RealtimeRepository(application)
 
     private val _followers = MutableStateFlow<List<FollowerItem>>(emptyList())
     val followers: StateFlow<List<FollowerItem>> = _followers.asStateFlow()
@@ -67,9 +69,12 @@ class FollowersViewModel(application: Application, private val userUid: String) 
         }
     }
 
-    /** 清空当前关注列表（顶部“清空”按钮确认后调用） */
+    /** 清空当前关注列表：本地清空 + 云端标记为已读（否则下次刷新又会回来） */
     fun clear() {
         _followers.value = emptyList()
+        viewModelScope.launch {
+            try { realtimeRepository.markNotificationsRead(userUid, listOf("follow")) } catch (_: Exception) { }
+        }
     }
 }
 
