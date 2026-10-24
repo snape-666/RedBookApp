@@ -45,6 +45,7 @@ kotlin {
 
 dependencies {
     implementation(libs.androidx.compose.foundation.layout)
+    implementation(libs.androidx.exifinterface)
     // Coil
     implementation(libs.coil.compose)
     // Lifecycle

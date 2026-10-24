@@ -79,7 +79,7 @@ class ProfileViewModel(
             var favoriteCount = 0
             kotlinx.coroutines.coroutineScope {
                 val d1 = async { safe { repository.getUserPosts(profileUid, profileXhsId) } }
-                val d2 = async { safe { repository.getUserDrafts(profileUid, profileXhsId) } }
+                val d2 = if (isSelf) async { safe { repository.getUserDrafts(profileUid, profileXhsId) } } else null
                 val d3 = async { safe { repository.getUserLikedPosts(profileUid) } }
                 val d4 = async { safe { repository.getUserFavoritedPosts(profileUid) } }
                 val d5 = async { safe { repository.getUserComments(profileUid, profileXhsId) } }
@@ -89,7 +89,7 @@ class ProfileViewModel(
                 val d9 = async { try { repository.getLikeCount(profileUid, profileXhsId) } catch (e: Exception) { 0 } }
                 val d10 = async { try { repository.getFavoriteCount(profileUid, profileXhsId) } catch (e: Exception) { 0 } }
                 posts = d1.await()
-                drafts = d2.await()
+                drafts = d2?.await() ?: org.json.JSONArray()
                 liked = d3.await()
                 favorited = d4.await()
                 comments = d5.await()

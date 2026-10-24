@@ -3,6 +3,7 @@ package com.example.redbook.data.local
 import android.content.Context
 import android.content.SharedPreferences
 import org.json.JSONObject
+import androidx.core.content.edit
 
 /**
  * Supabase 登录会话令牌(access_token / refresh_token)的本机仓库。
@@ -60,11 +61,11 @@ object AuthSession {
             expiresAtMs = System.currentTimeMillis() + expiresInSec * 1000L
             loaded = true
         }
-        prefs(context).edit()
-            .putString(KEY_ACCESS, accessToken)
-            .putString(KEY_REFRESH, refreshTokenValue)
-            .putLong(KEY_EXPIRES_AT, expiresAtMs)
-            .apply()
+        prefs(context).edit {
+            putString(KEY_ACCESS, accessToken)
+                .putString(KEY_REFRESH, refreshTokenValue)
+                .putLong(KEY_EXPIRES_AT, expiresAtMs)
+        }
     }
 
     fun access(context: Context): String {

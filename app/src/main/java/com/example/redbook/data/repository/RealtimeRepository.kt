@@ -65,8 +65,7 @@ class RealtimeRepository(private val app: Application) {
         if (uid.isBlank()) return UnreadCounts(0, 0, 0, 0)
         return withContext(Dispatchers.IO) {
             try {
-                val resp = queryRest("notifications", "select=type&recipient_uid=eq.$uid&is_read=eq.false")
-                val arr = resp.optJSONArray("users") ?: resp.optJSONArray("notifications") ?: JSONArray()
+                val arr = queryRest("notifications", "select=type&recipient_uid=eq.$uid&is_read=eq.false")
                 var likesFavs = 0
                 var follows = 0
                 var comments = 0
@@ -85,8 +84,7 @@ class RealtimeRepository(private val app: Application) {
     }
 
     suspend fun getNotifications(uid: String): JSONArray {
-        val resp = queryRest("notifications", "select=*&recipient_uid=eq.$uid&is_read=eq.false&order=created_at.desc&limit=100")
-        return resp.optJSONArray("users") ?: resp.optJSONArray("notifications") ?: JSONArray()
+        return queryRest("notifications", "select=*&recipient_uid=eq.$uid&is_read=eq.false&order=created_at.desc&limit=100")
     }
 
     /** 指定时间之后产生的未读互动通知(离线补发用;已读说明用户已看过,不再打扰) */
@@ -94,11 +92,10 @@ class RealtimeRepository(private val app: Application) {
         if (uid.isBlank()) return JSONArray()
         return withContext(Dispatchers.IO) {
             try {
-                val resp = queryRest(
+                queryRest(
                     "notifications",
                     "select=*&recipient_uid=eq.$uid&is_read=eq.false&created_at=gt.$sinceTs&order=created_at.asc&limit=50"
                 )
-                resp.optJSONArray("users") ?: resp.optJSONArray("notifications") ?: JSONArray()
             } catch (e: Exception) {
                 JSONArray()
             }
@@ -110,11 +107,10 @@ class RealtimeRepository(private val app: Application) {
         if (uid.isBlank()) return JSONArray()
         return withContext(Dispatchers.IO) {
             try {
-                val resp = queryRest(
+                queryRest(
                     "messages",
                     "select=*&receiver_uid=eq.$uid&is_read=eq.false&created_at=gt.$sinceTs&order=created_at.asc&limit=50"
                 )
-                resp.optJSONArray("users") ?: resp.optJSONArray("messages") ?: JSONArray()
             } catch (e: Exception) {
                 JSONArray()
             }
@@ -141,11 +137,10 @@ class RealtimeRepository(private val app: Application) {
         if (uid.isBlank()) return NotificationSettings()
         return withContext(Dispatchers.IO) {
             try {
-                val resp = queryRest(
+                val arr = queryRest(
                     "users",
                     "select=notif_receive_enabled,notif_like_fav,notif_follow,notif_comment,notif_dm,notif_version&uid=eq.$uid&limit=1"
                 )
-                val arr = resp.optJSONArray("users") ?: resp.optJSONArray("notifications") ?: JSONArray()
                 if (arr.length() == 0) return@withContext NotificationSettings()
                 val u = arr.getJSONObject(0)
                 NotificationSettings(
@@ -216,8 +211,7 @@ class RealtimeRepository(private val app: Application) {
         val convId = "c_${a}_$b"
         return withContext(Dispatchers.IO) {
             try {
-                val resp = queryRest("conversations", "select=conversation_id&conversation_id=eq.$convId&limit=1")
-                val arr = resp.optJSONArray("users") ?: resp.optJSONArray("conversations") ?: JSONArray()
+                val arr = queryRest("conversations", "select=conversation_id&conversation_id=eq.$convId&limit=1")
                 if (arr.length() > 0) {
                     arr.getJSONObject(0).optString("conversation_id", convId)
                 } else {
@@ -250,8 +244,7 @@ class RealtimeRepository(private val app: Application) {
         postRest("/rest/v1/messages", body)
         // 更新会话 last_message / last_time
         try {
-            val resp = queryRest("conversations", "select=last_message&conversation_id=eq.$conversationId&limit=1")
-            val arr = resp.optJSONArray("users") ?: resp.optJSONArray("conversations") ?: JSONArray()
+            val arr = queryRest("conversations", "select=last_message&conversation_id=eq.$conversationId&limit=1")
             val lastMsg = if (arr.length() > 0) arr.getJSONObject(0).optString("last_message", "") else ""
             val display = if (content.isNotBlank()) content else if (mediaUrl.isNotBlank()) "[图片]" else ""
             val updated = if (lastMsg == display) lastMsg else display
@@ -292,11 +285,10 @@ class RealtimeRepository(private val app: Application) {
     /** 重新计算会话的最后一条消息并更新 last_message / last_time */
     private suspend fun refreshConversationLastMessage(conversationId: String) {
         try {
-            val resp = queryRest(
+            val arr = queryRest(
                 "messages",
                 "select=content,media_url,created_at&conversation_id=eq.$conversationId&order=created_at.desc&limit=1"
             )
-            val arr = resp.optJSONArray("users") ?: resp.optJSONArray("messages") ?: JSONArray()
             val lastContent = if (arr.length() > 0) arr.getJSONObject(0).optString("content", "") else ""
             val lastMedia = if (arr.length() > 0) arr.getJSONObject(0).optString("media_url", "") else ""
             val lastTime = if (arr.length() > 0) arr.getJSONObject(0).optLong("created_at", 0L) else 0L
@@ -309,8 +301,7 @@ class RealtimeRepository(private val app: Application) {
     }
 
     suspend fun getMessages(conversationId: String): JSONArray {
-        val resp = queryRest("messages", "select=*&conversation_id=eq.$conversationId&order=created_at.asc&limit=200")
-        return resp.optJSONArray("users") ?: resp.optJSONArray("messages") ?: JSONArray()
+        return queryRest("messages", "select=*&conversation_id=eq.$conversationId&order=created_at.asc&limit=200")
     }
 
     /** 全局搜索我的聊天记录（content ilike 模糊匹配，倒序最多 100 条）
@@ -323,13 +314,12 @@ class RealtimeRepository(private val app: Application) {
             try {
                 // 对查询词做 URL 编码，避免特殊字符破坏请求（* 编码为 %2A 由服务端还原）
                 val encoded = java.net.URLEncoder.encode("*$q*", "UTF-8")
-                val resp = queryRest(
+                val arr = queryRest(
                     "messages",
                     "select=conversation_id,message_id,sender_uid,receiver_uid,content,created_at" +
                         "&or=(sender_uid.eq.$uid,receiver_uid.eq.$uid)" +
                         "&content=ilike.$encoded&order=created_at.desc&limit=100"
                 )
-                val arr = resp.optJSONArray("users") ?: resp.optJSONArray("messages") ?: JSONArray()
                 if (arr.length() == 0) return@withContext JSONArray()
 
                 // 解析对端 uid
@@ -348,8 +338,7 @@ class RealtimeRepository(private val app: Application) {
                 val avatarMap = mutableMapOf<String, String>()
                 try {
                     val filters = peerUids.joinToString(",") { "uid.eq.$it" }
-                    val uresp = queryRest("users", "select=uid,nickname,avatar_url&or=($filters)")
-                    val uarr = uresp.optJSONArray("users") ?: JSONArray()
+                    val uarr = queryRest("users", "select=uid,nickname,avatar_url&or=($filters)")
                     for (i in 0 until uarr.length()) {
                         val u = uarr.getJSONObject(i)
                         nameMap[u.optString("uid", "")] = u.optString("nickname", "")
@@ -360,8 +349,7 @@ class RealtimeRepository(private val app: Application) {
                 val remarkMap = mutableMapOf<String, String>()
                 try {
                     val filters = peerUids.joinToString(",") { "target_uid.eq.$it" }
-                    val rresp = queryRest("remarks", "select=target_uid,remark&viewer_uid=eq.$uid&or=($filters)")
-                    val rarr = rresp.optJSONArray("users") ?: rresp.optJSONArray("remarks") ?: JSONArray()
+                    val rarr = queryRest("remarks", "select=target_uid,remark&viewer_uid=eq.$uid&or=($filters)")
                     for (i in 0 until rarr.length()) {
                         val r = rarr.getJSONObject(i)
                         remarkMap[r.optString("target_uid", "")] = r.optString("remark", "")
@@ -397,9 +385,7 @@ class RealtimeRepository(private val app: Application) {
         if (uid.isBlank()) return 0
         return withContext(Dispatchers.IO) {
             try {
-                val resp = queryRest("messages", "select=message_id&receiver_uid=eq.$uid&is_read=eq.false")
-                val arr = resp.optJSONArray("users") ?: resp.optJSONArray("messages") ?: JSONArray()
-                arr.length()
+                queryRest("messages", "select=message_id&receiver_uid=eq.$uid&is_read=eq.false").length()
             } catch (e: Exception) { 0 }
         }
     }
@@ -410,8 +396,7 @@ class RealtimeRepository(private val app: Application) {
         if (uid.isBlank()) return JSONArray()
         return withContext(Dispatchers.IO) {
             try {
-                val resp = queryRest("conversations", "select=*&or=(user_a_uid.eq.$uid,user_b_uid.eq.$uid)&order=last_time.desc")
-                val arr = resp.optJSONArray("users") ?: resp.optJSONArray("conversations") ?: JSONArray()
+                val arr = queryRest("conversations", "select=*&or=(user_a_uid.eq.$uid,user_b_uid.eq.$uid)&order=last_time.desc")
                 if (arr.length() == 0) return@withContext JSONArray()
 
                 val result = JSONArray()
@@ -429,8 +414,7 @@ class RealtimeRepository(private val app: Application) {
                     // 未读数
                     var unread = 0
                     try {
-                        val mresp = queryRest("messages", "select=message_id&conversation_id=eq.$convId&receiver_uid=eq.$uid&is_read=eq.false")
-                        val marr = mresp.optJSONArray("users") ?: mresp.optJSONArray("messages") ?: JSONArray()
+                        val marr = queryRest("messages", "select=message_id&conversation_id=eq.$convId&receiver_uid=eq.$uid&is_read=eq.false")
                         unread = marr.length()
                     } catch (_: Exception) { }
 
@@ -446,8 +430,7 @@ class RealtimeRepository(private val app: Application) {
                     }
                     // 查对方用户资料
                     try {
-                        val uresp = queryRest("users", "select=nickname,avatar_url&uid=eq.$peerUid&limit=1")
-                        val uarr = uresp.optJSONArray("users") ?: JSONArray()
+                        val uarr = queryRest("users", "select=nickname,avatar_url&uid=eq.$peerUid&limit=1")
                         if (uarr.length() > 0) {
                             val u = uarr.getJSONObject(0)
                             peer.put("peer_name", u.optString("nickname", ""))
@@ -456,8 +439,7 @@ class RealtimeRepository(private val app: Application) {
                     } catch (_: Exception) { }
                     // 查我对对方的备注名
                     try {
-                        val rresp = queryRest("remarks", "select=remark&viewer_uid=eq.$uid&target_uid=eq.$peerUid&limit=1")
-                        val rarr = rresp.optJSONArray("users") ?: rresp.optJSONArray("remarks") ?: JSONArray()
+                        val rarr = queryRest("remarks", "select=remark&viewer_uid=eq.$uid&target_uid=eq.$peerUid&limit=1")
                         if (rarr.length() > 0) {
                             peer.put("peer_remark", rarr.getJSONObject(0).optString("remark", ""))
                         }
@@ -743,7 +725,8 @@ class RealtimeRepository(private val app: Application) {
 
     // ---------------- 基础 REST 工具 ----------------
 
-    private suspend fun queryRest(table: String, query: String): JSONObject {
+    /** 查询 PostgREST 表：直接返回响应数组（PostgREST 对 /rest/v1/<table> 的 GET 恒返回数组） */
+    private suspend fun queryRest(table: String, query: String): JSONArray {
         return withContext(Dispatchers.IO) {
             val result = withTimeoutOrNull(timeoutMs) {
                 SupabaseAuthHttp.withAuth(app) {
@@ -751,7 +734,7 @@ class RealtimeRepository(private val app: Application) {
                         val request = object : StringRequest(
                             GET, "${SupabaseConfig.url}/rest/v1/$table?$query",
                             { response ->
-                                try { cont.resume(JSONObject().apply { put("users", JSONArray(response)) }) }
+                                try { cont.resume(JSONArray(response)) }
                                 catch (e: Exception) { cont.resumeWithException(e) }
                             },
                             { error -> cont.resumeWithException(Exception(extractVolleyError(error))) }

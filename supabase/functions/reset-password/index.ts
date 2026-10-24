@@ -78,7 +78,7 @@ async function getLastSentAt(email: string): Promise<number> {
 }
 
 type SendResult =
-  | { ok: true }
+  | { ok: true; reason?: undefined; status?: undefined; detail?: undefined }
   | { ok: false; reason: string; status?: number; detail?: string };
 
 /**

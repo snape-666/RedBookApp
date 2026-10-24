@@ -287,10 +287,10 @@ fun ProfileScreen(
                     ) {
                             when (selectedTab) {
                                 0 -> {
-                                    if (state.draftCount > 0) {
+                                    if (isSelf && state.draftCount > 0) {
                                         item { DraftBox(state.latestDraftImage, state.draftCount, onDraftClick) }
                                     }
-                                    if (state.posts.isEmpty() && state.draftCount == 0) {
+                                    if (state.posts.isEmpty() && (!isSelf || state.draftCount == 0)) {
                                         item(span = StaggeredGridItemSpan.FullLine) {
                                             Box(Modifier.fillMaxWidth().height(200.dp), Alignment.Center) {
                                                 Text("暂无笔记", color = Color.Gray, fontSize = 14.sp)

@@ -15,11 +15,12 @@ import org.json.JSONArray
 import org.json.JSONObject
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
+import androidx.core.graphics.scale
 
 object SupabaseConfig {
     val url = "https://wsxygiskzjkezoakejri.supabase.co"
 
-    /** 可公开的 publishable key：设计上就允许出现在客户端，与 RLS 配合使用 */
+
     val anonKey = "sb_publishable_WedwYJNF5dqYrX5ERlSXTA_VTJkWkJL"
 }
 
@@ -35,7 +36,7 @@ class SupabaseAuthRepository(private val app: Application) {
         var currentUserAvatar: String = ""
     }
 
-    // 传输层换成 OkHttp（HTTP/2 多路复用 + 连接复用），见 OkHttpStack
+
     private val requestQueue by lazy { Volley.newRequestQueue(app, OkHttpStack.shared) }
     private val timeoutMs = 15_000L
 
@@ -48,10 +49,9 @@ class SupabaseAuthRepository(private val app: Application) {
     // 具体实现与续期逻辑集中在 SupabaseAuthHttp，供本类与 RealtimeRepository 共用
     // (refresh_token 单次有效，续期只能有一处实现，否则会互相作废)。
 
-    /** 统一请求头（读操作） */
+    /**手动加请求头*/
     private fun authHeaders(): Map<String, String> = SupabaseAuthHttp.headers(app)
 
-    /** 统一请求头（写操作，不需要回传内容） */
     private fun authWriteHeaders(): Map<String, String> = SupabaseAuthHttp.headers(app, write = true)
 
     /** 带自动续期的请求包装：命中 401 时续期并重试一次 */
@@ -59,6 +59,7 @@ class SupabaseAuthRepository(private val app: Application) {
         SupabaseAuthHttp.withAuth(app, block)
 
     /** 调用 PostgREST RPC(/rest/v1/rpc/<fn>)，用于需要服务端权限的写操作 */
+    //这个方法是用来调用SQL写好偶的业务逻辑方法等
     private suspend fun supabaseRpc(fn: String, params: JSONObject): JSONObject {
         val bodyString = params.toString()
         return withAuth {
@@ -68,7 +69,7 @@ class SupabaseAuthRepository(private val app: Application) {
                     { response ->
                         try {
                             cont.resume(if (response.isBlank()) JSONObject() else JSONObject(response))
-                        } catch (e: Exception) {
+                        } catch (_: Exception) {
                             cont.resume(JSONObject())
                         }
                     },
@@ -135,9 +136,6 @@ class SupabaseAuthRepository(private val app: Application) {
             try {
                 val result = withTimeoutOrNull(timeoutMs) {
                     val isAccountLogin = !input.contains("@")
-                    // 「账号名 → 邮箱」在服务端完成，邮箱不会回到客户端
-                    // （原先的 resolve_login_email 匿名可调且回传邮箱，等于任何人都能
-                    //   拿账号名换出别人的邮箱，已删除）
                     val res = SupabaseAuthHttp.edgeFunction(app, "login", JSONObject().apply {
                         put("input", input)
                         put("password", password)
@@ -169,10 +167,9 @@ class SupabaseAuthRepository(private val app: Application) {
                         Result.failure(Exception("登录失败"))
                     } else {
                         try {
-                            val res = queryRest("users", "select=xhs_id,account,nickname,gender,birthday,avatar_url,background_url&uid=eq.${userData.uid}&limit=1")
-                            val arr = res.optJSONArray("users")
-                            if (arr != null && arr.length() > 0) {
-                                val row = arr.getJSONObject(0)
+                            val arr = queryRest("users", "select=xhs_id,account,nickname,gender,birthday,avatar_url,background_url&uid=eq.${userData.uid}&limit=1")
+                            if (arr.length() > 0) {
+                                val row = arr.getJSONObject(0)//取第一条数据更新userData
                                 Result.success(userData.copy(
                                     xhsId = row.optString("xhs_id", userData.xhsId),
                                     account = userData.account.ifBlank { row.optString("account", "") },
@@ -185,7 +182,8 @@ class SupabaseAuthRepository(private val app: Application) {
                             } else {
                                 Result.success(userData)
                             }
-                        } catch (e: Exception) {
+                        } catch (_: Exception) {
+                            //查询扩展信息失败也返回原userData
                             Result.success(userData)
                         }
                     }
@@ -274,10 +272,11 @@ class SupabaseAuthRepository(private val app: Application) {
         }
     }
     /** 登录后确认 users 表里存在自己的行；缺失则补建(RLS 策略要求 uid = auth.uid()) */
+    //最终一致性补救机制:注册时没写成功的用户行,
     private suspend fun ensureUserRow(uid: String, account: String, email: String) {
         if (uid.isBlank()) return
-        val resp = queryRest("users", "select=uid&uid=eq.$uid&limit=1")
-        if ((resp.optJSONArray("users")?.length() ?: 0) > 0) return
+        val rows = queryRest("users", "select=uid&uid=eq.$uid&limit=1")
+        if (rows.length() > 0) return
         val body = JSONObject().apply {
             put("uid", uid)
             if (email.isNotBlank()) put("email", email)
@@ -302,6 +301,7 @@ class SupabaseAuthRepository(private val app: Application) {
                     override fun getBodyContentType(): String = "application/json"
                     override fun getHeaders(): Map<String, String> = authWriteHeaders()
                 }
+                //Volley请求列
                 requestQueue.add(request.withSupabaseRetry())
             }
         }
@@ -328,7 +328,7 @@ class SupabaseAuthRepository(private val app: Application) {
     // 邮件发送已移到 Edge Function(reset-password)：
     // 既避免把邮件服务密钥编译进 APK，也让验证码从生成到投递全程不经过客户端。
 
-    private class AppException(message: String) : Exception(message)
+  private class AppException(message: String) : Exception(message)
 
     private fun parseUserData(json: JSONObject): Result<UserData> {
         val user = json.getJSONObject("user")
@@ -344,16 +344,18 @@ class SupabaseAuthRepository(private val app: Application) {
     }
 
     /** 认证端点(/auth/v1/signup、/auth/v1/token)专用：只带 apikey，不带用户 JWT */
+    //未登录状态下调认证端点的封装
     private suspend fun supabasePost(path: String, body: JSONObject): JSONObject =
         SupabaseAuthHttp.authPost(app, path, body)
 
-    private suspend fun queryRest(table: String, query: String): JSONObject {
+    /** 查询 PostgREST 表：直接返回响应数组（PostgREST 对 /rest/v1/<table> 的 GET 恒返回数组） */
+    private suspend fun queryRest(table: String, query: String): JSONArray {
         return withAuth {
             suspendCancellableCoroutine { cont ->
                 val request = object : StringRequest(
                     GET, "${SupabaseConfig.url}/rest/v1/$table?$query",
                     { response ->
-                        try { cont.resume(JSONObject().apply { put("users", JSONArray(response)) }) }
+                        try { cont.resume(JSONArray(response)) }
                         catch (e: Exception) { cont.resumeWithException(e) }
                     },
                     { error -> cont.resumeWithException(Exception(extractVolleyError(error))) }
@@ -398,7 +400,7 @@ class SupabaseAuthRepository(private val app: Application) {
                     .ifBlank { json.optString("msg") }
                     .ifBlank { json.optString("error_description") }
                     .ifBlank { raw }
-            } catch (e: Exception) { raw }
+            } catch (_: Exception) { raw }
         } else error.message ?: "未知错误"
         // RLS / 鉴权类失败单独打点，便于 adb logcat -s RedBookAuth 定位是哪个表被拦
         if (code == 401 || code == 403 || raw.contains("row-level security", ignoreCase = true)) {
@@ -425,7 +427,7 @@ class SupabaseAuthRepository(private val app: Application) {
     suspend fun uploadImage(uri: android.net.Uri, app: android.content.Context, maxDimension: Int = 1080, quality: Int = 85): String? {
         return withContext(Dispatchers.IO) {
             try {
-                val cr = app.contentResolver
+                val cr = app.contentResolver//通过ContentResolver查询MIME类型(image/jpg,video/mp4)
                 val mime = cr.getType(uri) ?: inferMime(uri)
                 // file:// 本地路径（如保存草稿时缓存到 filesDir）无法通过 contentResolver 打开，直接读文件
                 val bytes = if (uri.scheme == "file") {
@@ -444,7 +446,7 @@ class SupabaseAuthRepository(private val app: Application) {
                     inputStream.use { it.readBytes() }
                 }
                 val isVideo = mime.contains("video")
-                // 图片上传前先缩放压缩，避免几 MB 的原图导致帖子/草稿列表加载缓慢
+                // 图片调compressImage压缩,视频原样上传
                 val (uploadBytes, uploadMime) = if (isVideo) bytes to mime else compressImage(bytes, mime, maxDimension, quality)
                 val ext = when { isVideo -> "mp4"; uploadMime.contains("png") -> "png"; uploadMime.contains("webp") -> "webp"; else -> "jpg" }
                 val prefix = if (isVideo) "video:" else ""
@@ -470,6 +472,7 @@ class SupabaseAuthRepository(private val app: Application) {
     private fun compressImage(bytes: ByteArray, mime: String, maxDimension: Int, quality: Int): Pair<ByteArray, String> {
         if (mime.contains("gif")) return bytes to mime
         return try {
+            //只读图片宽高,不解码像素
             val bounds = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
             android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
             if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return bytes to mime
@@ -479,40 +482,40 @@ class SupabaseAuthRepository(private val app: Application) {
             while (bounds.outWidth / (sampleSize * 2) >= maxDimension ||
                 bounds.outHeight / (sampleSize * 2) >= maxDimension
             ) sampleSize *= 2
-
+            //按采样率解码,解码像素
             val opts = android.graphics.BitmapFactory.Options().apply { inSampleSize = sampleSize }
             var bitmap = android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size, opts)
                 ?: return bytes to mime
-
+            //读取EXIF方向
             val orientation = try {
-                android.media.ExifInterface(java.io.ByteArrayInputStream(bytes))
-                    .getAttributeInt(android.media.ExifInterface.TAG_ORIENTATION, android.media.ExifInterface.ORIENTATION_NORMAL)
-            } catch (e: Exception) { android.media.ExifInterface.ORIENTATION_NORMAL }
+                androidx.exifinterface.media.ExifInterface(java.io.ByteArrayInputStream(bytes))
+                    .getAttributeInt(androidx.exifinterface.media.ExifInterface.TAG_ORIENTATION, androidx.exifinterface.media.ExifInterface.ORIENTATION_NORMAL)
+            } catch (_: Exception) { androidx.exifinterface.media.ExifInterface.ORIENTATION_NORMAL }
+            //根据方向旋转
             val matrix = android.graphics.Matrix()
             when (orientation) {
-                android.media.ExifInterface.ORIENTATION_ROTATE_90 -> matrix.postRotate(90f)
-                android.media.ExifInterface.ORIENTATION_ROTATE_180 -> matrix.postRotate(180f)
-                android.media.ExifInterface.ORIENTATION_ROTATE_270 -> matrix.postRotate(270f)
-                android.media.ExifInterface.ORIENTATION_FLIP_HORIZONTAL -> matrix.postScale(-1f, 1f)
-                android.media.ExifInterface.ORIENTATION_FLIP_VERTICAL -> matrix.postScale(1f, -1f)
+                androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_90 -> matrix.postRotate(90f)
+                androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_180 -> matrix.postRotate(180f)
+                androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_270 -> matrix.postRotate(270f)
+                androidx.exifinterface.media.ExifInterface.ORIENTATION_FLIP_HORIZONTAL -> matrix.postScale(-1f, 1f)
+                androidx.exifinterface.media.ExifInterface.ORIENTATION_FLIP_VERTICAL -> matrix.postScale(1f, -1f)
             }
             if (!matrix.isIdentity) {
                 val rotated = android.graphics.Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
                 if (rotated != bitmap) bitmap.recycle()
                 bitmap = rotated
             }
-
+            //缩放到最长边不超过maxDimension
             val maxSide = maxOf(bitmap.width, bitmap.height)
             if (maxSide > maxDimension) {
                 val scale = maxDimension.toFloat() / maxSide
-                val scaled = android.graphics.Bitmap.createScaledBitmap(
-                    bitmap,
+                val scaled = bitmap.scale(
                     (bitmap.width * scale).toInt().coerceAtLeast(1),
-                    (bitmap.height * scale).toInt().coerceAtLeast(1),
-                    true
+                    (bitmap.height * scale).toInt().coerceAtLeast(1)
                 )
                 if (scaled != bitmap) bitmap.recycle()
                 bitmap = scaled
+                //到这里bitmap已是纠正方向,缩放后的图
             }
 
             val out = java.io.ByteArrayOutputStream()
@@ -591,11 +594,13 @@ class SupabaseAuthRepository(private val app: Application) {
      * 公开(public/空)对所有人生效。帖子数据为空时按可见处理（便于调用方自行兜底）。
      */
     fun isPostVisibleTo(post: org.json.JSONObject?, viewerUid: String): Boolean {
-        if (post == null) return true
+        if (post == null) return false
         val author = post.optString("author_uid", "")
         return when (post.optString("visibility", "public")) {
             "private" -> author.isNotBlank() && author == viewerUid
-            else -> true
+            "public", "" -> true
+            else -> false  // 未知值默认不可见，更安全
+            //以后可以添加仅某某可见等
         }
     }
 
@@ -617,12 +622,12 @@ class SupabaseAuthRepository(private val app: Application) {
             put("image_url", imageUrl)
             put("visibility", visibility)
         }
-        patchUserRowByPostId(postId, body)
+        patchPostByPostId(postId, body)
     }
 
     /** 设置帖子可见性（public/private） */
     suspend fun setPostVisibility(postId: String, visibility: String) {
-        patchUserRowByPostId(postId, JSONObject().apply { put("visibility", visibility) })
+        patchPostByPostId(postId, JSONObject().apply { put("visibility", visibility) })
     }
 
     /** 删除帖子（级联删除评论等由数据库外键/触发器处理，这里直接删 posts 行） */
@@ -646,13 +651,7 @@ class SupabaseAuthRepository(private val app: Application) {
         supabasePostBody("/rest/v1/drafts", body)
     }
 
-    suspend fun getDrafts(authorUid: String): JSONArray {
-        val resp = queryRest("drafts", "select=*&author_uid=eq.$authorUid&order=updated_at.desc")
-        return resp.optJSONArray("users") ?: resp.optJSONArray("drafts") ?: JSONArray()
-    }
-
     suspend fun deleteDraft(draftId: String) {
-        val body = JSONObject().apply { put("draft_id", draftId) }
         supabaseDelete("/rest/v1/drafts?draft_id=eq.$draftId")
     }
 
@@ -703,18 +702,15 @@ class SupabaseAuthRepository(private val app: Application) {
     }
 
     suspend fun getPosts(): JSONArray {
-        val resp = queryRest("posts", "select=*&order=created_at.desc")
-        return resp.optJSONArray("users") ?: resp.optJSONArray("posts") ?: JSONArray()
+        return queryRest("posts", "select=*&order=created_at.desc")
     }
 
     suspend fun getPostsByViews(): JSONArray {
-        val resp = queryRest("posts", "select=*&order=view_count.desc&limit=6")
-        return resp.optJSONArray("users") ?: resp.optJSONArray("posts") ?: JSONArray()
+        return queryRest("posts", "select=*&order=view_count.desc&limit=6")
     }
 
     suspend fun getPost(postId: String): JSONObject? {
-        val resp = queryRest("posts", "select=*&post_id=eq.$postId&limit=1")
-        val arr = resp.optJSONArray("users") ?: resp.optJSONArray("posts") ?: return null
+        val arr = queryRest("posts", "select=*&post_id=eq.$postId&limit=1")
         return if (arr.length() > 0) arr.getJSONObject(0) else null
     }
 
@@ -755,16 +751,14 @@ class SupabaseAuthRepository(private val app: Application) {
     // 是否已点赞
     suspend fun hasLiked(userUid: String, postId: String): Boolean {
         return try {
-            val resp = queryRest("likes", "select=like_id&user_uid=eq.$userUid&post_id=eq.$postId&limit=1")
-            (resp.optJSONArray("users")?.length() ?: 0) > 0
-        } catch (e: Exception) { false }
+            queryRest("likes", "select=like_id&user_uid=eq.$userUid&post_id=eq.$postId&limit=1").length() > 0
+        } catch (_: Exception) { false }
     }
 
     // 是否已收藏
     suspend fun hasFavorited(userUid: String, postId: String): Boolean {
         return try {
-            val resp = queryRest("favorites", "select=fav_id&user_uid=eq.$userUid&post_id=eq.$postId&limit=1")
-            (resp.optJSONArray("users")?.length() ?: 0) > 0
+            queryRest("favorites", "select=fav_id&user_uid=eq.$userUid&post_id=eq.$postId&limit=1").length() > 0
         } catch (e: Exception) { false }
     }
 
@@ -772,14 +766,12 @@ class SupabaseAuthRepository(private val app: Application) {
     suspend fun getUserPosts(userUid: String, userXhsId: String): JSONArray {
         android.util.Log.d("RedBook", "getUserPosts uid=$userUid xhs=$userXhsId")
         if (userXhsId.isNotBlank()) {
-            val resp = queryRest("posts", "select=*&author_xhs_id=eq.$userXhsId&order=created_at.desc")
-            val arr = resp.optJSONArray("users") ?: resp.optJSONArray("posts") ?: JSONArray()
+            val arr = queryRest("posts", "select=*&author_xhs_id=eq.$userXhsId&order=created_at.desc")
             android.util.Log.d("RedBook", "getUserPosts by xhs_id count=${arr.length()}")
             if (arr.length() > 0) return arr
         }
         if (userUid.isNotBlank()) {
-            val resp = queryRest("posts", "select=*&author_uid=eq.$userUid&order=created_at.desc")
-            val arr = resp.optJSONArray("users") ?: resp.optJSONArray("posts") ?: JSONArray()
+            val arr = queryRest("posts", "select=*&author_uid=eq.$userUid&order=created_at.desc")
             android.util.Log.d("RedBook", "getUserPosts by uid count=${arr.length()}")
             return arr
         }
@@ -789,32 +781,27 @@ class SupabaseAuthRepository(private val app: Application) {
     // 用户点赞的帖子 id 集合
     suspend fun getLikedPostIds(userUid: String): Set<String> {
         return try {
-            val resp = queryRest("likes", "select=post_id&user_uid=eq.$userUid")
-            val arr = resp.optJSONArray("users") ?: resp.optJSONArray("likes") ?: JSONArray()
+            val arr = queryRest("likes", "select=post_id&user_uid=eq.$userUid")
             (0 until arr.length()).map { arr.getJSONObject(it).getString("post_id") }.toSet()
         } catch (e: Exception) { emptySet() }
     }
 
     // 用户点赞的帖子
     suspend fun getUserLikedPosts(userUid: String): JSONArray {
-        val resp = queryRest("likes", "select=post_id&user_uid=eq.$userUid")
-        val arr = resp.optJSONArray("users") ?: resp.optJSONArray("likes") ?: JSONArray()
+        val arr = queryRest("likes", "select=post_id&user_uid=eq.$userUid")
         val postIds = (0 until arr.length()).map { arr.getJSONObject(it).getString("post_id") }
         if (postIds.isEmpty()) return JSONArray()
         val filters = postIds.joinToString(",") { "post_id.eq.$it" }
-        val postsResp = queryRest("posts", "select=*&or=($filters)")
-        return postsResp.optJSONArray("users") ?: postsResp.optJSONArray("posts") ?: JSONArray()
+        return queryRest("posts", "select=*&or=($filters)")
     }
 
     // 用户收藏的帖子
     suspend fun getUserFavoritedPosts(userUid: String): JSONArray {
-        val resp = queryRest("favorites", "select=post_id&user_uid=eq.$userUid")
-        val arr = resp.optJSONArray("users") ?: resp.optJSONArray("favorites") ?: JSONArray()
+        val arr = queryRest("favorites", "select=post_id&user_uid=eq.$userUid")
         val postIds = (0 until arr.length()).map { arr.getJSONObject(it).getString("post_id") }
         if (postIds.isEmpty()) return JSONArray()
         val filters = postIds.joinToString(",") { "post_id.eq.$it" }
-        val postsResp = queryRest("posts", "select=*&or=($filters)")
-        return postsResp.optJSONArray("users") ?: postsResp.optJSONArray("posts") ?: JSONArray()
+        return queryRest("posts", "select=*&or=($filters)")
     }
 
     // 用户的评论和回复
@@ -826,8 +813,7 @@ class SupabaseAuthRepository(private val app: Application) {
         if (userXhsId.isNotBlank()) filters.add("author_xhs_id.eq.$userXhsId")
         if (filters.isEmpty()) return JSONArray()
         val filterExpr = if (filters.size == 1) filters[0] else "or=(${filters.joinToString(",")})"
-        val resp = queryRest("comments", "select=*&$filterExpr&order=created_at.desc")
-        val arr = resp.optJSONArray("users") ?: resp.optJSONArray("comments") ?: JSONArray()
+        val arr = queryRest("comments", "select=*&$filterExpr&order=created_at.desc")
         // 先建内存 map，避免 N+1 查询
         val map = mutableMapOf<String, Triple<String, String, String>>()
         for (i in 0 until arr.length()) {
@@ -858,8 +844,7 @@ class SupabaseAuthRepository(private val app: Application) {
                     obj.put("parent_user", cached.second)
                     obj.put("parent_user_id", cached.third)
                 } else {
-                    val pr = queryRest("comments", "select=content,author_name,author_uid&comment_id=eq.$parentId&limit=1")
-                    val parr = pr.optJSONArray("users") ?: pr.optJSONArray("comments") ?: JSONArray()
+                    val parr = queryRest("comments", "select=content,author_name,author_uid&comment_id=eq.$parentId&limit=1")
                     if (parr.length() > 0) {
                         val p = parr.getJSONObject(0)
                         obj.put("parent_content", p.optString("content"))
@@ -883,15 +868,13 @@ class SupabaseAuthRepository(private val app: Application) {
         if (filters.isEmpty()) return JSONArray()
 
         val filterExpr = if (filters.size == 1) filters[0] else "or=(${filters.joinToString(",")})"
-        val resp = queryRest("drafts", "select=*&$filterExpr&order=updated_at.desc")
-        val arr = resp.optJSONArray("users") ?: resp.optJSONArray("drafts") ?: JSONArray()
+        val arr = queryRest("drafts", "select=*&$filterExpr&order=updated_at.desc")
         android.util.Log.d("RedBook", "getUserDrafts uid=$userUid xhs=$userXhsId count=${arr.length()}")
         return arr
     }
 
     suspend fun getComments(postId: String): JSONArray {
-        val resp = queryRest("comments", "select=*&post_id=eq.$postId&order=created_at.asc")
-        return resp.optJSONArray("users") ?: resp.optJSONArray("comments") ?: JSONArray()
+        return queryRest("comments", "select=*&post_id=eq.$postId&order=created_at.asc")
     }
 
     /** 批量判断哪些 comment_id 还存在（用于通知列表标记已删除评论；失败返回 null，调用方据此不误判） */
@@ -900,8 +883,7 @@ class SupabaseAuthRepository(private val app: Application) {
         return try {
             val filters = commentIds.filter { it.isNotBlank() }.joinToString(",") { "comment_id.eq.$it" }
             if (filters.isBlank()) return emptySet()
-            val resp = queryRest("comments", "select=comment_id&or=($filters)")
-            val arr = resp.optJSONArray("users") ?: resp.optJSONArray("comments") ?: JSONArray()
+            val arr = queryRest("comments", "select=comment_id&or=($filters)")
             (0 until arr.length()).map { arr.getJSONObject(it).optString("comment_id", "") }.toSet()
         } catch (e: Exception) { null }
     }
@@ -965,13 +947,11 @@ class SupabaseAuthRepository(private val app: Application) {
 
     // 获取浏览记录（返回帖子）
     suspend fun getBrowseHistory(userUid: String): JSONArray {
-        val resp = queryRest("browsing_history", "select=post_id&user_uid=eq.$userUid&order=created_at.desc")
-        val arr = resp.optJSONArray("users") ?: resp.optJSONArray("browsing_history") ?: JSONArray()
+        val arr = queryRest("browsing_history", "select=post_id&user_uid=eq.$userUid&order=created_at.desc")
         val postIds = (0 until arr.length()).map { arr.getJSONObject(it).getString("post_id") }
         if (postIds.isEmpty()) return JSONArray()
         val filters = postIds.joinToString(",") { "post_id.eq.$it" }
-        val postsResp = queryRest("posts", "select=*&or=($filters)")
-        return postsResp.optJSONArray("users") ?: postsResp.optJSONArray("posts") ?: JSONArray()
+        return queryRest("posts", "select=*&or=($filters)")
     }
 
     // 删除浏览记录
@@ -999,8 +979,7 @@ class SupabaseAuthRepository(private val app: Application) {
     suspend fun isFollowing(followerUid: String, followedUid: String): Boolean {
         if (followerUid.isBlank() || followedUid.isBlank()) return false
         return try {
-            val resp = queryRest("follows", "select=follower_uid&follower_uid=eq.$followerUid&followed_uid=eq.$followedUid&limit=1")
-            (resp.optJSONArray("users")?.length() ?: 0) > 0
+            queryRest("follows", "select=follower_uid&follower_uid=eq.$followerUid&followed_uid=eq.$followedUid&limit=1").length() > 0
         } catch (e: Exception) { false }
     }
 
@@ -1008,8 +987,7 @@ class SupabaseAuthRepository(private val app: Application) {
     suspend fun getUserByUid(uid: String): JSONObject? {
         if (uid.isBlank()) return null
         return try {
-            val resp = queryRest("users", "select=uid,nickname,avatar_url,background_url,gender,birthday,xhs_id,ip_location&uid=eq.$uid&limit=1")
-            val arr = resp.optJSONArray("users") ?: JSONArray()
+            val arr = queryRest("users", "select=uid,nickname,avatar_url,background_url,gender,birthday,xhs_id,ip_location&uid=eq.$uid&limit=1")
             if (arr.length() > 0) arr.getJSONObject(0) else null
         } catch (e: Exception) { null }
     }
@@ -1026,8 +1004,7 @@ class SupabaseAuthRepository(private val app: Application) {
     suspend fun getUserIpLocation(uid: String): String {
         if (uid.isBlank()) return ""
         return try {
-            val resp = queryRest("users", "select=ip_location&uid=eq.$uid&limit=1")
-            val arr = resp.optJSONArray("users") ?: JSONArray()
+            val arr = queryRest("users", "select=ip_location&uid=eq.$uid&limit=1")
             if (arr.length() > 0) arr.getJSONObject(0).optString("ip_location", "") else ""
         } catch (e: Exception) { "" }
     }
@@ -1038,11 +1015,10 @@ class SupabaseAuthRepository(private val app: Application) {
     suspend fun getPrivacySettings(uid: String): com.example.redbook.data.model.PrivacySettings {
         if (uid.isBlank()) return com.example.redbook.data.model.PrivacySettings()
         return try {
-            val resp = queryRest(
+            val arr = queryRest(
                 "users",
                 "select=privacy_posts,privacy_comments,privacy_favorites,privacy_likes,privacy_version&uid=eq.$uid&limit=1"
             )
-            val arr = resp.optJSONArray("users") ?: JSONArray()
             if (arr.length() == 0) return com.example.redbook.data.model.PrivacySettings()
             val u = arr.getJSONObject(0)
             val s = com.example.redbook.data.model.PrivacySettings(
@@ -1084,11 +1060,10 @@ class SupabaseAuthRepository(private val app: Application) {
         if (q.isBlank()) return JSONArray()
         return try {
             val encoded = java.net.URLEncoder.encode("*$q*", "UTF-8")
-            val resp = queryRest(
+            val arr = queryRest(
                 "users",
                 "select=uid,nickname,xhs_id,avatar_url&or=(nickname.ilike.$encoded,xhs_id.ilike.$encoded)&limit=50"
             )
-            val arr = resp.optJSONArray("users") ?: JSONArray()
             if (excludeUid.isBlank()) return arr
             val result = JSONArray()
             for (i in 0 until arr.length()) {
@@ -1106,8 +1081,7 @@ class SupabaseAuthRepository(private val app: Application) {
         if (targets.isEmpty()) return emptyMap()
         return try {
             val filters = targets.joinToString(",") { "followed_uid.eq.$it" }
-            val resp = queryRest("follows", "select=followed_uid&follower_uid=eq.$followerUid&or=($filters)")
-            val arr = resp.optJSONArray("users") ?: resp.optJSONArray("follows") ?: JSONArray()
+            val arr = queryRest("follows", "select=followed_uid&follower_uid=eq.$followerUid&or=($filters)")
             val followed = (0 until arr.length()).map { arr.getJSONObject(it).optString("followed_uid", "") }.toSet()
             targets.associateWith { it in followed }
         } catch (e: Exception) { emptyMap() }
@@ -1119,8 +1093,7 @@ class SupabaseAuthRepository(private val app: Application) {
         return try {
             val filters = uids.filter { it.isNotBlank() }.joinToString(",") { "uid.eq.$it" }
             if (filters.isBlank()) return emptyMap()
-            val resp = queryRest("users", "select=uid,avatar_url&or=($filters)")
-            val arr = resp.optJSONArray("users") ?: JSONArray()
+            val arr = queryRest("users", "select=uid,avatar_url&or=($filters)")
             (0 until arr.length()).associate {
                 val u = arr.getJSONObject(it)
                 u.optString("uid", "") to u.optString("avatar_url", "")
@@ -1132,8 +1105,7 @@ class SupabaseAuthRepository(private val app: Application) {
     suspend fun getRemark(viewerUid: String, targetUid: String): String {
         if (viewerUid.isBlank() || targetUid.isBlank()) return ""
         return try {
-            val resp = queryRest("remarks", "select=remark&viewer_uid=eq.$viewerUid&target_uid=eq.$targetUid&limit=1")
-            val arr = resp.optJSONArray("users") ?: resp.optJSONArray("remarks") ?: JSONArray()
+            val arr = queryRest("remarks", "select=remark&viewer_uid=eq.$viewerUid&target_uid=eq.$targetUid&limit=1")
             if (arr.length() > 0) arr.getJSONObject(0).optString("remark", "") else ""
         } catch (e: Exception) { "" }
     }
@@ -1145,8 +1117,7 @@ class SupabaseAuthRepository(private val app: Application) {
         if (targets.isEmpty()) return emptyMap()
         return try {
             val filters = targets.joinToString(",") { "target_uid.eq.$it" }
-            val resp = queryRest("remarks", "select=target_uid,remark&viewer_uid=eq.$viewerUid&or=($filters)")
-            val arr = resp.optJSONArray("users") ?: resp.optJSONArray("remarks") ?: JSONArray()
+            val arr = queryRest("remarks", "select=target_uid,remark&viewer_uid=eq.$viewerUid&or=($filters)")
             (0 until arr.length()).mapNotNull { i ->
                 val row = arr.getJSONObject(i)
                 val remark = row.optString("remark", "")
@@ -1191,21 +1162,11 @@ class SupabaseAuthRepository(private val app: Application) {
         }
     }
 
-    /** 是否互相关注 */
-    suspend fun isMutualFollow(aUid: String, bUid: String): Boolean {
-        if (aUid.isBlank() || bUid.isBlank()) return false
-        return try {
-            val resp = queryRest("follows", "select=follower_uid&follower_uid=eq.$aUid&followed_uid=eq.$bUid&limit=1")
-            (resp.optJSONArray("users") ?: resp.optJSONArray("follows") ?: JSONArray()).length() > 0
-        } catch (e: Exception) { false }
-    }
-
     /** 关注数：我关注了多少人 */
     suspend fun getFollowingCount(userUid: String): Int {
         if (userUid.isBlank()) return 0
         return try {
-            val resp = queryRest("follows", "select=follower_uid&follower_uid=eq.$userUid")
-            (resp.optJSONArray("users") ?: resp.optJSONArray("follows") ?: JSONArray()).length()
+            queryRest("follows", "select=follower_uid&follower_uid=eq.$userUid").length()
         } catch (e: Exception) { 0 }
     }
 
@@ -1213,8 +1174,7 @@ class SupabaseAuthRepository(private val app: Application) {
     suspend fun getFansCount(userUid: String): Int {
         if (userUid.isBlank()) return 0
         return try {
-            val resp = queryRest("follows", "select=followed_uid&followed_uid=eq.$userUid")
-            (resp.optJSONArray("users") ?: resp.optJSONArray("follows") ?: JSONArray()).length()
+            queryRest("follows", "select=followed_uid&followed_uid=eq.$userUid").length()
         } catch (e: Exception) { 0 }
     }
 
@@ -1223,8 +1183,7 @@ class SupabaseAuthRepository(private val app: Application) {
         if (userUid.isBlank()) return 0
         var total = 0
         try {
-            val postsResp = queryRest("posts", "select=like_count&author_uid=eq.$userUid")
-            val postsArr = postsResp.optJSONArray("users") ?: postsResp.optJSONArray("posts") ?: JSONArray()
+            val postsArr = queryRest("posts", "select=like_count&author_uid=eq.$userUid")
             for (i in 0 until postsArr.length()) total += postsArr.getJSONObject(i).optInt("like_count", 0)
         } catch (_: Exception) { }
         return total
@@ -1235,8 +1194,7 @@ class SupabaseAuthRepository(private val app: Application) {
         if (userUid.isBlank()) return 0
         var total = 0
         try {
-            val postsResp = queryRest("posts", "select=favorite_count&author_uid=eq.$userUid")
-            val postsArr = postsResp.optJSONArray("users") ?: postsResp.optJSONArray("posts") ?: JSONArray()
+            val postsArr = queryRest("posts", "select=favorite_count&author_uid=eq.$userUid")
             for (i in 0 until postsArr.length()) total += postsArr.getJSONObject(i).optInt("favorite_count", 0)
         } catch (_: Exception) { }
         return total
@@ -1253,13 +1211,11 @@ class SupabaseAuthRepository(private val app: Application) {
 
     // 关注我的用户列表（按关注时间倒序），返回 uid,nickname,avatar_url,created_at
     suspend fun getMyFollowers(userUid: String): JSONArray {
-        val resp = queryRest("follows", "select=follower_uid,created_at&followed_uid=eq.$userUid&order=created_at.desc")
-        val arr = resp.optJSONArray("users") ?: resp.optJSONArray("follows") ?: JSONArray()
+        val arr = queryRest("follows", "select=follower_uid,created_at&followed_uid=eq.$userUid&order=created_at.desc")
         if (arr.length() == 0) return JSONArray()
         val followerUids = (0 until arr.length()).map { arr.getJSONObject(it).getString("follower_uid") }
         val filters = followerUids.joinToString(",") { "uid.eq.$it" }
-        val usersResp = queryRest("users", "select=uid,nickname,avatar_url&or=($filters)")
-        val usersArr = usersResp.optJSONArray("users") ?: JSONArray()
+        val usersArr = queryRest("users", "select=uid,nickname,avatar_url&or=($filters)")
         val userMap = (0 until usersArr.length()).associateBy(
             { usersArr.getJSONObject(it).optString("uid", "") },
             { usersArr.getJSONObject(it) }
@@ -1282,8 +1238,7 @@ class SupabaseAuthRepository(private val app: Application) {
     // 我已关注的 uid 集合
     suspend fun getFollowingUids(userUid: String): Set<String> {
         return try {
-            val resp = queryRest("follows", "select=followed_uid&follower_uid=eq.$userUid")
-            val arr = resp.optJSONArray("users") ?: resp.optJSONArray("follows") ?: JSONArray()
+            val arr = queryRest("follows", "select=followed_uid&follower_uid=eq.$userUid")
             (0 until arr.length()).map { arr.getJSONObject(it).getString("followed_uid") }.toSet()
         } catch (e: Exception) { emptySet() }
     }
@@ -1292,13 +1247,11 @@ class SupabaseAuthRepository(private val app: Application) {
     suspend fun getFollowingUsers(userUid: String): JSONArray {
         if (userUid.isBlank()) return JSONArray()
         try {
-            val resp = queryRest("follows", "select=followed_uid,created_at&follower_uid=eq.$userUid&order=created_at.desc")
-            val arr = resp.optJSONArray("users") ?: resp.optJSONArray("follows") ?: JSONArray()
+            val arr = queryRest("follows", "select=followed_uid,created_at&follower_uid=eq.$userUid&order=created_at.desc")
             if (arr.length() == 0) return JSONArray()
             val uids = (0 until arr.length()).map { arr.getJSONObject(it).getString("followed_uid") }
             val filters = uids.joinToString(",") { "uid.eq.$it" }
-            val usersResp = queryRest("users", "select=uid,nickname,avatar_url&or=($filters)")
-            val usersArr = usersResp.optJSONArray("users") ?: JSONArray()
+            val usersArr = queryRest("users", "select=uid,nickname,avatar_url&or=($filters)")
             val userMap = (0 until usersArr.length()).associateBy(
                 { usersArr.getJSONObject(it).optString("uid", "") },
                 { usersArr.getJSONObject(it) }
@@ -1314,7 +1267,7 @@ class SupabaseAuthRepository(private val app: Application) {
                 })
             }
             return result
-        } catch (e: Exception) { return JSONArray() }
+        } catch (_: Exception) { return JSONArray() }
     }
 
     // 更新用户资料
@@ -1425,8 +1378,7 @@ class SupabaseAuthRepository(private val app: Application) {
         if (userUid.isBlank()) return emptySet()
         val local = localLikedCommentIds(userUid)
         val cloud = try {
-            val resp = queryRest("comment_likes", "select=comment_id&user_uid=eq.$userUid")
-            val arr = resp.optJSONArray("users") ?: resp.optJSONArray("comment_likes") ?: JSONArray()
+            val arr = queryRest("comment_likes", "select=comment_id&user_uid=eq.$userUid")
             (0 until arr.length()).map { arr.getJSONObject(it).getString("comment_id") }.toSet()
         } catch (_: Exception) { emptySet<String>() }
         return local + cloud
@@ -1449,7 +1401,7 @@ class SupabaseAuthRepository(private val app: Application) {
         }
     }
 
-    private suspend fun patchUserRowByPostId(postId: String, body: JSONObject) {
+    private suspend fun patchPostByPostId(postId: String, body: JSONObject) {
         val bodyStr = body.toString()
         withAuth {
             suspendCancellableCoroutine<String> { cont ->
