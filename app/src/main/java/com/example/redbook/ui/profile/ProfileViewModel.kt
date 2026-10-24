@@ -138,43 +138,43 @@ class ProfileViewModel(
         }
     }
 
-    /** 加载对方主页：资料 + 关注关系 + 备注 */
+    /** 加载对方主页：资料 + 关注关系 + 备注（并行拉取，避免串行网络往返造成卡顿） */
     fun loadUserProfile(targetUid: String) {
         if (targetUid.isBlank()) return
         viewModelScope.launch {
             try {
-                val u = repository.getUserByUid(targetUid)
-                if (u == null) {
-                    _userProfile.value = UserProfileState()
-                    return@launch
+                coroutineScope {
+                    val uDef = async { repository.getUserByUid(targetUid) }
+                    val iFollowDef = if (viewerUid.isNotBlank()) async { repository.isFollowing(viewerUid, targetUid) } else null
+                    val heFollowsMeDef = if (viewerUid.isNotBlank()) async { repository.isFollowing(targetUid, viewerUid) } else null
+                    val remarkDef = if (viewerUid.isNotBlank()) async { repository.getRemark(viewerUid, targetUid) } else null
+                    val followCountDef = async { try { repository.getFollowingCount(targetUid) } catch (_: Exception) { 0 } }
+                    val fansCountDef = async { try { repository.getFansCount(targetUid) } catch (_: Exception) { 0 } }
+                    val likeCountDef = async { try { repository.getLikeCount(targetUid, "") } catch (_: Exception) { 0 } }
+
+                    val u = uDef.await()
+                    if (u == null) {
+                        _userProfile.value = UserProfileState()
+                        return@coroutineScope
+                    }
+                    val ip = u.optString("ip_location", "").ifBlank { "未知" }
+                    _userProfile.value = UserProfileState(
+                        uid = targetUid,
+                        userName = u.optString("nickname", "").ifBlank { "小红书用户" },
+                        avatarUrl = u.optString("avatar_url", ""),
+                        backgroundUrl = u.optString("background_url", ""),
+                        xhsId = u.optString("xhs_id", ""),
+                        gender = u.optString("gender", ""),
+                        birthday = u.optString("birthday", ""),
+                        ipLocation = ip,
+                        iFollow = iFollowDef?.await() ?: false,
+                        heFollowsMe = heFollowsMeDef?.await() ?: false,
+                        remark = remarkDef?.await() ?: "",
+                        followCount = followCountDef.await(),
+                        fansCount = fansCountDef.await(),
+                        likeCount = likeCountDef.await()
+                    )
                 }
-                // 我是否已关注对方
-                val iFollow = if (viewerUid.isNotBlank()) repository.isFollowing(viewerUid, targetUid) else false
-                // 对方是否已关注我（用于互相关注状态）
-                val heFollowsMe = if (viewerUid.isNotBlank()) repository.isFollowing(targetUid, viewerUid) else false
-                // 备注与关注关系无关，总是读取
-                val remark = if (viewerUid.isNotBlank()) repository.getRemark(viewerUid, targetUid) else ""
-                // 对方主页统计（关注/粉丝/获赞）
-                val followCount = try { repository.getFollowingCount(targetUid) } catch (_: Exception) { 0 }
-                val fansCount = try { repository.getFansCount(targetUid) } catch (_: Exception) { 0 }
-                val likeCount = try { repository.getLikeCount(targetUid, u.optString("xhs_id", "")) } catch (_: Exception) { 0 }
-                val ip = u.optString("ip_location", "").ifBlank { "未知" }
-                _userProfile.value = UserProfileState(
-                    uid = targetUid,
-                    userName = u.optString("nickname", "").ifBlank { "小红书用户" },
-                    avatarUrl = u.optString("avatar_url", ""),
-                    backgroundUrl = u.optString("background_url", ""),
-                    xhsId = u.optString("xhs_id", ""),
-                    gender = u.optString("gender", ""),
-                    birthday = u.optString("birthday", ""),
-                    ipLocation = ip,
-                    iFollow = iFollow,
-                    heFollowsMe = heFollowsMe,
-                    remark = remark,
-                    followCount = followCount,
-                    fansCount = fansCount,
-                    likeCount = likeCount
-                )
             } catch (_: Exception) {
                 _userProfile.value = UserProfileState()
             }

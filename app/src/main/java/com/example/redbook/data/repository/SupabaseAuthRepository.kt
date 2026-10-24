@@ -702,7 +702,7 @@ class SupabaseAuthRepository(private val app: Application) {
     }
 
     suspend fun getPosts(): JSONArray {
-        return queryRest("posts", "select=*&order=created_at.desc")
+        return queryRest("posts", "select=*&order=created_at.desc&limit=50")
     }
 
     suspend fun getPostsByViews(): JSONArray {

@@ -42,12 +42,13 @@ class HomeViewModel(application: Application, private val userUid: String = "") 
     private fun load(fetch: suspend () -> List<Note>) {
         val seq = ++fetchSeq
         viewModelScope.launch {
-            _uiState.value = HomeUiState.Loading
+            val hadContent = _uiState.value is HomeUiState.Success
+            if (!hadContent) _uiState.value = HomeUiState.Loading
             try {
                 val notes = fetch()
                 if (seq == fetchSeq) _uiState.value = HomeUiState.Success(notes)
             } catch (e: Exception) {
-                if (seq == fetchSeq) _uiState.value = HomeUiState.Error(errorMessage(e))
+                if (seq == fetchSeq && !hadContent) _uiState.value = HomeUiState.Error(errorMessage(e))
             }
         }
     }

@@ -399,52 +399,75 @@ class RealtimeRepository(private val app: Application) {
                 val arr = queryRest("conversations", "select=*&or=(user_a_uid.eq.$uid,user_b_uid.eq.$uid)&order=last_time.desc")
                 if (arr.length() == 0) return@withContext JSONArray()
 
-                val result = JSONArray()
-                for (i in 0 until arr.length()) {
+                // 先收集所有会话与对端 uid，把逐条 N+1 查询改成 3 次批量查询
+                val convIds = mutableListOf<String>()
+                val peerUids = LinkedHashSet<String>()
+                val rows = (0 until arr.length()).mapNotNull { i ->
                     val c = arr.getJSONObject(i)
                     val userA = c.optString("user_a_uid", "")
                     val userB = c.optString("user_b_uid", "")
                     // 跳过脏数据：自己对自己的会话
-                    if (userA.isBlank() || userB.isBlank() || userA == userB) continue
+                    if (userA.isBlank() || userB.isBlank() || userA == userB) return@mapNotNull null
                     val peerUid = if (userA == uid) userB else userA
                     val convId = c.optString("conversation_id", "")
-                    val lastMessage = c.optString("last_message", "")
-                    val lastTime = c.optLong("last_time", 0L)
+                    convIds.add(convId)
+                    peerUids.add(peerUid)
+                    Triple(convId, peerUid, c)
+                }
 
-                    // 未读数
-                    var unread = 0
-                    try {
-                        val marr = queryRest("messages", "select=message_id&conversation_id=eq.$convId&receiver_uid=eq.$uid&is_read=eq.false")
-                        unread = marr.length()
-                    } catch (_: Exception) { }
+                // 批量查未读数：一次拿所有会话的未读消息数
+                val unreadMap = mutableMapOf<String, Int>()
+                try {
+                    if (convIds.isNotEmpty()) {
+                        val filters = convIds.joinToString(",") { "conversation_id.eq.$it" }
+                        val marr = queryRest("messages", "select=conversation_id&receiver_uid=eq.$uid&is_read=eq.false&or=($filters)")
+                        for (i in 0 until marr.length()) {
+                            val conv = marr.getJSONObject(i).optString("conversation_id", "")
+                            if (conv.isNotBlank()) unreadMap[conv] = (unreadMap[conv] ?: 0) + 1
+                        }
+                    }
+                } catch (_: Exception) { }
 
-                    val peer = JSONObject().apply {
+                // 批量查对端资料（昵称/头像）
+                val nameMap = mutableMapOf<String, String>()
+                val avatarMap = mutableMapOf<String, String>()
+                try {
+                    if (peerUids.isNotEmpty()) {
+                        val filters = peerUids.joinToString(",") { "uid.eq.$it" }
+                        val uarr = queryRest("users", "select=uid,nickname,avatar_url&or=($filters)")
+                        for (i in 0 until uarr.length()) {
+                            val u = uarr.getJSONObject(i)
+                            nameMap[u.optString("uid", "")] = u.optString("nickname", "")
+                            avatarMap[u.optString("uid", "")] = u.optString("avatar_url", "")
+                        }
+                    }
+                } catch (_: Exception) { }
+
+                // 批量查我对各对端的备注名
+                val remarkMap = mutableMapOf<String, String>()
+                try {
+                    if (peerUids.isNotEmpty()) {
+                        val filters = peerUids.joinToString(",") { "target_uid.eq.$it" }
+                        val rarr = queryRest("remarks", "select=target_uid,remark&viewer_uid=eq.$uid&or=($filters)")
+                        for (i in 0 until rarr.length()) {
+                            val r = rarr.getJSONObject(i)
+                            remarkMap[r.optString("target_uid", "")] = r.optString("remark", "")
+                        }
+                    }
+                } catch (_: Exception) { }
+
+                val result = JSONArray()
+                for ((convId, peerUid, c) in rows) {
+                    result.put(JSONObject().apply {
                         put("conversation_id", convId)
                         put("peer_uid", peerUid)
-                        put("peer_name", "")
-                        put("peer_avatar", "")
-                        put("peer_remark", "")
-                        put("last_message", lastMessage)
-                        put("last_time", lastTime)
-                        put("unread_count", unread)
-                    }
-                    // 查对方用户资料
-                    try {
-                        val uarr = queryRest("users", "select=nickname,avatar_url&uid=eq.$peerUid&limit=1")
-                        if (uarr.length() > 0) {
-                            val u = uarr.getJSONObject(0)
-                            peer.put("peer_name", u.optString("nickname", ""))
-                            peer.put("peer_avatar", u.optString("avatar_url", ""))
-                        }
-                    } catch (_: Exception) { }
-                    // 查我对对方的备注名
-                    try {
-                        val rarr = queryRest("remarks", "select=remark&viewer_uid=eq.$uid&target_uid=eq.$peerUid&limit=1")
-                        if (rarr.length() > 0) {
-                            peer.put("peer_remark", rarr.getJSONObject(0).optString("remark", ""))
-                        }
-                    } catch (_: Exception) { }
-                    result.put(peer)
+                        put("peer_name", nameMap[peerUid].orEmpty())
+                        put("peer_avatar", avatarMap[peerUid].orEmpty())
+                        put("peer_remark", remarkMap[peerUid].orEmpty())
+                        put("last_message", c.optString("last_message", ""))
+                        put("last_time", c.optLong("last_time", 0L))
+                        put("unread_count", unreadMap[convId] ?: 0)
+                    })
                 }
                 result
             } catch (e: Exception) { JSONArray() }

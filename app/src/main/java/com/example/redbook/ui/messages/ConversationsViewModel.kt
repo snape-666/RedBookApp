@@ -39,7 +39,7 @@ class ConversationsViewModel(application: Application) : AndroidViewModel(applic
     fun load(userUid: String) {
         if (userUid.isBlank()) return
         viewModelScope.launch {
-            _loading.value = true
+            if (_conversations.value.isEmpty()) _loading.value = true
             try {
                 val arr = repository.getConversations(userUid)
                 _conversations.value = (0 until arr.length()).map { i ->
@@ -56,7 +56,7 @@ class ConversationsViewModel(application: Application) : AndroidViewModel(applic
                     )
                 }
             } catch (e: Exception) {
-                _conversations.value = emptyList()
+                if (_conversations.value.isEmpty()) _conversations.value = emptyList()
             }
             _loading.value = false
         }

@@ -2,6 +2,8 @@ package com.example.redbook.data.repository
 
 import com.example.redbook.R
 import com.example.redbook.data.model.Note
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import org.json.JSONArray
 
 /**
@@ -31,20 +33,27 @@ object HomeFeedCache {
 
 class HomeRepository(val supabase: SupabaseAuthRepository) {
 
-    suspend fun getNotes(userUid: String = ""): List<Note> {
-        val posts = supabase.filterVisiblePosts(supabase.getPosts(), userUid)
-        val likedIds = try { supabase.getLikedPostIds(userUid) } catch (e: Exception) { emptySet() }
-        return applyRemarks(parsePosts(posts, likedIds), userUid)
+    suspend fun getNotes(userUid: String = ""): List<Note> = coroutineScope {
+        val postsDef = async { supabase.getPosts() }
+        val likedDef = async { try { supabase.getLikedPostIds(userUid) } catch (e: Exception) { emptySet() } }
+        val posts = supabase.filterVisiblePosts(postsDef.await(), userUid)
+        val likedIds = likedDef.await()
+        applyRemarks(parsePosts(posts, likedIds), userUid)
     }
 
     /** 只返回我关注的人发布的帖子 */
     suspend fun getFollowingNotes(userUid: String): List<Note> {
         if (userUid.isBlank()) return emptyList()
-        val followingUids = supabase.getFollowingUids(userUid)
-        val posts = supabase.filterVisiblePosts(supabase.getPosts(), userUid)
-        val likedIds = try { supabase.getLikedPostIds(userUid) } catch (e: Exception) { emptySet() }
-        val notes = parsePosts(posts, likedIds).filter { it.authorUid in followingUids }
-        return applyRemarks(notes, userUid)
+        return coroutineScope {
+            val followingDef = async { supabase.getFollowingUids(userUid) }
+            val postsDef = async { supabase.getPosts() }
+            val likedDef = async { try { supabase.getLikedPostIds(userUid) } catch (e: Exception) { emptySet() } }
+            val followingUids = followingDef.await()
+            val posts = supabase.filterVisiblePosts(postsDef.await(), userUid)
+            val likedIds = likedDef.await()
+            val notes = parsePosts(posts, likedIds).filter { it.authorUid in followingUids }
+            applyRemarks(notes, userUid)
+        }
     }
 
     /** 将作者名替换为我对该作者的备注（有备注优先），authorUid 为空的 mock 数据跳过 */
