@@ -102,6 +102,22 @@ private suspend fun uploadCommentImages(repository: SupabaseAuthRepository, cont
 
 private val feedComments = mutableMapOf<String, MutableList<Comment>>()
 
+// 视频流进程级缓存：切换底部 tab 再回来时秒出上次列表，后台再刷新
+private object VideoFeedCache {
+    @Volatile private var uid: String = ""
+    @Volatile private var videos: List<FeedVideo>? = null
+
+    fun put(uid: String, list: List<FeedVideo>) {
+        this.uid = uid
+        this.videos = list
+    }
+
+    fun get(uid: String): List<FeedVideo>? {
+        if (this.uid != uid) return null
+        return videos
+    }
+}
+
 @Composable
 fun VideoFeedScreen(
     userUid: String = "",
@@ -113,10 +129,12 @@ fun VideoFeedScreen(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val repository = remember { SupabaseAuthRepository(context.applicationContext as android.app.Application) }
-    var videos by remember { mutableStateOf<List<FeedVideo>>(emptyList()) }
-    var loading by remember { mutableStateOf(true) }
+    val cachedVideos = remember { VideoFeedCache.get(userUid) }
+    var videos by remember { mutableStateOf<List<FeedVideo>>(cachedVideos ?: emptyList()) }
+    var loading by remember { mutableStateOf(cachedVideos == null) }
 //数据加载
     LaunchedEffect(Unit) {
+        var result = emptyList<FeedVideo>()
         try {
             // 数据源：posts 表中 image_url 带 video: 前缀的视频（视频统一存 posts 表）
             val merged = mutableListOf<FeedVideo>()
@@ -140,7 +158,7 @@ fun VideoFeedScreen(
                 }
             } catch (_: Exception) { }
             // 备注名全局替换：作者名替换为"我"对该作者的备注
-            videos = if (userUid.isNotBlank()) {
+            result = if (userUid.isNotBlank()) {
                 try {
                     val uids = merged.map { it.authorUid }.filter { it.isNotBlank() }.distinct()
                     if (uids.isEmpty()) merged
@@ -155,6 +173,8 @@ fun VideoFeedScreen(
                 } catch (_: Exception) { merged }
             } else merged
         } catch (_: Exception) { }
+        videos = result
+        VideoFeedCache.put(userUid, result)
         loading = false
     }
 

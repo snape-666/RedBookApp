@@ -40,6 +40,12 @@ class ProfileViewModel(
     /** 是否为查看自己的主页 */
     val isSelf: Boolean = profileUid == viewerUid || viewerUid.isBlank()
 
+    private val cacheKey: String get() = "$profileUid|$viewerUid"
+
+    companion object {
+        private val profileCache = mutableMapOf<String, ProfileUiState>()
+    }
+
     /** 加载当前主页的隐私设置：自己读本地+云端，对方只读云端 */
     fun loadPrivacy() {
         viewModelScope.launch {
@@ -66,7 +72,10 @@ class ProfileViewModel(
 
     fun refresh() {
         viewModelScope.launch {
-            _refreshing.value = true
+            // 先展示内存缓存，做到秒出；无缓存时走正常加载
+            profileCache[cacheKey]?.let { _uiState.value = it }
+            // 已有内容时静默刷新，不弹下拉刷新圈；首次(空状态)才显示
+            if (_uiState.value == ProfileUiState()) _refreshing.value = true
             lateinit var posts: org.json.JSONArray
             lateinit var drafts: org.json.JSONArray
             lateinit var liked: org.json.JSONArray
@@ -120,7 +129,7 @@ class ProfileViewModel(
             val visiblePosts = repository.filterVisiblePosts(posts, selfViewer)
             val visibleLiked = repository.filterVisiblePosts(liked, selfViewer)
             val visibleFavorited = repository.filterVisiblePosts(favorited, selfViewer)
-            _uiState.value = ProfileUiState(
+            val newState = ProfileUiState(
                 posts = applyRemarksToPosts(parsePosts(visiblePosts, likedIds)),
                 draftCount = drafts.length(),
                 likedPosts = applyRemarksToPosts(parsePosts(visibleLiked, likedIds)),
@@ -134,6 +143,8 @@ class ProfileViewModel(
                 likeCount = likeCount,
                 favoriteCount = favoriteCount
             )
+            _uiState.value = newState
+            profileCache[cacheKey] = newState
             _refreshing.value = false
         }
     }

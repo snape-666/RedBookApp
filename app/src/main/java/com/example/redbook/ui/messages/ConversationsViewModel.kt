@@ -39,10 +39,16 @@ class ConversationsViewModel(application: Application) : AndroidViewModel(applic
     fun load(userUid: String) {
         if (userUid.isBlank()) return
         viewModelScope.launch {
-            if (_conversations.value.isEmpty()) _loading.value = true
+            // 先展示内存缓存，做到秒出；无缓存且当前为空时才显示加载圈
+            val cached = cache[userUid]
+            if (cached != null) {
+                _conversations.value = cached
+            } else if (_conversations.value.isEmpty()) {
+                _loading.value = true
+            }
             try {
                 val arr = repository.getConversations(userUid)
-                _conversations.value = (0 until arr.length()).map { i ->
+                val list = (0 until arr.length()).map { i ->
                     val c = arr.getJSONObject(i)
                     ConversationItem(
                         conversationId = c.optString("conversation_id", ""),
@@ -55,11 +61,17 @@ class ConversationsViewModel(application: Application) : AndroidViewModel(applic
                         peerRemark = c.optString("peer_remark", "")
                     )
                 }
+                _conversations.value = list
+                cache[userUid] = list
             } catch (e: Exception) {
                 if (_conversations.value.isEmpty()) _conversations.value = emptyList()
             }
             _loading.value = false
         }
+    }
+
+    companion object {
+        private val cache = mutableMapOf<String, List<ConversationItem>>()
     }
 }
 
